@@ -1,0 +1,135 @@
+/* Container spacing inside tabs */
+.tab-container {
+  padding: 20px 5px;
+  min-height: 250px;
+}
+
+/* Layout helpers */
+.full-width { width: 100%; }
+.form-row {
+  display: flex;
+  gap: 15px;
+  margin-top: 15px;
+  .flex-2 { flex: 2; }
+  .flex-1 { flex: 1; }
+}
+
+.instruction-text {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 20px;
+}
+
+/* Stats Grid: 3 columns on desktop, 2 on mobile */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+
+  @media (max-width: 500px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* AC Styling */
+.ac-section {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+  mat-form-field { width: 180px; }
+}
+
+/* File Upload Boxes */
+.upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.upload-box {
+  border: 2px dashed #ccc;
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: border-color 0.3s;
+
+  &:hover {
+    border-color: #3f51b5;
+    background-color: rgba(63, 81, 181, 0.04);
+  }
+
+  mat-icon { font-size: 40px; width: 40px; height: 40px; margin-bottom: 8px; }
+  label { font-weight: 500; margin-bottom: 10px; }
+  input[type="file"] { font-size: 0.8rem; }
+  small { color: #888; margin-top: 5px; }
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  p { margin: 0; font-size: 0.9rem; color: #666; }
+}
+
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type=number] {
+  -moz-appearance: textfield; /* Firefox support */
+}
+
+.class-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 5px;
+  button[mat-icon-button] {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0;
+  }
+
+  .flex-2 { flex: 2; }
+  .flex-1 {
+    flex: 0.8;
+    min-width: 70px;
+    max-width: 90px; // Keeps the level box compact
+  }
+}
+
+input[type=number] {
+  text-align: center;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 30px;
+  color: #999;
+  border: 2px dashed #eee;
+  border-radius: 8px;
+}
+
+/* Animation for the sync icon */
+.rotating {
+  animation: rotate 1.5s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Dialog content adjustments */
+mat-dialog-content {
+  overflow-x: hidden; // Prevent horizontal scroll on tab switch
+}

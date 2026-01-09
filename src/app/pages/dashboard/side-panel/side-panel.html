@@ -1,0 +1,63 @@
+<div class="sidebar-container">
+
+  <div class="top-section">
+    <div class="selector-row">
+      <mat-form-field appearance="fill" class="character-select" subscriptSizing="dynamic">
+        <mat-select [(value)]="selectedCharacter" (selectionChange)="onCharacterChange($event.value)">
+          <mat-option *ngFor="let char of characters" [value]="char">
+            {{ char.name }}
+          </mat-option>
+        </mat-select>
+      </mat-form-field>
+      <button mat-icon-button class="manage-chars-btn" matTooltip="Manage Characters" (click)="goToManageCharacters()">
+        <mat-icon>people</mat-icon>
+      </button>
+    </div>
+
+    <div class="profile-card" *ngIf="selectedCharacter">
+      <div class="avatar-container">
+        <img [src]="selectedCharacter.icon || 'assets/default-avatar.png'" class="avatar-img" alt="Character Icon">
+      </div>
+      <h2 class="character-name">{{ selectedCharacter.name }}</h2>
+      <p class="character-sub">{{ selectedCharacter.race }}</p>
+    </div>
+  </div>
+
+  <div class="middle-section">
+    <div class="category-header">
+      <mat-icon class="category-chevron">expand_more</mat-icon>
+      <span>Channels</span>
+    </div>
+
+    <mat-nav-list class="channel-list">
+      <a mat-list-item *ngFor="let channel of channels"
+         class="channel-item" routerLinkActive="active-channel">
+        <mat-icon matListItemIcon class="channel-icon">{{ channel.icon }}</mat-icon>
+        <span matListItemTitle class="channel-label">{{ channel.label }}</span>
+      </a>
+    </mat-nav-list>
+  </div>
+
+  <div class="bottom-section">
+    <button mat-button class="server-btn" [matMenuTriggerFor]="serverMenu">
+      <mat-icon>dns</mat-icon>
+      <span class="btn-text">{{ selectedServer.name }}</span>
+      <mat-icon class="chevron">expand_less</mat-icon>
+    </button>
+
+    <mat-menu #serverMenu="matMenu" xPosition="after" yPosition="above" class="discord-menu">
+      <div class="menu-title">SELECT SERVER</div>
+      <button mat-menu-item *ngFor="let server of servers" (click)="selectServer(server)">
+
+        <span>{{ server.name }}</span>
+      </button>
+    </mat-menu>
+
+    <div class="user-controls">
+      <button matFab (click)="goToSettings()" matTooltip="User Settings">
+        <mat-icon>menu</mat-icon>
+      </button>
+    </div>
+  </div>
+
+</div>

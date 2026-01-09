@@ -1,0 +1,84 @@
+/* Page background */
+.auth-container {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Card */
+.auth-card {
+  width: 420px;
+  background: #1e1f22;
+  color: #dbdee1;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+/* Header */
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.subtitle {
+  color: #b5bac1;
+  font-size: 0.9rem;
+}
+
+/* Tabs */
+mat-tab-group {
+  margin-top: 12px;
+}
+mat-tab{
+  overflow-y: hidden;
+}
+
+.mat-mdc-tab-label {
+  color: #b5bac1;
+  font-weight: 500;
+}
+
+.mat-mdc-tab.mdc-tab--active {
+  color: #5865f2; /* Discord blurple */
+}
+
+/* Forms */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 16px;
+}
+
+/* Inputs */
+mat-form-field {
+  width: 100%;
+}
+
+.mat-mdc-text-field-wrapper {
+  border-radius: 8px;
+}
+
+/* Button */
+.auth-button {
+  margin-top: 8px;
+  height: 44px;
+  font-weight: 600;
+  border-radius: 8px;
+  background-color: #5865f2 !important;
+}
+
+.auth-button:hover {
+  background-color: #4752c4 !important;
+}
+
+.auth-card ::ng-deep .mat-mdc-tab-body-content {
+  overflow: hidden !important;
+}
+
+.auth-card mat-card-content {
+  overflow: visible;
+}
