@@ -2,25 +2,50 @@
 
   <div class="top-section">
     <div class="selector-row">
-      <mat-form-field appearance="fill" class="character-select" subscriptSizing="dynamic">
-        <mat-select [(value)]="selectedCharacter" (selectionChange)="onCharacterChange($event.value)">
-          <mat-option *ngFor="let char of characters" [value]="char">
-            {{ char.name }}
-          </mat-option>
-        </mat-select>
-      </mat-form-field>
-      <button mat-icon-button class="manage-chars-btn" matTooltip="Manage Characters" (click)="goToManageCharacters()">
+
+      @if (selectedServer) {
+        <mat-form-field
+          appearance="fill"
+          class="character-select"
+          subscriptSizing="dynamic">
+
+          <mat-select
+            [value]="selectedCharacter"
+            (selectionChange)="onCharacterChange($event.value)">
+
+            @for (char of characters; track char) {
+              @if (char.servers.includes(selectedServer._id) || char.servers[0] === '0') {
+                <mat-option [value]="char">
+                  {{ char.name }}
+                </mat-option>
+              }
+            }
+
+          </mat-select>
+        </mat-form-field>
+      }
+
+      <button
+        mat-icon-button
+        class="manage-chars-btn"
+        matTooltip="Manage Characters"
+        (click)="goToManageCharacters()">
         <mat-icon>people</mat-icon>
       </button>
     </div>
 
-    <div class="profile-card" *ngIf="selectedCharacter">
-      <div class="avatar-container">
-        <img [src]="selectedCharacter.icon || 'assets/default-avatar.png'" class="avatar-img" alt="Character Icon">
+    @if (selectedCharacter) {
+      <div class="profile-card">
+        <div class="avatar-container">
+          <img
+            [src]="selectedCharacter.icon ||  'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
+            class="avatar-img"
+            alt="Character Icon">
+        </div>
+        <h2 class="character-name">{{ selectedCharacter.name }}</h2>
+        <p class="character-sub">{{ selectedCharacter.race }}</p>
       </div>
-      <h2 class="character-name">{{ selectedCharacter.name }}</h2>
-      <p class="character-sub">{{ selectedCharacter.race }}</p>
-    </div>
+    }
   </div>
 
   <div class="middle-section">
@@ -30,34 +55,71 @@
     </div>
 
     <mat-nav-list class="channel-list">
-      <a mat-list-item *ngFor="let channel of channels"
-         class="channel-item" routerLinkActive="active-channel">
-        <mat-icon matListItemIcon class="channel-icon">{{ channel.icon }}</mat-icon>
-        <span matListItemTitle class="channel-label">{{ channel.label }}</span>
-      </a>
+      @for (channel of channels; track channel) {
+        <a
+          mat-list-item
+          class="channel-item"
+          routerLinkActive="active-channel"
+          (click)="selectChannel(channel)">
+          <mat-icon matListItemIcon class="channel-icon">
+            {{ channel.icon }}
+          </mat-icon>
+          <span matListItemTitle class="channel-label">
+            {{ channel.name }}
+          </span>
+        </a>
+      }
     </mat-nav-list>
   </div>
 
-  <div class="bottom-section">
-    <button mat-button class="server-btn" [matMenuTriggerFor]="serverMenu">
-      <mat-icon>dns</mat-icon>
-      <span class="btn-text">{{ selectedServer.name }}</span>
-      <mat-icon class="chevron">expand_less</mat-icon>
-    </button>
+  @if (selectedServer && servers) {
 
-    <mat-menu #serverMenu="matMenu" xPosition="after" yPosition="above" class="discord-menu">
-      <div class="menu-title">SELECT SERVER</div>
-      <button mat-menu-item *ngFor="let server of servers" (click)="selectServer(server)">
-
-        <span>{{ server.name }}</span>
+    <div class="bottom-section">
+      <button
+        mat-button
+        class="server-btn"
+        [matMenuTriggerFor]="serverMenu">
+        <mat-icon>dns</mat-icon>
+        <span class="btn-text">{{ selectedServer.name }}</span>
+        <mat-icon class="chevron">expand_less</mat-icon>
       </button>
-    </mat-menu>
 
+      <mat-menu
+        #serverMenu="matMenu"
+        xPosition="after"
+        yPosition="above"
+        class="discord-menu">
+
+        <div class="menu-title">SELECT SERVER</div>
+
+        @for (server of servers; track server) {
+          <button
+            mat-menu-item
+            (click)="selectServer(server)">
+            <span>{{ server.name }}</span>
+          </button>
+        }
+      </mat-menu>
+
+
+      </div>
     <div class="user-controls">
-      <button matFab (click)="goToSettings()" matTooltip="User Settings">
+      <button
+        matIconButton
+        color="secondary"
+        (click)="goToSettings()"
+        matTooltip="User Settings">
         <mat-icon>menu</mat-icon>
       </button>
+
+      <button
+        matIconButton
+        color="secondary"
+        (click)="goToSettings()"
+        matTooltip="User Settings">
+        <mat-icon>add</mat-icon>
+      </button>
     </div>
-  </div>
+  }
 
 </div>

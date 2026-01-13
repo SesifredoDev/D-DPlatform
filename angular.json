@@ -21,6 +21,9 @@
         "build": {
           "builder": "@angular/build:application",
           "options": {
+            "polyfills": [
+              "zone.js"
+            ],
             "outputPath": "dist/d-d-platform",
             "baseHref": "./",
             "browser": "src/main.ts",
@@ -28,11 +31,9 @@
             "inlineStyleLanguage": "scss",
 
             "assets": [
-              {
-                "glob": "**/*",
-                "input": "public"
-              }
+              "src/assets"
             ],
+
             "styles": [
               "src/styles.scss"
             ]

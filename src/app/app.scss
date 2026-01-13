@@ -1,0 +1,15 @@
+.resizable-dialog {
+  resize: horizontal;
+  overflow: auto;
+  min-width: 400px; // Prevent the form from breaking
+  max-width: 95vw;
+
+  // Customizing the resize handle appearance
+  &::-webkit-resizer {
+    background-color: var(--mat-sys-primary);
+    border-radius: 50% 0 0 0;
+  }
+}
+:host{
+  overflow: hidden;
+}

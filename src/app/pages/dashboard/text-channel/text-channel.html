@@ -1,0 +1,57 @@
+<div class="rpg-chat-container">
+  <mat-card class="parchment-scroll">
+    <mat-card-content id="message-container" class="message-list">
+
+      @for (msg of messages; track msg._id) {
+        <div class="message-entry">
+          @if (!msg.character){
+          <div class="avatar-frame">
+            <img [src]="msg.author?.profileIcon || 'https://www.gravatar.com/avatar/'+msg.author._id+'?d=identicon'" class="rpg-avatar">
+            <div class="frame-overlay"></div>
+          </div>
+          }@else{
+            <div class="avatar-frame">
+              <img [src]="msg.character.icon || 'https://www.gravatar.com/avatar/'+msg.character._id+'?d=identicon'" class="rpg-avatar">
+              <div class="frame-overlay"></div>
+            </div>
+          }
+
+          <div class="message-body">
+            <div class="message-header">
+              <span class="scribe-name">{{ msg.character?.name || msg.author?.username }}</span>
+              <span class="chronicle-time">{{ msg.createdAt | date:'HH:mm' }}</span>
+            </div>
+
+            <markdown class="ink-text" [data]="msg.content"></markdown>
+          </div>
+        </div>
+      } @empty {
+        <div class="empty-quest-log">
+          <mat-icon>menu_book</mat-icon>
+          <p>The chronicle is empty...</p>
+        </div>
+      }
+
+    </mat-card-content>
+  </mat-card>
+
+  <div class="command-bar">
+    <mat-form-field appearance="outline" class="ink-input">
+      <mat-label>Scribe a message...</mat-label>
+
+      <textarea
+        matInput
+        [(ngModel)]="newMessageContent"
+        (keydown)="handleKeyDown($event)"
+        cdkTextareaAutosize
+        #autosize="cdkTextareaAutosize"
+        cdkAutosizeMinRows="1"
+        cdkAutosizeMaxRows="5">
+    </textarea>
+
+      <button matSuffix mat-icon-button (click)="sendMessage()" [disabled]="!newMessageContent.trim()">
+        <mat-icon>auto_stories</mat-icon>
+      </button>
+    </mat-form-field>
+  </div>
+</div>

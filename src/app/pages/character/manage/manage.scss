@@ -1,0 +1,84 @@
+  @use '@angular/material' as mat;
+
+.management-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+
+    h1 {
+      margin: 0;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+  }
+}
+
+.character-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.character-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 2px solid transparent;
+
+  // Uses Material Elevation 2 by default
+  @include mat.elevation(2);
+
+  &:hover {
+    @include mat.elevation(6);
+    transform: translateY(-4px);
+  }
+
+  &.active-card {
+    // Highlights the active character using the theme's primary color
+    border-color: var(--mat-sys-primary);
+    background-color: var(--mat-sys-primary-container);
+  }
+}
+
+.card-content {
+  display: flex;
+  padding: 16px;
+  gap: 16px;
+
+  .char-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    background-color: var(--mat-sys-surface-variant);
+    border: 3px solid var(--mat-sys-outline-variant);
+  }
+
+  .char-info {
+    flex: 1;
+
+    mat-card-title {
+      font-size: 1.25rem;
+      margin-bottom: 4px;
+    }
+
+    .class-chips {
+      margin-top: 12px;
+
+      mat-chip {
+        --mdc-chip-label-text-size: 12px;
+        height: 24px;
+      }
+    }
+  }
+}
+
+mat-card-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 16px !important;
+}

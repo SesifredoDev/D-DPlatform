@@ -1,28 +1,28 @@
 import { Injectable } from '@angular/core';
-import {Observable} from 'rxjs';
+import {BehaviorSubject, Observable, Subject} from 'rxjs';
 import {HttpClient} from '@angular/common/http';
 import {environment} from '../../../../environments/environment';
-import {Character} from '../../models/user/character.model';
+import {ICharacter} from '../../models/user/character.model';
 
 @Injectable({
   providedIn: 'root',
 })
 export class CharacterService {
+  activeCharacter = new BehaviorSubject<ICharacter | null>(null);
   private readonly apiUrl = `${environment.apiURL}character`;
 
   constructor(private http: HttpClient) {}
 
-  getMyCharacters(): Observable<Character[]> {
-    return this.http.get<Character[]>(this.apiUrl);
+  getMyCharacters(): Observable<ICharacter[]> {
+    return this.http.get<ICharacter[]>(this.apiUrl);
   }
 
 
   saveCharacter(
-    characterData: Partial<Character>,
+    characterData: Partial<ICharacter>,
     iconFile?: File,
     pdfFile?: File,
-    serverId?: string
-  ): Observable<Character> {
+  ): Observable<ICharacter> {
     const formData = new FormData();
 
     // Append the basic fields
@@ -31,7 +31,6 @@ export class CharacterService {
     formData.append('ac', (characterData.ac || 10).toString());
 
     if (characterData.ddbId) formData.append('ddbId', characterData.ddbId.toString());
-    if (serverId) formData.append('serverId', serverId);
 
     formData.append('baseStats', JSON.stringify(characterData.baseStats));
     formData.append('classes', JSON.stringify(characterData.classes));
@@ -48,6 +47,41 @@ export class CharacterService {
       formData.append('pdfLink', characterData.pdfLink);
     }
 
-    return this.http.post<Character>(this.apiUrl, formData);
+    return this.http.post<ICharacter>(this.apiUrl, formData);
+  }
+
+  updateCharacter(
+    id: string,
+    characterData: Partial<ICharacter>,
+    iconFile?: File,
+    pdfFile?: File
+  ): Observable<any> {
+    const formData = new FormData();
+
+    if (characterData.name) formData.append('name', characterData.name);
+
+    if (characterData.servers) {
+      formData.append('servers', JSON.stringify(characterData.servers));
+    }
+
+    if (characterData.baseStats) {
+      formData.append('baseStats', JSON.stringify(characterData.baseStats));
+    }
+    if (characterData.classes) {
+      formData.append('classes', JSON.stringify(characterData.classes));
+    }
+
+    if (iconFile) formData.append('icon', iconFile);
+    if (pdfFile) formData.append('pdf', pdfFile);
+
+    return this.http.put(`${this.apiUrl}/${id}`, formData);
+  }
+
+  setActiveCharacter(characterData: ICharacter) {
+    this.activeCharacter.next(characterData);
+    return characterData;
+  }
+  getActiveCharacterObservable(){
+    return this.activeCharacter;
   }
 }

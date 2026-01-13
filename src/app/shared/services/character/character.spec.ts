@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 
-import { Character } from './character';
+import { ICharacter } from './character';
 
 describe('Character', () => {
   let service: Character;

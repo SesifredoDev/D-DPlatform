@@ -1,56 +1,18 @@
 
-<app-side-panel></app-side-panel>
-<button
-  mat-raised-button
-  color="primary"
-  (click)="getMe()"
->
-  Get Me
-</button>
+  <app-side-panel class="sidebar"></app-side-panel>
 
-<button
-  mat-raised-button
-  color="primary"
-  (click)="logout()"
->
-  Logout
-</button>
+  <main class="content-area" [class.split-view]="showMessages && showVideo">
 
+    @if (showVideo) {
+      <div class="video-container">
+        <app-video-call [channelId]="messageChannelID"></app-video-call>
+      </div>
+    }
 
-<button
-  mat-raised-button
-  color="primary"
-  (click)="convertLink()"
->
-  convert
-</button>
+    @if (showMessages) {
+      <div class="chat-container">
+        <app-text-channel [channelId]="messageChannelID" [currentCharacterId]="activeCharacterID"></app-text-channel>
+      </div>
+    }
 
-
-<button
-  mat-raised-button
-  color="primary"
-  (click)="getdndbeyondInfo()"
->
-  getInfo
-</button>
-
-
-<button
-  mat-raised-button
-  color="primary"
-  (click)="openAddCharacter()"
->
-  add Character
-</button>
-
-
-<button
-  mat-raised-button
-  color="primary"
-  (click)="getCharacters()"
->
-  get Character
-</button>
-
-
-
+  </main>

@@ -1,0 +1,116 @@
+.rpg-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 98vh;
+  padding: 10px;
+  //background: var(--mat-sys-surface-container-low);
+}
+
+.parchment-scroll {
+  flex: 1;
+  color: var(--mat-sys-on-tertiary-container);
+  border: 8px solid var(--mat-sys-outline-variant);
+  border-image: linear-gradient(
+      to bottom,
+      var(--mat-sys-outline),
+      var(--mat-sys-outline-variant)
+  ) 1;
+
+  box-shadow: inset 0 0 50px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.4);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.message-list {
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px !important;
+  mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
+}
+
+.message-entry {
+  display: flex;
+  margin-bottom: 20px;
+  border-bottom: 1px dashed var(--mat-sys-outline-variant);
+  padding-bottom: 10px;
+
+  .avatar-frame {
+    position: relative;
+    margin-right: 15px;
+
+    .rpg-avatar {
+      width: 50px;
+      height: 50px;
+      border: 2px solid var(--mat-sys-outline);
+    }
+  }
+}
+
+.scribe-name {
+  font-family: 'Cinzel', serif;
+  font-weight: bold;
+  color: var(--mat-sys-primary);
+  font-size: 1.1rem;
+}
+
+.ink-text {
+  font-family: 'EB Garamond', serif;
+  font-size: 1.1rem;
+  line-height: 1.4;
+  display: block;
+    white-space: pre-wrap; // This is crucial for rendering the multi-lines
+    word-wrap: break-word;
+
+  // Ensure markdown paragraphs don't add double spacing
+  p {
+    margin: 5px 0;
+  }
+
+  // Style for code snippets (useful for magic spells or mechanics)
+  code {
+    background: var(--mat-sys-surface-container-high);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+  }
+
+  // Style for blockquotes (ideal for "old whispers" or "ancient texts")
+  blockquote {
+    border-left: 3px solid var(--mat-sys-primary);
+    padding-left: 10px;
+    margin-left: 0;
+    font-style: italic;
+    color: var(--mat-sys-on-surface-variant);
+  }
+}
+
+.command-bar {
+  background: var(--mat-sys-surface-container);
+  padding: 10px;
+  border-radius: 8px;
+  border-top: 2px solid var(--mat-sys-secondary); // Accent line
+
+  .ink-input {
+    width: 100%;
+    // We let the MatFormField handle its own internal M3 variables.
+    // If you need to force a color, use the sys variables:
+    --mdc-outlined-text-field-focus-outline-color: var(--mat-sys-primary);
+    --mdc-outlined-text-field-outline-color: var(--mat-sys-outline);
+  }
+}
+
+.chronicle-time{
+  margin-left: 20px;
+}
+
+// Custom Scrollbar using theme variables
+.message-list::-webkit-scrollbar {
+  width: 8px;
+}
+.message-list::-webkit-scrollbar-track {
+  background: var(--mat-sys-surface-container-lowest);
+}
+.message-list::-webkit-scrollbar-thumb {
+  background: var(--mat-sys-secondary-fixed-dim);
+  border-radius: 10px;
+}

@@ -9,7 +9,7 @@ import {MatButtonModule} from '@angular/material/button';
 import {MatInputModule} from '@angular/material/input';
 import {MatIconModule} from '@angular/material/icon';
 import {MatDividerModule} from '@angular/material/divider';
-import {MatDialog, MatDialogModule} from '@angular/material/dialog';
+import {MatDialog, MatDialogModule, MatDialogRef} from '@angular/material/dialog';
 import {MatProgressSpinnerModule} from '@angular/material/progress-spinner';
 import {MatTabsModule} from '@angular/material/tabs';
 
@@ -42,6 +42,7 @@ export class CreateCharacterComponent implements OnInit {
     private ddbService: dndbeyond,
     private charService: CharacterService,
     private matDialog: MatDialog,
+    private dialogRef: MatDialogRef<CreateCharacterComponent>,
   ) {
     this.charForm = this.fb.group({
       ddbUrl: [''],
@@ -100,8 +101,10 @@ export class CreateCharacterComponent implements OnInit {
             constitution: data.baseStats.constitution,
             intelligence: data.baseStats.intelligence,
             wisdom: data.baseStats.wisdom,
-            charisma: data.baseStats.charisma
+            charisma: data.baseStats.charisma,
           });
+
+          console.log(data.icon)
 
           // Add classes from DDB
           data.classes.forEach((c: any) => {
@@ -130,7 +133,7 @@ export class CreateCharacterComponent implements OnInit {
         race: formVal.race,
         ac: formVal.ac,
         ddbId: formVal.ddbId,
-        icon: formVal.iconUrl, // This will be used if selectedIcon is null
+        icon: formVal.iconUrl,
         baseStats: {
           strength: formVal.strength,
           dexterity: formVal.dexterity,
@@ -139,16 +142,18 @@ export class CreateCharacterComponent implements OnInit {
           wisdom: formVal.wisdom,
           charisma: formVal.charisma
         },
-        classes: [] // You can extend the form to handle class arrays similarly
+        classes: formVal.classes
       };
 
+      console.log(characterData);
       this.charService.saveCharacter(characterData, this.selectedIcon!, this.selectedPdf!)
         .subscribe(res =>{
           console.log('Character Saved!', res)
           this.charForm.reset();
           this.selectedIcon = null;
           this.selectedPdf = null;
-        });
+          this.dialogRef.close(res);
+        })
     }
   }
 

@@ -1,0 +1,107 @@
+<div class="edit-header">
+  <h2 mat-dialog-title>Edit Character: {{data.name}}</h2>
+  <button mat-icon-button (click)="close()" class="close-button">
+    <mat-icon>close</mat-icon>
+  </button>
+</div>
+
+<mat-dialog-content>
+  <form [formGroup]="charForm">
+    <mat-tab-group mat-stretch-tabs="false" mat-align-tabs="start">
+
+      <mat-tab label="Basic Info">
+        <div class="tab-content">
+          <div class="profile-preview-section" *ngIf="charForm.get('iconUrl')?.value">
+            <img [src]="charForm.get('iconUrl')?.value" alt="Character Icon" class="current-icon">
+            <p class="mat-caption">Current Icon</p>
+          </div>
+
+          <div class="form-row">
+            <mat-form-field appearance="outline" class="flex-3">
+              <mat-label>Character Name</mat-label>
+              <input matInput formControlName="name">
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="flex-1">
+              <mat-label>AC</mat-label>
+              <input matInput type="number" formControlName="ac">
+            </mat-form-field>
+          </div>
+
+          <mat-form-field appearance="outline" class="full-width">
+            <mat-label>Race</mat-label>
+            <input matInput formControlName="race">
+          </mat-form-field>
+        </div>
+      </mat-tab>
+
+      <mat-tab label="Combat & Stats">
+        <div class="tab-container">
+          <div class="ac-section">
+            <mat-form-field appearance="outline">
+              <mat-label>Armor Class (AC)</mat-label>
+              <input matInput type="number" formControlName="ac">
+              <mat-icon matPrefix>shield</mat-icon>
+            </mat-form-field>
+          </div>
+
+          <div class="stats-grid">
+            <mat-form-field *ngFor="let stat of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']" appearance="fill">
+              <mat-label>{{ stat | titlecase }}</mat-label>
+              <input matInput type="number" [formControlName]="stat">
+            </mat-form-field>
+          </div>
+        </div>
+      </mat-tab>
+      <mat-tab label="classes">
+        <div class="classes-header">
+          <h3>Classes</h3>
+          <button mat-stroked-button color="primary" type="button" (click)="addClass()">
+            <mat-icon>add</mat-icon> Add Level
+          </button>
+        </div>
+        <div formArrayName="classes" class="class-scroll-area">
+          <div *ngFor="let c of classArray.controls; let i = index" [formGroupName]="i" class="edit-class-row">
+            <mat-form-field appearance="outline">
+              <input matInput formControlName="className" placeholder="Class">
+            </mat-form-field>
+            <mat-form-field appearance="outline">
+              <input matInput type="number" formControlName="level">
+            </mat-form-field>
+            <button mat-icon-button color="warn" (click)="removeClass(i)">
+              <mat-icon>delete_outline</mat-icon>
+            </button>
+          </div>
+        </div>
+      </mat-tab>
+
+      <mat-tab label="Media">
+        <div class="tab-content media-tab">
+          <div class="upload-card">
+            <mat-icon>image</mat-icon>
+            <div class="upload-info">
+              <span class="label">Update Profile Image</span>
+              <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*">
+            </div>
+          </div>
+
+          <div class="upload-card">
+            <mat-icon>picture_as_pdf</mat-icon>
+            <div class="upload-info">
+              <span class="label">Update Character PDF</span>
+              <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
+            </div>
+          </div>
+        </div>
+      </mat-tab>
+
+    </mat-tab-group>
+  </form>
+</mat-dialog-content>
+
+<mat-dialog-actions align="end">
+  <button mat-button (click)="close()">Discard Changes</button>
+  <button mat-raised-button color="primary" (click)="submitForm()" [disabled]="charForm.invalid || charForm.pristine && !selectedIcon && !selectedPdf">
+    <mat-icon>check</mat-icon> Save Changes
+  </button>
+</mat-dialog-actions>

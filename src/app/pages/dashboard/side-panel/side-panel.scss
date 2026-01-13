@@ -2,7 +2,6 @@
   display: block;
   height: 100vh;
   width: 260px;
-  background-color: #2f3136; // Discord-dark theme
   color: #dcddde;
 }
 
@@ -15,7 +14,7 @@
 /* TOP SECTION: 30% height */
 .top-section {
   height: 30%;
-  background-color: #202225;
+  background-color: rgba(32, 34, 37, 0.15);
   display: flex;
   flex-direction: column;
   padding: 10px;
@@ -34,8 +33,7 @@
     flex-grow: 1;
 
     .avatar-container {
-      width: 70px;
-      height: 70px;
+      width: 7vw;
       border-radius: 50%;
       overflow: hidden;
       border: 3px solid #3f51b5;
@@ -45,8 +43,8 @@
     }
 
     .character-name {
-      margin: 0;
-      font-size: 1.1rem;
+      margin-top: 10px;
+      font-size: 1.3rem;
       font-weight: 500;
       color: white;
     }
@@ -141,7 +139,7 @@ $discord-text-normal: #dcddde;
 
 
 $discord-darker: #202225;
-$discord-bottom-bg: #292b2f;
+$discord-bottom-bg: rgba(41, 43, 47, 0.19);
 $discord-text-muted: #8e9297;
 
 
@@ -163,6 +161,7 @@ $discord-text-muted: #8e9297;
 /* Bottom Section Overhaul */
 .bottom-section {
   min-height: 52px;
+  padding: 5px;
   background-color: $discord-bottom-bg;
   display: flex;
   align-items: center;
@@ -191,26 +190,23 @@ $discord-text-muted: #8e9297;
     .chevron { font-size: 18px;}
   }
 
-  .user-controls {
-    display: flex;
-    align-items: center;
 
-    button {
-      width: 32px;
-      height: 32px;
-      line-height: 32px;
-      color: $discord-text-muted;
+}
 
-      mat-icon {
-        font-size: 20px;
-        width: 20px;
-        height: 20px;
-      }
+.user-controls {
+  background-color: $discord-bottom-bg;
+  display: flex;
+  align-items: center;
+  flex-direction: row;
+  flex-wrap: wrap;
 
-      &:hover {
-        background-color: rgba(255, 255, 255, 0.1);
-        color: #dcddde;
-      }
+  button {
+    line-height: 32px;
+    color: $discord-text-muted;
+    margin:auto;
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.1);
+      color: #dcddde;
     }
   }
 }

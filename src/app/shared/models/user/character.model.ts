@@ -9,21 +9,20 @@ export interface BaseStats {
 
 export interface CharacterClass {
   className: string;
-  subclassName: string | null;
+  subclassName?: string;
   level: number;
 }
 
-export interface Character {
-  _id?: string;               // MongoDB internal ID
+export interface ICharacter {
+  _id?: string;
   ownerId: string;
-  servers: string[];          // Array of Server ObjectIds
-  ddbId?: number | null;      // D&D Beyond ID
-  pdfLink?: string | null;    // URL to PDF or server path
+  servers: string[];
+  ddbId?: number | null;
+  pdfLink?: string | null;
   name: string;
-  race: string;
-  icon: string;               // Can be a URL or server path
+  race?: string;
+  icon?: string;
   baseStats: BaseStats;
   classes: CharacterClass[];
-  ac: number;
-  lastUpdated?: Date;
+  ac?: number;
 }

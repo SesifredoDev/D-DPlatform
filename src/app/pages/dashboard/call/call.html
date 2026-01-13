@@ -1,0 +1,20 @@
+<div class="video-container">
+  <div class="controls">
+    <select [(ngModel)]="selectedVideoId">
+      <option *ngFor="let d of videoDevices" [value]="d.deviceId">{{d.label || 'Camera'}}</option>
+    </select>
+    <button (click)="joinCall()">Join Video</button>
+  </div>
+
+  <div class="grid">
+    <div class="video-box">
+      <video #localVideo autoplay muted playsinline></video>
+      <span class="label">You</span>
+    </div>
+
+    <div class="video-box" *ngFor="let remote of remoteStreams">
+      <video [srcObject]="remote.stream" autoplay playsinline></video>
+      <span class="label">Peer {{remote.id.substring(0,4)}}</span>
+    </div>
+  </div>
+</div>

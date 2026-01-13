@@ -1,0 +1,60 @@
+<div class="management-container">
+  <div class="header">
+    <h1>Your Characters</h1>
+    <dir>
+
+      <button mat-raised-button color="primary" (click)="openCreateDialog()">
+        <mat-icon>add</mat-icon> New Character
+      </button>
+      <button MatFab color="secondary" routerLink="../dashboard">
+        <mat-icon>close</mat-icon>
+      </button>
+    </dir>
+  </div>
+
+  <div class="character-grid">
+    <mat-card *ngFor="let char of characters"
+              [class.active-card]="selectedCharacterId === char._id"
+              class="character-card">
+
+      <div class="card-content">
+        <img [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'" class="char-icon">
+
+        <div class="char-info">
+          <mat-card-title>{{ char.name }}</mat-card-title>
+          <mat-card-subtitle>{{ char.race }} | AC: {{ char.ac }}</mat-card-subtitle>
+
+          <div class="class-chips">
+            <mat-chip-set>
+              <mat-chip *ngFor="let c of char.classes">
+                {{ c.className }} {{ c.level }}
+              </mat-chip>
+            </mat-chip-set>
+          </div>
+        </div>
+      </div>
+
+      <mat-divider></mat-divider>
+
+      <mat-card-actions>
+
+        @if (char.ddbId) {
+          <button mat-icon-button color="accent" (click)="syncWithDdb(char)" matTooltip="Sync with D&D Beyond">
+            <mat-icon>sync</mat-icon>
+          </button>
+        }
+        <button mat-icon-button color="primary" (click)="editCharacter(char)" matTooltip="Edit Character">
+          <mat-icon>edit</mat-icon>
+        </button>
+
+        <button mat-button [matMenuTriggerFor]="serverMenu">Assign Servers</button>
+        <mat-menu #serverMenu="matMenu">
+          <button mat-menu-item *ngFor="let server of availableServers" (click)="toggleServer(char, server._id)">
+            <mat-icon>{{ isAssigned(char, server._id) ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
+            <span>{{ server.name }}</span>
+          </button>
+        </mat-menu>
+      </mat-card-actions>
+    </mat-card>
+  </div>
+</div>

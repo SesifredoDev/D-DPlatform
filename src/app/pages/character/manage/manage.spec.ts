@@ -1,20 +1,20 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { Server } from './server';
+import { Manage } from './manage';
 
-describe('Server', () => {
-  let component: Server;
-  let fixture: ComponentFixture<Server>;
+describe('Manage', () => {
+  let component: Manage;
+  let fixture: ComponentFixture<Manage>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [Server]
+      imports: [Manage]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(Server);
+    fixture = TestBed.createComponent(Manage);
     component = fixture.componentInstance;
-    await fixture.whenStable();
+    fixture.detectChanges();
   });
 
   it('should create', () => {
