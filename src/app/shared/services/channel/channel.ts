@@ -38,7 +38,7 @@ export class ChannelService {
     payload: any
   ): Observable<any> {
     return this.http
-      .put(
+      .patch(
         `${this.baseUrl}/${serverId}/channels/${channelId}`,
         payload,
         { withCredentials: true }
@@ -54,6 +54,8 @@ export class ChannelService {
       )
       .pipe(catchError(handleApiError));
   }
+
+
 
   getChannelObservable(){
     return this.selectedChannelObservable;

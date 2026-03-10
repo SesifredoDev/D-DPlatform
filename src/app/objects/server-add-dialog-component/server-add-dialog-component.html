@@ -1,0 +1,139 @@
+<h2 mat-dialog-title>Add a Server</h2>
+
+<mat-dialog-content class="dialog-content">
+
+  <mat-tab-group
+    [selectedIndex]="selectedIndex"
+    (selectedIndexChange)="onTabChange($event)">
+
+    <!-- CREATE -->
+    <mat-tab label="Create Server">
+
+      <div class="tab-content">
+
+        <p class="subtitle">
+          Give your server a name and optional icon.
+        </p>
+
+        <form [formGroup]="createForm" class="server-form">
+
+          <div class="icon-upload">
+
+            <div
+              class="icon-preview"
+              [style.background-image]="'url(' + (iconPreview || 'assets/placeholder.png') + ')'">
+
+              <input
+                type="file"
+                hidden
+                accept="image/*"
+                #fileInput
+                (change)="onFileSelected($event)">
+
+              <button
+                mat-mini-fab
+                color="primary"
+                type="button"
+                (click)="fileInput.click()">
+
+                <mat-icon>add_a_photo</mat-icon>
+
+              </button>
+
+            </div>
+
+          </div>
+
+          <mat-form-field appearance="outline" class="full">
+
+            <mat-label>Server Name</mat-label>
+
+            <input
+              matInput
+              formControlName="name"
+              placeholder="My Awesome Server">
+
+            <mat-error *ngIf="createForm.get('name')?.invalid">
+              Server name is required
+            </mat-error>
+
+          </mat-form-field>
+
+        </form>
+
+      </div>
+
+    </mat-tab>
+
+    <!-- JOIN -->
+    <mat-tab label="Join Server">
+
+      <div class="tab-content">
+
+        <p class="subtitle">
+          Enter an invite code to join a server.
+        </p>
+
+        <form [formGroup]="joinForm" class="server-form">
+
+          <mat-form-field appearance="outline" class="full">
+
+            <mat-label>Invite Code</mat-label>
+
+            <input
+              matInput
+              formControlName="code"
+              placeholder="ABC12345">
+
+            <mat-error *ngIf="joinForm.get('code')?.invalid">
+              Invite code required
+            </mat-error>
+
+          </mat-form-field>
+
+        </form>
+
+      </div>
+
+    </mat-tab>
+
+  </mat-tab-group>
+
+</mat-dialog-content>
+
+
+<mat-dialog-actions align="end">
+
+  <button mat-button mat-dialog-close>
+    Cancel
+  </button>
+
+  <button
+    mat-raised-button
+    color="primary"
+    *ngIf="selectedIndex === 0"
+    (click)="onCreate()"
+    [disabled]="createForm.invalid || isLoading">
+
+    Create
+
+  </button>
+
+  <button
+    mat-raised-button
+    color="accent"
+    *ngIf="selectedIndex === 1"
+    (click)="onJoin()"
+    [disabled]="joinForm.invalid || isLoading">
+
+    Join
+
+  </button>
+
+</mat-dialog-actions>
+
+
+<mat-progress-bar
+  *ngIf="isLoading"
+  mode="indeterminate">
+</mat-progress-bar>

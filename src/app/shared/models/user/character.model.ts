@@ -18,10 +18,11 @@ export interface ICharacter {
   ownerId: string;
   servers: string[];
   ddbId?: number | null;
+  ddbUsername?: string | null;
   pdfLink?: string | null;
   name: string;
   race?: string;
-  icon?: string;
+  icon?: string | null;
   baseStats: BaseStats;
   classes: CharacterClass[];
   ac?: number;

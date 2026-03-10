@@ -70,9 +70,14 @@ export class CharacterService {
     if (characterData.classes) {
       formData.append('classes', JSON.stringify(characterData.classes));
     }
+    if(characterData.ddbUsername){
+      formData.append('ddbUsername', characterData.ddbUsername);
 
+    }
     if (iconFile) formData.append('icon', iconFile);
     if (pdfFile) formData.append('pdf', pdfFile);
+
+
 
     return this.http.put(`${this.apiUrl}/${id}`, formData);
   }

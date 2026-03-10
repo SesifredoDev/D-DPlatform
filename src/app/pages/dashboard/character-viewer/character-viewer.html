@@ -1,0 +1,72 @@
+@if (character){
+
+
+<!-- Tabs -->
+<mat-tab-group class="viewer-tabs">
+    <mat-tab *ngIf="character?.ddbId" label="DnD Beyond Charcater Sheet">
+      <iframe [src]="ddbUrl" class="viewer-frame" loading="lazy"></iframe>
+    </mat-tab>
+
+    <mat-tab *ngIf="pdfUrl" label="Provided PDF">
+      <mat-card class="character-card" >
+        <mat-card-header>
+          <img
+            *ngIf="character.icon"
+            mat-card-avatar
+            [src]="character.icon"
+            alt="Character icon"
+          />
+
+          <mat-card-title>{{ character.name }}</mat-card-title>
+          <mat-card-subtitle>
+            {{ character.race || 'Unknown Race' }}
+          </mat-card-subtitle>
+        </mat-card-header>
+
+        <mat-card-content>
+          <!-- Classes -->
+          <section class="classes">
+            <div *ngFor="let cls of character.classes">
+              <strong>{{ cls.className }}</strong>
+              <span *ngIf="cls.subclassName">
+          ({{ cls.subclassName }})
+        </span>
+              – Level {{ cls.level }}
+            </div>
+          </section>
+
+          <!-- Base Stats -->
+          <section class="stats-grid">
+            <div class="stat" *ngFor="let stat of character.baseStats | keyvalue">
+              <div class="stat-name">{{ stat.key | titlecase }}</div>
+              <div class="stat-value">{{ stat.value }}</div>
+              <div class="stat-mod">
+                {{ modifier(stat.value) }}
+              </div>
+            </div>
+          </section>
+
+          <div class="ac" *ngIf="character.ac">
+            <strong>Armor Class:</strong> {{ character.ac }}
+          </div>
+        </mat-card-content>
+      </mat-card>
+      <pdf-viewer
+        [src]="pdfUrl"
+        [render-text]="true"
+        [original-size]="false"
+        [zoom]="zoom"
+        [page]="page"
+
+        style="display: block; height: 80vh"
+      >
+      </pdf-viewer>
+    </mat-tab>
+
+  <mat-tab *ngIf="!ddbUrl && !pdfUrl" label="No Sheet">
+    <div class="empty-state">
+      No D&D Beyond character or PDF available.
+    </div>
+  </mat-tab>
+</mat-tab-group>
+}

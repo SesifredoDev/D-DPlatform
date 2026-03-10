@@ -1,18 +1,74 @@
+<app-side-panel class="sidebar"></app-side-panel>
 
-  <app-side-panel class="sidebar"></app-side-panel>
+<main class="editor-area" [class.resizing-active]="isResizing" cdkDropListGroup>
 
-  <main class="content-area" [class.split-view]="showMessages && showVideo">
+  <div class="pane"
+       id="left-pane"
+       cdkDropList
+       [style.flex-basis.px]="leftWidth"
+       [cdkDropListData]="'left'"
+       (cdkDropListDropped)="onDrop($event)">
 
-    @if (showVideo) {
-      <div class="video-container">
-        <app-video-call [channelId]="messageChannelID"></app-video-call>
-      </div>
-    }
+    <div class="tab-bar">
+      @for (tab of leftTabs; track tab.id) {
+        <div class="tab" [class.active]="tab.active" cdkDrag [cdkDragData]="tab" (click)="selectTab(tab)">
+          {{ tab.title }}
+          <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
+        </div>
+      }
+    </div>
 
-    @if (showMessages) {
-      <div class="chat-container">
-        <app-text-channel [channelId]="messageChannelID" [currentCharacterId]="activeCharacterID"></app-text-channel>
-      </div>
-    }
+    <div class="pane-content">
+      @for (tab of leftTabs; track tab.id) {
+        <div [hidden]="!tab.active" class="full-height">
+          @if (tab.type === 'call') {
+            <app-video-call [channelId]="tab.id" [character]="activeCharacter"></app-video-call>
+          } @else if (tab.type === 'text') {
+            <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
+          } @else {
+            <app-character-viewer [character]="tab.character"></app-character-viewer>
+          }
+        </div>
+      }
+    </div>
+  </div>
 
-  </main>
+  @if (rightTabs.length > 0) {
+    <div class="resizer-handle" (mousedown)="startResizing($event)"></div>
+  }
+
+  <div class="pane right-pane"
+       [class.hidden]="rightTabs.length === 0"
+       cdkDropList
+       [cdkDropListData]="'right'"
+       (cdkDropListDropped)="onDrop($event)">
+
+    <div class="tab-bar">
+      @for (tab of rightTabs; track tab.id) {
+        <div class="tab" [class.active]="tab.active" cdkDrag [cdkDragData]="tab" (click)="selectTab(tab)">
+          {{ tab.title }}
+          <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
+        </div>
+      }
+    </div>
+
+    <div class="pane-content">
+      @if (rightTabs.length > 0) {
+        @for (tab of rightTabs; track tab.id) {
+          <div [hidden]="!tab.active" class="full-height">
+            @if (tab.type === 'call') {
+              <app-video-call [channelId]="tab.id" [character]="activeCharacter"></app-video-call>
+            } @else if (tab.type === 'text') {
+              <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
+            } @else {
+              <app-character-viewer [character]="tab.character"></app-character-viewer>
+            }
+          </div>
+        }
+      } @else {
+        <div class="drop-hint">Drop tab here to split view</div>
+      }
+    </div>
+  </div>
+
+</main>

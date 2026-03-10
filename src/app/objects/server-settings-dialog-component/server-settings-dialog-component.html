@@ -1,0 +1,476 @@
+<div class="settings-container">
+
+  <!-- SIDEBAR -->
+  <aside class="settings-sidebar">
+    <h3 class="sidebar-title">Server Settings</h3>
+
+    <button mat-button class="nav-btn"
+            [class.active]="activeTab==='overview'"
+            (click)="setTab('overview')">
+      <mat-icon>settings</mat-icon>
+      Overview
+    </button>
+
+    <button mat-button class="nav-btn"
+            [class.active]="activeTab==='roles'"
+            (click)="setTab('roles')">
+      <mat-icon>security</mat-icon>
+      Roles
+    </button>
+
+    <button mat-button class="nav-btn"
+            [class.active]="activeTab==='members'"
+            (click)="setTab('members')">
+      <mat-icon>group</mat-icon>
+      Members
+    </button>
+
+    <button mat-button class="nav-btn"
+            [class.active]="activeTab==='channels'"
+            (click)="setTab('channels')">
+      <mat-icon>tag</mat-icon>
+      Channels
+    </button>
+
+    <mat-divider></mat-divider>
+
+    <button mat-button color="warn" class="nav-btn danger" (click)="onLeaveServer()">
+      <mat-icon>logout</mat-icon>
+      Leave Server
+    </button>
+
+    <button mat-button color="warn" class="nav-btn danger" (click)="onDeleteServer()">
+      <mat-icon>delete</mat-icon>
+      Delete Server
+    </button>
+  </aside>
+
+
+  <!-- MAIN CONTENT -->
+  <main class="settings-content">
+
+    <!-- ===================== -->
+    <!-- OVERVIEW -->
+    <!-- ===================== -->
+    <section *ngIf="activeTab==='overview'" class="panel">
+
+      <header class="panel-header">
+        <h2>Server Overview</h2>
+      </header>
+
+      <form [formGroup]="settingsForm" class="settings-form">
+
+        <div class="overview-grid">
+
+          <!-- SERVER ICON -->
+          <div class="icon-editor">
+            <div class="icon-wrapper" (click)="fileInput.click()">
+              <img [src]="iconPreview || 'assets/placeholder.png'" class="server-icon">
+
+              <div class="icon-overlay">
+                <span>Change</span>
+              </div>
+            </div>
+
+            <input type="file"
+                   #fileInput
+                   hidden
+                   (change)="onFileSelected($event)"
+                   accept="image/*">
+
+            <span class="hint">Minimum size 128x128</span>
+          </div>
+
+
+          <!-- SERVER SETTINGS -->
+          <div class="form-fields">
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Server Name</mat-label>
+              <input matInput formControlName="name">
+            </mat-form-field>
+
+            <div class="info-row">
+              <label>Join Code</label>
+              <span class="join-code">{{serverDetails?.joinCode}}</span>
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <!-- SAVE BAR -->
+        <div class="save-bar" *ngIf="settingsForm.dirty || selectedFile">
+
+          <span>Unsaved changes</span>
+
+          <div class="save-actions">
+            <button mat-button (click)="dialogRef.close()">Cancel</button>
+            <button mat-raised-button color="primary" (click)="onSaveChanges()">
+              Save Changes
+            </button>
+          </div>
+
+        </div>
+
+      </form>
+
+    </section>
+
+
+    <!-- ===================== -->
+    <!-- ROLES -->
+    <!-- ===================== -->
+    <section *ngIf="activeTab==='roles'" class="split-panel">
+
+      <!-- ROLE LIST -->
+      <aside class="list-panel">
+
+        <div class="list-header">
+          <span>Roles — {{ serverDetails?.roles?.length }}</span>
+
+          <button mat-icon-button (click)="createRole()">
+            <mat-icon>add</mat-icon>
+          </button>
+        </div>
+
+        <div class="list-item"
+             *ngFor="let role of serverDetails?.roles"
+             [class.active]="selectedRole?._id === role._id && !isCreating"
+             (click)="selectRole(role)">
+
+          <mat-icon [style.color]="role.color">label</mat-icon>
+          <span>{{ role.name }}</span>
+
+        </div>
+
+      </aside>
+
+
+      <!-- ROLE EDITOR -->
+      <div class="editor-panel" *ngIf="selectedRole || isCreating; else noRoleSelected">
+
+        <form [formGroup]="roleForm" (ngSubmit)="onSaveRole()">
+
+          <h3 class="editor-title">
+            {{ isCreating ? 'Create Role' : 'Edit Role: ' + selectedRole?.name }}
+          </h3>
+
+          <div class="editor-section">
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Role Name</mat-label>
+              <input matInput formControlName="name"
+                     [readonly]="selectedRole?.name === '@everyone'">
+            </mat-form-field>
+
+            <div class="row">
+
+              <div class="color-picker">
+                <label>Role Color</label>
+                <input type="color" formControlName="color">
+              </div>
+
+              <mat-slide-toggle formControlName="hoist">
+                Display role members separately
+              </mat-slide-toggle>
+
+            </div>
+
+          </div>
+
+          <mat-divider></mat-divider>
+
+          <div class="editor-section permissions">
+
+            <h4>Permissions</h4>
+
+            <div class="permissions-grid">
+
+              <mat-checkbox formControlName="ADMINISTRATOR">
+                Administrator
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="MANAGE_SERVER">
+                Manage Server
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="MANAGE_ROLES">
+                Manage Roles
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="MANAGE_CHANNELS">
+                Manage Channels
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="SEND_MESSAGES">
+                Send Messages
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="READ_MESSAGE_HISTORY">
+                Read Message History
+              </mat-checkbox>
+
+              <mat-checkbox formControlName="CONNECT">
+                Connect
+              </mat-checkbox>
+
+            </div>
+
+          </div>
+
+
+          <div class="editor-footer">
+
+            <button *ngIf="!isCreating && selectedRole?.name !== '@everyone'"
+                    mat-button
+                    color="warn"
+                    type="button"
+                    (click)="deleteRole(selectedRole._id)">
+              Delete Role
+            </button>
+
+
+            <div class="save-bar" *ngIf="roleForm.dirty || isCreating">
+
+              <span>Unsaved changes</span>
+
+              <div class="save-actions">
+
+                <button mat-button
+                        type="button"
+                        (click)="isCreating=false; selectedRole=null; roleForm.markAsPristine()">
+                  Reset
+                </button>
+
+                <button mat-raised-button
+                        color="primary"
+                        [disabled]="roleForm.invalid">
+                  {{ isCreating ? 'Create Role' : 'Save Changes' }}
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </form>
+
+      </div>
+
+
+      <ng-template #noRoleSelected>
+        <div class="empty-state">
+          <mat-icon>security</mat-icon>
+          <p>Select a role to edit.</p>
+        </div>
+      </ng-template>
+
+    </section>
+
+
+    <!-- ===================== -->
+    <!-- MEMBERS -->
+    <!-- ===================== -->
+    <section *ngIf="activeTab==='members'" class="panel">
+
+      <h2>Members</h2>
+
+      <div *ngFor="let member of serverDetails?.members" class="member-row">
+
+        <div class="member-info">
+          <img [src]="member.user.profileIcon || 'assets/default-avatar.png'" class="avatar">
+          <span>{{ member.user.username }}</span>
+        </div>
+
+        <mat-form-field appearance="outline">
+
+          <mat-label>Roles</mat-label>
+
+          <mat-select multiple
+                      [value]="member.roles"
+                      [compareWith]="compareRoles"
+                      (selectionChange)="updateMemberRoles(member.user._id, $event.value)">
+
+            <mat-option *ngFor="let role of serverDetails?.roles"
+                        [value]="role._id">
+
+              <span [style.color]="role.color">{{ role.name }}</span>
+
+            </mat-option>
+
+          </mat-select>
+
+        </mat-form-field>
+
+      </div>
+
+    </section>
+
+
+    <!-- ===================== -->
+    <!-- CHANNELS -->
+    <!-- ===================== -->
+    <section *ngIf="activeTab==='channels'" class="split-panel">
+
+      <!-- CHANNEL LIST -->
+      <aside class="list-panel">
+
+        <div class="list-header">
+          <span>Channels — {{ serverDetails?.channels?.length }}</span>
+
+          <button mat-icon-button (click)="createChannelMode()">
+            <mat-icon>add</mat-icon>
+          </button>
+        </div>
+
+        <div class="list-item"
+             *ngFor="let chan of serverDetails?.channels"
+             [class.active]="selectedChannel?._id === chan._id && !isCreatingChannel"
+             (click)="selectChannel(chan)">
+
+          <mat-icon>
+            {{ chan.type === 'text' ? 'tag' : 'volume_up' }}
+          </mat-icon>
+
+          <span># {{ chan.name }}</span>
+
+        </div>
+
+      </aside>
+
+
+      <!-- CHANNEL EDITOR -->
+      <div class="editor-panel"
+           *ngIf="selectedChannel || isCreatingChannel; else noChannelSelected">
+
+        <form [formGroup]="channelForm" (ngSubmit)="onSaveChannel()">
+
+          <h3 class="editor-title">
+            {{ isCreatingChannel ? 'Create Channel' : 'Edit Channel: #' + selectedChannel?.name }}
+          </h3>
+
+          <div class="editor-section">
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Channel Name</mat-label>
+              <input matInput formControlName="name" placeholder="general">
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Channel Type</mat-label>
+
+              <mat-select formControlName="type"
+                          (selectionChange)="onTypeChange($event.value)">
+
+                <mat-option value="text">
+                  <mat-icon>tag</mat-icon>
+                  Text Channel
+                </mat-option>
+
+                <mat-option value="call">
+                  <mat-icon>volume_up</mat-icon>
+                  Voice Channel
+                </mat-option>
+
+              </mat-select>
+
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
+
+              <mat-label>Channel Icon</mat-label>
+
+              <mat-select formControlName="icon">
+
+                <mat-select-trigger>
+                  <mat-icon style="margin-right:8px">
+                    {{ channelForm.get('icon')?.value }}
+                  </mat-icon>
+
+                  {{ channelForm.get('icon')?.value }}
+                </mat-select-trigger>
+
+                <mat-option value="tag">
+                  <mat-icon>tag</mat-icon> Text
+                </mat-option>
+
+                <mat-option value="volume_up">
+                  <mat-icon>volume_up</mat-icon> Voice
+                </mat-option>
+
+                <mat-option value="announcement">
+                  <mat-icon>announcement</mat-icon> Announcement
+                </mat-option>
+
+                <mat-option value="lock">
+                  <mat-icon>lock</mat-icon> Private
+                </mat-option>
+
+              </mat-select>
+
+            </mat-form-field>
+
+          </div>
+
+
+          <div class="editor-footer">
+
+            <button *ngIf="!isCreatingChannel"
+                    mat-button
+                    color="warn"
+                    type="button"
+                    (click)="onDeleteChannel()">
+              Delete Channel
+            </button>
+
+
+            <div class="save-bar" *ngIf="channelForm.dirty || isCreatingChannel">
+
+              <span>Unsaved changes</span>
+
+              <div class="save-actions">
+
+                <button mat-button
+                        type="button"
+                        (click)="isCreatingChannel=false; selectedChannel=null">
+                  Reset
+                </button>
+
+                <button mat-raised-button
+                        color="primary"
+                        [disabled]="channelForm.invalid">
+                  {{ isCreatingChannel ? 'Create Channel' : 'Save Changes' }}
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </form>
+
+      </div>
+
+
+      <ng-template #noChannelSelected>
+        <div class="empty-state">
+          <mat-icon>chat</mat-icon>
+          <p>Select a channel to edit or create a new one.</p>
+        </div>
+      </ng-template>
+
+    </section>
+
+  </main>
+
+
+  <!-- CLOSE BUTTON -->
+  <button mat-icon-button class="close-btn" mat-dialog-close>
+    <mat-icon>close</mat-icon>
+  </button>
+
+</div>

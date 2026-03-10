@@ -50,6 +50,7 @@ export class CreateCharacterComponent implements OnInit {
       race: ['', Validators.required],
       ac: [10, [Validators.required, Validators.min(0)]],
       ddbId: [null],
+      ddbUsername: [null],
       iconUrl: [''], // Holds the DDB icon URL if no file is uploaded
       // Stats
       strength: [10], dexterity: [10], constitution: [10],
@@ -95,6 +96,7 @@ export class CreateCharacterComponent implements OnInit {
             race: data.race,
             ac: data.ac,
             ddbId: data.id,
+            ddbUsername: data.username,
             iconUrl: data.icon,
             strength: data.baseStats.strength,
             dexterity: data.baseStats.dexterity,
@@ -133,6 +135,7 @@ export class CreateCharacterComponent implements OnInit {
         race: formVal.race,
         ac: formVal.ac,
         ddbId: formVal.ddbId,
+        ddbUsername: formVal.ddbUsername,
         icon: formVal.iconUrl,
         baseStats: {
           strength: formVal.strength,

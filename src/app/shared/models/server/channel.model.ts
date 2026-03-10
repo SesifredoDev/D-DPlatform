@@ -3,7 +3,8 @@ import {ICharacter} from '../user/character.model';
 export enum ChannelType {
   Text = 'text',
   Call = 'call',
-  Map = 'map'
+  Map = 'map',
+  Character = 'character',
 }
 
 export interface PermissionOverwrite {

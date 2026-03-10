@@ -19,6 +19,12 @@ import {ServerService} from '../../../shared/services/server/server';
 import {IServer} from '../../../shared/models/server/server.model';
 import {IChannel} from '../../../shared/models/server/channel.model';
 import {ChannelService} from '../../../shared/services/channel/channel';
+import {TabService} from '../../../shared/services/tab/tab-service';
+import {MatDialog} from '@angular/material/dialog';
+import {
+  ServerSettingsDialogComponent
+} from '../../../objects/server-settings-dialog-component/server-settings-dialog-component';
+import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-component/server-add-dialog-component';
 
 
 @Component({
@@ -49,8 +55,18 @@ export class SidePanel implements  AfterViewInit {
   selectedServer: IServer | null = null;
   channels: IChannel[] = [];
 
+  groupedMembers: any[] = [];
 
-  constructor(private cdr: ChangeDetectorRef,private zone: NgZone,private charService: CharacterService, private userService: UserService, private serverService: ServerService, private channelService: ChannelService, private router: Router) {}
+
+  constructor(
+    private cdr: ChangeDetectorRef,
+    private charService: CharacterService,
+    private tabService: TabService,
+    private userService: UserService,
+    private serverService: ServerService,
+    private channelService: ChannelService,
+    private router: Router,
+    private dialog: MatDialog,) {}
 
 
   ngAfterViewInit(): void {
@@ -75,14 +91,14 @@ export class SidePanel implements  AfterViewInit {
           ownerId: '',
           race: 'Human? Maybe...',
           servers: ['0'],
-          name:user.username, icon: user.profileIcon})
+          name:user.username, icon: user.profileIcon||null})
         console.log(user)
         this.characters = [
           userChar,
           ...this.characters
         ]
 
-        this.selectedCharacter = this.characters[0];
+        this.onCharacterChange(this.characters[0]);
         this.cdr.markForCheck();
       });
 
@@ -106,10 +122,15 @@ export class SidePanel implements  AfterViewInit {
     this.serverService.getServerDetailsObservable().subscribe((server) =>{
       if(server){
 
-        console.log('Switched to server:', server);
+        console.log('Switched to index:', server);
       this.channels = server.channels;
 
         if(this.channels[0])    this.selectChannel(this.channels[0]);
+
+        if (server) {
+          this.groupMembersByRole(server);
+        }
+
       }
 
 
@@ -143,14 +164,85 @@ export class SidePanel implements  AfterViewInit {
     console.log("Server",server);
     this.selectedServer = server;
     this.serverService.getServerDetails(server._id);
+
+    this.tabService.closeAllTabs()
     this.cdr.markForCheck();
 
   }
 
 
-  goToSettings() {
-    console.log('Opening Personal Settings');
 
+
+  openSettings() {
+    this.dialog.open(ServerSettingsDialogComponent, {
+      data: this.selectedServer,
+      width: '1800px',
+      maxWidth: '95vw',
+      height: '80vh',
+      panelClass: 'server-settings-dialog'
+    });
   }
+
+  openAddServerDialog() {
+    this.dialog.open(ServerAddDialogComponent, {
+      width: '50vw',
+      height: '70vh',
+      minWidth: '400px',
+      minHeight: '500px',
+      panelClass: 'custom-dialog-container'
+    });
+  }
+
+  groupMembersByRole(server: any) {
+
+    if (!server || !server.roles || !server.members) {
+      this.groupedMembers = [];
+      return;
+    }
+
+    const hoistedRoles = server.roles
+      .filter((r: any) => r?.hoist)
+      .sort((a: any, b: any) => (b.position || 0) - (a.position || 0));
+
+    const groups: any[] = [];
+
+    // Groups for hoisted roles
+    hoistedRoles.forEach((role: any) => {
+
+      const members = server.members.filter((member: any) =>
+        member?.roles?.some((r: any) => r._id === role._id)
+      );
+
+      if (members.length) {
+        groups.push({
+          role,
+          members
+        });
+      }
+    });
+
+    // Members without hoisted roles
+    const ungrouped = server.members.filter((member: any) =>
+      !member?.roles?.some((r: any) =>
+        hoistedRoles.some((hr: any) => hr._id === r._id)
+      )
+    );
+
+    if (ungrouped.length) {
+      groups.push({
+        role: { name: "Members" },
+        members: ungrouped
+      });
+    }
+
+    this.groupedMembers = groups;
+  }
+
+  openCharacter(character: ICharacter) {
+    if (character?._id) {
+      this.tabService.openTab(character._id, character.name, 'character', 'right', character);
+    }
+  }
+
 
 }

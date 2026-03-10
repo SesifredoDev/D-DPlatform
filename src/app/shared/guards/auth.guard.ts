@@ -16,7 +16,7 @@ export class AuthGuard implements CanActivate {
 
     if (!token) {
       console.warn('AUTH GUARD → NO TOKEN, REDIRECTING');
-      this.router.navigate(['']);
+      this.router.navigate(['auth']);
       return false;
     }
 

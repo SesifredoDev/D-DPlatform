@@ -1,6 +1,19 @@
 <div class="rpg-chat-container">
+  @if(showNewMessageIndicator){
+    <div
+      class="new-message-indicator"
+      (click)="scrollToBottom(true)"
+    >
+      <mat-icon>arrow_downward</mat-icon>
+      New messages
+    </div>
+  }
   <mat-card class="parchment-scroll">
-    <mat-card-content id="message-container" class="message-list">
+    <mat-card-content
+      #messageContainer
+      class="message-list"
+      (scroll)="onScroll()"
+    >
 
       @for (msg of messages; track msg._id) {
         <div class="message-entry">
@@ -24,6 +37,8 @@
 
             <markdown class="ink-text" [data]="msg.content"></markdown>
           </div>
+
+
         </div>
       } @empty {
         <div class="empty-quest-log">

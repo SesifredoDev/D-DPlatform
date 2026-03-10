@@ -1,14 +1,18 @@
 <div class="sidebar-container">
 
+  <!-- TOP SECTION -->
   <div class="top-section">
+
     <div class="selector-row">
-
+      <button
+        mat-icon-button
+        class="manage-chars-btn"
+        matTooltip="Manage Characters"
+        (click)="goToManageCharacters()">
+        <mat-icon>people</mat-icon>
+      </button>
       @if (selectedServer) {
-        <mat-form-field
-          appearance="fill"
-          class="character-select"
-          subscriptSizing="dynamic">
-
+        <mat-form-field appearance="fill" class="character-select">
           <mat-select
             [value]="selectedCharacter"
             (selectionChange)="onCharacterChange($event.value)">
@@ -25,101 +29,179 @@
         </mat-form-field>
       }
 
-      <button
-        mat-icon-button
-        class="manage-chars-btn"
-        matTooltip="Manage Characters"
-        (click)="goToManageCharacters()">
-        <mat-icon>people</mat-icon>
-      </button>
     </div>
 
     @if (selectedCharacter) {
       <div class="profile-card">
-        <div class="avatar-container">
-          <img
-            [src]="selectedCharacter.icon ||  'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
-            class="avatar-img"
-            alt="Character Icon">
+
+        <img
+          class="avatar-img"
+          [src]="selectedCharacter.icon || 'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
+          alt="Character Icon">
+
+        <div class="profile-text">
+          <div class="character-name">{{ selectedCharacter.name }}</div>
+          <div class="character-sub">{{ selectedCharacter.race }}</div>
         </div>
-        <h2 class="character-name">{{ selectedCharacter.name }}</h2>
-        <p class="character-sub">{{ selectedCharacter.race }}</p>
+
       </div>
     }
+
   </div>
 
+
+  <!-- CHANNEL SECTION -->
   <div class="middle-section">
+
     <div class="category-header">
-      <mat-icon class="category-chevron">expand_more</mat-icon>
+      <mat-icon>expand_more</mat-icon>
       <span>Channels</span>
     </div>
 
     <mat-nav-list class="channel-list">
+
       @for (channel of channels; track channel) {
         <a
           mat-list-item
           class="channel-item"
           routerLinkActive="active-channel"
           (click)="selectChannel(channel)">
+
           <mat-icon matListItemIcon class="channel-icon">
             {{ channel.icon }}
           </mat-icon>
+
           <span matListItemTitle class="channel-label">
             {{ channel.name }}
           </span>
+
         </a>
       }
+
     </mat-nav-list>
+
   </div>
 
+
+  <!-- MEMBER LIST -->
+  <div class="member-sidebar">
+
+    @for (group of groupedMembers; track group) {
+
+      <div class="role-group">
+
+        <div class="role-header">
+          {{ group.role.name.toUpperCase() }}
+          <span class="count">{{ group.members.length }}</span>
+        </div>
+
+        @for (member of group.members; track member) {
+
+          <div class="member-row">
+
+            <img
+              class="member-avatar"
+              [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'"
+            >
+
+            <div class="member-info">
+
+              <div class="member-name">
+                {{ member.user.username }}
+              </div>
+
+              @if (member.characters.length) {
+
+                <div class="character-row">
+
+                  @for (char of member.characters; track char) {
+
+                    <div class="character-chip" (click)="openCharacter(char)">
+
+                      <img
+                        class="char-icon"
+                        [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
+                      >
+
+                      <span>{{ char.name }}</span>
+
+                    </div>
+
+                  }
+
+                </div>
+
+              }
+
+            </div>
+
+          </div>
+
+        }
+
+      </div>
+
+    }
+
+  </div>
+
+
+  <!-- SERVER SWITCHER -->
   @if (selectedServer && servers) {
 
     <div class="bottom-section">
+
       <button
         mat-button
         class="server-btn"
         [matMenuTriggerFor]="serverMenu">
+
         <mat-icon>dns</mat-icon>
         <span class="btn-text">{{ selectedServer.name }}</span>
         <mat-icon class="chevron">expand_less</mat-icon>
+
       </button>
 
       <mat-menu
         #serverMenu="matMenu"
         xPosition="after"
-        yPosition="above"
-        class="discord-menu">
+        yPosition="above">
 
         <div class="menu-title">SELECT SERVER</div>
 
-        @for (server of servers; track server) {
+        @for (index of servers; track index) {
           <button
             mat-menu-item
-            (click)="selectServer(server)">
-            <span>{{ server.name }}</span>
+            (click)="selectServer(index)">
+            {{ index.name }}
           </button>
         }
+
       </mat-menu>
 
-
-      </div>
-    <div class="user-controls">
-      <button
-        matIconButton
-        color="secondary"
-        (click)="goToSettings()"
-        matTooltip="User Settings">
-        <mat-icon>menu</mat-icon>
-      </button>
-
-      <button
-        matIconButton
-        color="secondary"
-        (click)="goToSettings()"
-        matTooltip="User Settings">
-        <mat-icon>add</mat-icon>
-      </button>
     </div>
+
   }
+
+
+  <!-- USER CONTROLS -->
+  <div class="user-controls">
+
+    <button
+      mat-icon-button
+      *ngIf="selectedServer"
+      (click)="openSettings()"
+      matTooltip="User Settings">
+      <mat-icon>menu</mat-icon>
+    </button>
+
+    <button
+      mat-icon-button
+      (click)="openAddServerDialog()"
+      matTooltip="Add Server">
+      <mat-icon>add</mat-icon>
+    </button>
+
+  </div>
 
 </div>

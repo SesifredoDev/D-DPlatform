@@ -27,7 +27,7 @@ export class AuthService {
       )
       .pipe(
         tap(res => {this.tokenService.setAccessToken(res.accessToken)
-          this.router.navigate(['dashboard']);
+          this.router.navigate(['']);
         })
       );
   }
@@ -56,6 +56,6 @@ export class AuthService {
       { withCredentials: true }
     );
 
-    this.router.navigate(['']);
+    this.router.navigate(['auth']);
   }
 }

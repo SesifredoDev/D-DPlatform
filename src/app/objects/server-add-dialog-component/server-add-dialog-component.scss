@@ -1,0 +1,67 @@
+::ng-deep .mat-mdc-dialog-container {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.dialog-content {
+  padding: 24px;
+  min-width: 420px;
+}
+
+.tab-content {
+  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.subtitle {
+  color: #72767d;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.server-form {
+  width: 100%;
+  max-width: 320px;
+}
+
+.full {
+  width: 100%;
+}
+
+.icon-upload {
+  margin-bottom: 20px;
+}
+
+.icon-preview {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  border: 2px dashed #4f545c;
+  margin: auto;
+  position: relative;
+  transition: border 0.2s;
+
+  &:hover {
+    border-color: #7289da;
+  }
+
+  button {
+    position: absolute;
+    bottom: -6px;
+    right: -6px;
+  }
+}
+
+mat-dialog-actions {
+  padding: 16px 24px;
+  background: #2f3136;
+}
+
+mat-progress-bar {
+  height: 3px;
+}

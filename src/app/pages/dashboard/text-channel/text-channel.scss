@@ -1,7 +1,7 @@
 .rpg-chat-container {
   display: flex;
   flex-direction: column;
-  height: 98vh;
+  height: 100%;
   padding: 10px;
   //background: var(--mat-sys-surface-container-low);
 }
@@ -113,4 +113,26 @@
 .message-list::-webkit-scrollbar-thumb {
   background: var(--mat-sys-secondary-fixed-dim);
   border-radius: 10px;
+}
+
+
+.new-message-indicator {
+  position: absolute;
+  bottom: 90px;
+  right: 24px;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  background: #2b1e14;
+  color: #f5e6c8;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+
+  mat-icon {
+    font-size: 18px;
+  }
 }

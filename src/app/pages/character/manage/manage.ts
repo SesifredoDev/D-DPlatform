@@ -127,6 +127,7 @@ export class Manage implements OnInit {
           race: data.race,
           ac: data.ac,
           ddbId: data.id,
+          ddbUsername:data.username,
           icon: data.icon,
           baseStats: data.baseStats,
           classes: data.classes.map((c: any) => ({

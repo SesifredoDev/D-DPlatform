@@ -1,0 +1,75 @@
+import { Injectable } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
+import {ICharacter} from '../../models/user/character.model';
+import {Video} from '../video/video';
+
+export interface Tab {
+  id: string;
+  title: string;
+  type: 'text' | 'call' | 'character';
+  pane: 'left' | 'right';
+  active: boolean; // Added to track selection
+  character?: ICharacter;
+}
+
+@Injectable({ providedIn: 'root' })
+export class TabService {
+
+  private tabs = new BehaviorSubject<Tab[]>([]);
+  tabs$ = this.tabs.asObservable();
+
+  constructor(private videoService: Video) {}
+
+  openTab(id: string, title: string, type: string, pane: "left" | "right" = 'left', character?: ICharacter) {
+    const current = this.tabs.value;
+    // If tab exists, just select it; otherwise add it
+    if (current.find(t => t.id === id)) {
+      this.selectTab(id);
+    } else {
+      // @ts-ignore
+      const newTab: Tab = { id, title, type, pane, active: true };
+      if(character){
+        newTab.character = character;
+      }
+      // Deactivate others in the same pane
+      const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
+      console.log(updated)
+      this.tabs.next([...updated, newTab]);
+    }
+  }
+
+  selectTab(id: string) {
+    const tabs = this.tabs.value;
+    const target = tabs.find(t => t.id === id);
+    if (!target) return;
+
+    this.tabs.next(tabs.map(t => ({
+      ...t,
+      active: t.pane === target.pane ? t.id === id : t.active
+    })));
+  }
+
+  moveTab(tabId: string, targetPane: 'left' | 'right') {
+    this.tabs.next(this.tabs.value.map(t =>
+      t.id === tabId ? { ...t, pane: targetPane, active: true } :
+        (t.pane === targetPane ? { ...t, active: false } : t)
+    ));
+  }
+
+  closeTab(id: string) {
+    const tabToRemove = this.tabs.value.find(t => t.id === id);
+
+    // If the tab being closed is a call, trigger the leave logic
+    if (tabToRemove && tabToRemove.type === 'call') {
+      this.videoService.leaveCall(id);
+    }
+
+    this.tabs.next(this.tabs.value.filter(t => t.id !== id));
+  }
+
+  closeAllTabs() {
+    this.tabs.next([]);
+
+
+  }
+}

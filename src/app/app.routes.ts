@@ -5,10 +5,10 @@ import {AuthGuard} from './shared/guards/auth.guard';
 import {Manage} from './pages/character/manage/manage';
 export const routes: Routes = [
   {
-    path: '', component: Auth
+    path: 'auth', component: Auth
   },
   {
-    path:'dashboard', component:Dashboard, canActivate:[AuthGuard]
+    path:'', component:Dashboard, canActivate:[AuthGuard]
   },
   {
     path: 'characters', component:Manage, canActivate:[AuthGuard]

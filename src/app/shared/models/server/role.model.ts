@@ -1,5 +1,5 @@
 export interface IRole {
-  _id?: string;
+  _id: string;
   server: string;
   name: string;
   color: string;

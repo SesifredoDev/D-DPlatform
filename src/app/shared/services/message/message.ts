@@ -2,40 +2,61 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject, Observable } from 'rxjs';
-import {environment} from '../../../../environments/environment';
+
+import { environment } from '../../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class Message {
   private socket: Socket;
-  private messageSource = new BehaviorSubject<any[]>([]);
-  public messages$ = this.messageSource.asObservable();
+  private channelMessages = new Map<string, BehaviorSubject<any[]>>();
 
   constructor(private http: HttpClient) {
-    // Initialize socket connection
-    this.socket = io(environment.apiURL, { withCredentials: true });
-
-    // Listen for the 'new_message' event defined in message.controller.js
+    this.socket = io('http://localhost', {
+      path: '/socket.io/',
+      withCredentials: true,
+      transports: ['websocket'] // Force websocket to see clear errors if it fails
+    });
     this.socket.on('new_message', (message: any) => {
-      const currentMessages = this.messageSource.value;
-      this.messageSource.next([...currentMessages, message]);
-      console.log(message);
+      const channelId = message.channelId ?? message.channel;
+      const subject = this.channelMessages.get(channelId);
+
+      if (subject) {
+        subject.next([...subject.value, message]);
+      }
     });
   }
 
-  // Join a specific channel room
-  joinChannel(channelId: string) {
-    this.socket.emit('join_channel', channelId);
-    this.getHistory(channelId).subscribe(msgs => this.messageSource.next(msgs.reverse()));
+  joinChannel(channelId: string): Observable<any[]> {
+
+    if (!this.channelMessages.has(channelId)) {
+      this.channelMessages.set(channelId, new BehaviorSubject<any[]>([]));
+    }
+
+    if (this.socket.connected) {
+      this.socket.emit('join_channel', channelId);
+    } else {
+      this.socket.once('connect', () => {
+        this.socket.emit('join_channel', channelId);
+      });
+    }
+
+    this.getHistory(channelId).subscribe(history => {
+      this.channelMessages.get(channelId)!.next(history.reverse());
+    });
+
+    return this.channelMessages.get(channelId)!.asObservable();
   }
 
-  // Fetch history via HTTP GET
-  getHistory(channelId: string): Observable<any[]> {
+  leaveChannel(channelId: string) {
+    this.socket.emit('leave_channel', channelId);
+    this.channelMessages.delete(channelId);
+  }
+
+  getHistory(channelId: string) {
     return this.http.get<any[]>(`${environment.apiURL}message/${channelId}`);
   }
 
-  // Send message via HTTP POST
   sendMessage(channelId: string, content: string, characterId?: string) {
-    console.log(characterId);
     return this.http.post(`${environment.apiURL}message/${channelId}`, {
       content,
       characterId

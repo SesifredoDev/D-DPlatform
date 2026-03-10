@@ -1,8 +1,136 @@
-:host{
+:host {
   display: flex;
-  overflow: hidden;
-}
-.content-area{
-  width: 100%;
   height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  background-color: #1e1e1e;
+}
+
+.editor-area {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  background: #1e1e1e;
+  position: relative;
+
+  &.resizing-active {
+    cursor: col-resize;
+    pointer-events: none;
+    * { pointer-events: none !important; }
+  }
+
+  .pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex-grow: 0;
+    flex-shrink: 0;
+    background: #1e1e1e;
+
+    .pane-content {
+      flex: 1;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+
+      // NEW: Ensure the wrapper div for [hidden] fills the pane
+      .full-height {
+        height: 100%;
+        width: 100%;
+        display: flex; // Allows children to fill space efficiently
+        flex-direction: column;
+
+        &[hidden] {
+          display: none !important; // Ensure hidden attribute works with flex
+        }
+      }
+
+      // Target the actual component tags inside the wrapper
+      app-video-call,
+      app-text-channel,
+      app-character-viewer {
+        display: block;
+        height: 100%;
+        width: 100%;
+        flex: 1; // Ensure they expand to fill the .full-height container
+      }
+    }
+
+    &#left-pane {
+      &:only-child, &:has(+ .right-pane.hidden) {
+        flex: 1 1 auto !important;
+      }
+    }
+
+    &.right-pane {
+      flex: 1 1 0;
+      border-left: 1px solid #333;
+
+      &.hidden {
+        flex: 0 0 40px !important;
+        background: transparent;
+        .tab-bar, .pane-content { display: none; }
+      }
+    }
+
+    .tab-bar {
+      display: flex;
+      height: 55px;
+      background: #252526;
+      align-items: center;
+
+      .tab {
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        height: 100%;
+        min-width: 120px;
+        background: #2d2d2d;
+        color: #969696;
+        cursor: pointer;
+        border-right: 1px solid #1e1e1e;
+        font-size: 13px;
+
+        &.active {
+          background: #1e1e1e;
+          color: white;
+          border-top: 1px solid #007acc;
+        }
+
+        .close-btn {
+          font-size: 16px;
+          width: 16px;
+          height: 16px;
+          margin-left: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 4px;
+
+          &:hover {
+            background: rgba(255, 255, 255, 0.1);
+          }
+        }
+      }
+    }
+  }
+
+  .resizer-handle {
+    width: 4px;
+    background: #252526;
+    cursor: col-resize;
+    z-index: 10;
+    transition: background 0.2s;
+    &:hover, &:active {
+      background: #007acc;
+    }
+  }
+}
+
+.cdk-drag-preview {
+  background: #3c3c3c;
+  padding: 10px 20px;
+  border-radius: 4px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+  color: white;
 }
