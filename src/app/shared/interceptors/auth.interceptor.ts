@@ -18,6 +18,12 @@ export class AuthInterceptor implements HttpInterceptor {
   ) {}
 
   intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
+    // 1. Skip if it's an external API (like Spotify)
+    if (req.url.includes('api.spotify.com')) {
+      return next.handle(req);
+    }
+
+    // 2. Skip if it's the auth endpoint itself
     if (req.url.includes('/auth')){
       return next.handle(req);
     }

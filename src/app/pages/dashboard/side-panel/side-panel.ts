@@ -5,7 +5,7 @@ import {MatCardModule} from '@angular/material/card';
 import {ICharacter} from '../../../shared/models/user/character.model';
 
 import {CharacterService} from '../../../shared/services/character/character';
-import {CommonModule,  NgForOf, NgIf} from '@angular/common';
+import {CommonModule, NgForOf, NgIf} from '@angular/common';
 import {MatSelectModule} from '@angular/material/select';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatListModule} from '@angular/material/list';
@@ -25,6 +25,7 @@ import {
   ServerSettingsDialogComponent
 } from '../../../objects/server-settings-dialog-component/server-settings-dialog-component';
 import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-component/server-add-dialog-component';
+import {VttSync} from '../../../shared/services/vttsync/vttsync';
 
 
 @Component({
@@ -46,7 +47,7 @@ import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-compo
 
 })
 
-export class SidePanel implements  AfterViewInit {
+export class SidePanel implements AfterViewInit {
 
   characters: ICharacter[] = [];
   selectedCharacter: ICharacter | null = null;
@@ -66,16 +67,17 @@ export class SidePanel implements  AfterViewInit {
     private serverService: ServerService,
     private channelService: ChannelService,
     private router: Router,
-    private dialog: MatDialog,) {}
+    private dialog: MatDialog,
+    private vttSync: VttSync) {
+  }
 
 
   ngAfterViewInit(): void {
 
 
-
-    this.userService.getMe().subscribe((user) =>{
+    this.userService.getMe().subscribe((user) => {
       console.log(user);
-      this.charService.getMyCharacters().subscribe((chars) =>{
+      this.charService.getMyCharacters().subscribe((chars) => {
         this.characters = chars;
         let userChar = ({
           ac: 0,
@@ -91,7 +93,8 @@ export class SidePanel implements  AfterViewInit {
           ownerId: '',
           race: 'Human? Maybe...',
           servers: ['0'],
-          name:user.username, icon: user.profileIcon||null})
+          name: user.username, icon: user.profileIcon || null
+        })
         console.log(user)
         this.characters = [
           userChar,
@@ -103,14 +106,13 @@ export class SidePanel implements  AfterViewInit {
       });
 
 
-
     });
 
 
-    this.serverService.getMyServersObservable().subscribe((servers) =>{
+    this.serverService.getMyServersObservable().subscribe((servers) => {
 
       console.log(servers);
-      if(servers.length > 0){
+      if (servers.length > 0) {
         this.servers = servers;
         this.selectServer(servers[0]);
 
@@ -119,13 +121,13 @@ export class SidePanel implements  AfterViewInit {
     })
 
 
-    this.serverService.getServerDetailsObservable().subscribe((server) =>{
-      if(server){
+    this.serverService.getServerDetailsObservable().subscribe((server) => {
+      if (server) {
 
         console.log('Switched to index:', server);
-      this.channels = server.channels;
+        this.channels = server.channels;
 
-        if(this.channels[0])    this.selectChannel(this.channels[0]);
+        if (this.channels[0]) this.selectChannel(this.channels[0]);
 
         if (server) {
           this.groupMembersByRole(server);
@@ -134,12 +136,10 @@ export class SidePanel implements  AfterViewInit {
       }
 
 
-
     })
     this.serverService.getMyServers();
 
   }
-
 
 
   onCharacterChange(char: ICharacter) {
@@ -147,7 +147,6 @@ export class SidePanel implements  AfterViewInit {
     this.charService.setActiveCharacter(this.selectedCharacter);
 
   }
-
 
 
   goToManageCharacters() {
@@ -161,7 +160,7 @@ export class SidePanel implements  AfterViewInit {
 
 
   selectServer(server: any) {
-    console.log("Server",server);
+    console.log("Server", server);
     this.selectedServer = server;
     this.serverService.getServerDetails(server._id);
 
@@ -169,8 +168,6 @@ export class SidePanel implements  AfterViewInit {
     this.cdr.markForCheck();
 
   }
-
-
 
 
   openSettings() {
@@ -230,7 +227,7 @@ export class SidePanel implements  AfterViewInit {
 
     if (ungrouped.length) {
       groups.push({
-        role: { name: "Members" },
+        role: {name: "Members"},
         members: ungrouped
       });
     }
@@ -241,6 +238,33 @@ export class SidePanel implements  AfterViewInit {
   openCharacter(character: ICharacter) {
     if (character?._id) {
       this.tabService.openTab(character._id, character.name, 'character', 'right', character);
+    }
+  }
+
+  openVTT() {
+    if (!this.selectedServer?._id) return;
+    this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
+  }
+
+  onRightClickCharacter(event: MouseEvent, character: ICharacter) {
+    event.preventDefault(); // Prevent browser context menu
+
+    // 1. Check if we are actually in a VTT session
+    if (!this.vttSync.isConnected) {
+      console.warn('Cannot add token: No active VTT session.');
+      return;
+    }
+
+    // 2. Obtain the engine instance.
+    // If your engine is stored in a shared service or accessible via a getter:
+    const engine = this.vttSync.getEngine();
+
+    if (engine) {
+      // 3. Call the service method we built earlier
+      this.vttSync.addCharacterToken(engine, character);
+      console.log(`Added ${character.name} to the map via right-click.`);
+    } else {
+      console.error('VTT Engine not found. Is the map tab open?');
     }
   }
 

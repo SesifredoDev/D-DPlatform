@@ -1,0 +1,185 @@
+
+import Konva from 'konva';
+
+export class MeasurementManager {
+  constructor(engine) {
+    this.engine = engine;
+    this.layer = new Konva.Layer();
+    this.engine.stage.add(this.layer);
+    this.layer.setZIndex(10); // Ensure measurements are always on top
+
+    this.mode = 'none'; // 'none', 'line', 'radius'
+    this.isDrawing = false;
+    this.startPos = null;
+
+    this.localGroup = null;
+    this.remoteMeasures = {}; // userId -> Konva.Group
+
+    // Generate a consistent color from the user's ID
+    this.userColor = this.generateUserColor(this.engine.currentUserId || 'default');
+
+    this.initEvents();
+  }
+
+  generateUserColor(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    // Convert to a hue, keep saturation high and lightness balanced
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 80%, 50%)`;
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    const container = this.engine.stage.container();
+
+    if (mode !== 'none') {
+      container.style.cursor = 'crosshair';
+      this.engine.stage.draggable(false);
+    } else {
+      container.style.cursor = 'default';
+      // Restore dragging if wall mode isn't active
+      this.engine.stage.draggable(!this.engine.wallManager?.isWallMode);
+    }
+  }
+
+  getRelativePointerPosition() {
+    const transform = this.engine.stage.getAbsoluteTransform().copy().invert();
+    return transform.point(this.engine.stage.getPointerPosition());
+  }
+
+  initEvents() {
+    const stage = this.engine.stage;
+
+    stage.on('mousedown', (e) => {
+      if (this.mode === 'none' || e.evt.button !== 0) return;
+      this.isDrawing = true;
+      this.startPos = this.getRelativePointerPosition();
+
+      this.localGroup = this.createMeasureGroup(this.startPos, this.startPos, this.mode, this.userColor);
+      this.layer.add(this.localGroup);
+      this.layer.batchDraw();
+
+      this.broadcast('start', this.startPos, this.startPos, this.mode);
+    });
+
+    stage.on('mousemove', () => {
+      if (!this.isDrawing) return;
+      const currentPos = this.getRelativePointerPosition();
+
+      this.updateMeasureGroup(this.localGroup, this.startPos, currentPos, this.mode);
+      this.layer.batchDraw();
+
+      this.broadcast('update', this.startPos, currentPos, this.mode);
+    });
+
+    stage.on('mouseup mouseleave', () => {
+      if (!this.isDrawing) return;
+      this.isDrawing = false;
+
+      if (this.localGroup) {
+        this.localGroup.destroy();
+        this.localGroup = null;
+      }
+      this.layer.batchDraw();
+
+      this.broadcast('end', null, null, this.mode);
+    });
+  }
+
+  broadcast(action, start, current, mode) {
+    this.engine.stage.fire('measureAction', {
+      userId: this.engine.currentUserId,
+      action: action,     // 'start', 'update', or 'end'
+      measureType: mode,    // CRITICAL: Ensure this is sending 'line' or 'radius'
+      color: this.userColor,
+      start: start,
+      current: current
+    });
+  }
+
+  createMeasureGroup(start, current, type, color) {
+    const group = new Konva.Group();
+    let shape;
+
+    if (type === 'line') {
+      shape = new Konva.Line({
+        points: [start.x, start.y, current.x, current.y],
+        stroke: color,
+        strokeWidth: 3,
+        dash: [10, 5],
+        lineCap: 'round'
+      });
+    } else {
+      shape = new Konva.Circle({
+        x: start.x, y: start.y,
+        radius: 0,
+        stroke: color,
+        strokeWidth: 2,
+        fill: color,
+        opacity: 0.2
+      });
+    }
+
+    const label = new Konva.Label({ x: current.x, y: current.y });
+    label.add(new Konva.Tag({ fill: 'black', cornerRadius: 4 }));
+    label.add(new Konva.Text({ text: '0 ft', fill: 'white', padding: 5, fontSize: 14 }));
+
+    group.add(shape);
+    group.add(label);
+
+    // Save references directly on the group so the update function can find them
+    group.measureShape = shape;
+    group.measureLabel = label;
+
+    return group;
+  }
+
+  updateMeasureGroup(group, start, current, type) {
+    if (!group || !group.measureShape || !group.measureLabel) return;
+
+    const dx = current.x - start.x;
+    const dy = current.y - start.y;
+    const distancePx = Math.sqrt(dx * dx + dy * dy);
+    const ft = Math.round((distancePx / this.engine.gridSize) * 5);
+
+    // Update text
+    group.measureLabel.getText().text(`${ft} ft`);
+
+    if (type === 'line') {
+      group.measureShape.points([start.x, start.y, current.x, current.y]);
+      group.measureLabel.position({ x: current.x, y: current.y - 20 });
+    } else {
+      group.measureShape.radius(distancePx);
+      group.measureLabel.position({ x: start.x, y: start.y - distancePx - 20 });
+    }
+  }
+
+  handleRemoteAction(data) {
+    const userId = data.userId;
+    console.log(!!userId);
+    if (!userId) return;
+
+    if (data.action === 'start') {
+      if (this.remoteMeasures[userId]) this.remoteMeasures[userId].destroy();
+
+      // Use data.measureType here
+      const group = this.createMeasureGroup(data.start, data.current, data.measureType, data.color);
+      this.remoteMeasures[userId] = group;
+      this.layer.add(group);
+      this.layer.batchDraw();
+    }
+    else if (data.action === 'update' && this.remoteMeasures[userId]) {
+      // Use data.measureType here
+      this.updateMeasureGroup(this.remoteMeasures[userId], data.start, data.current, data.measureType);
+      this.layer.batchDraw();
+    }
+    else if (data.action === 'end' && this.remoteMeasures[userId]) {
+      this.remoteMeasures[userId].destroy();
+      delete this.remoteMeasures[userId];
+      this.layer.batchDraw();
+    }
+  }
+}

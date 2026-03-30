@@ -116,7 +116,8 @@
 
                   @for (char of member.characters; track char) {
 
-                    <div class="character-chip" (click)="openCharacter(char)">
+                    <div class="character-chip" (click)="openCharacter(char)"
+                         (contextmenu)="onRightClickCharacter($event, char)">>
 
                       <img
                         class="char-icon"
@@ -201,6 +202,13 @@
       matTooltip="Add Server">
       <mat-icon>add</mat-icon>
     </button>
+    <button
+      mat-icon-button
+      (click)="openVTT()"
+      matTooltip="Open Map">
+      <mat-icon>map</mat-icon>
+    </button>
+
 
   </div>
 

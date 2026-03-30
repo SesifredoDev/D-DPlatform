@@ -15,10 +15,12 @@ import {MatIcon, MatIconModule} from '@angular/material/icon';
 import {Tab, TabService} from '../../shared/services/tab/tab-service';
 import {CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup} from '@angular/cdk/drag-drop';
 import {CharacterViewer} from './character-viewer/character-viewer';
+import {VttCanvas} from './vtt-canvas/vtt-canvas';
+import {ICharacter} from '../../shared/models/user/character.model';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [MatButtonModule, SidePanel, Call, TextChannel, MatIconModule, CdkDropList, CdkDrag, CdkDropListGroup, CharacterViewer],
+  imports: [MatButtonModule, SidePanel, Call, TextChannel, MatIconModule, CdkDropList, CdkDrag, CdkDropListGroup, CharacterViewer, VttCanvas],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -39,7 +41,6 @@ export class Dashboard implements OnInit {
   leftWidth: number = window.innerWidth / 2;
   isResizing = false;
 
-  // Helper getters to find what to render in the content area
   get activeLeftTab() { return this.leftTabs.find(t => t.active); }
   get activeRightTab() { return this.rightTabs.find(t => t.active); }
 
@@ -48,34 +49,46 @@ export class Dashboard implements OnInit {
   }
 
   ngOnInit() {
-
     this.tabService.tabs$.subscribe(tabs => {
       this.leftTabs = tabs.filter(t => t.pane === 'left');
       this.rightTabs = tabs.filter(t => t.pane === 'right');
     });
 
-
-
     this.userService.getMe().subscribe(user =>{
         this.userInfo = user;
-    })
+        this.setupActiveCharacterListener();
+    });
 
     this.channelService.getChannelObservable().subscribe(channel => {
-      if (channel&& channel._id) {
+      if (channel && channel._id) {
         this.tabService.openTab(channel._id, channel.name, channel.type);
       }
     });
+  }
 
+  private setupActiveCharacterListener() {
     this.characterService.getActiveCharacterObservable().subscribe(character => {
-      if(!character)return;
-      else{
-        console.log("Setup Character", character);
+      if (!character && this.userInfo) {
+        this.activeCharacter = {
+          _id: this.userInfo._id || '0',
+          ownerId: this.userInfo._id,
+          servers: [],
+          name: this.userInfo.username || 'User',
+          baseStats: {
+            strength: 0,
+            dexterity: 0,
+            constitution: 0,
+            intelligence: 0,
+            wisdom: 0,
+            charisma: 0
+          },
+          classes: []
+        };
+      } else if (character) {
         this.activeCharacter = character;
-        this.activeCharacterID = character._id;
-        if(this.activeCharacterID =="0") this.activeCharacterID  = undefined;
-        console.log("Active Character",this.activeCharacterID);
+        this.activeCharacterID = character._id === '0' ? undefined : character._id;
       }
-    })
+    });
   }
 
   startResizing(event: MouseEvent) {
@@ -86,12 +99,8 @@ export class Dashboard implements OnInit {
   @HostListener('window:mousemove', ['$event'])
   onMouseMove(event: MouseEvent) {
     if (!this.isResizing) return;
-
-    // Adjust based on your actual sidebar width (e.g., 260px)
     const sidebarWidth = 260;
     const newWidth = event.clientX - sidebarWidth;
-
-    // Minimum width constraints (200px per pane)
     if (newWidth > 200 && (window.innerWidth - event.clientX) > 200) {
       this.leftWidth = newWidth;
     }
@@ -103,32 +112,28 @@ export class Dashboard implements OnInit {
   }
 
   closeTab(event: Event, id: string) {
-    event.stopPropagation(); // Prevent selection when clicking X
+    event.stopPropagation();
     this.tabService.closeTab(id);
   }
+
   selectTab(tab: Tab) {
     this.tabService.selectTab(tab.id);
   }
 
   onDrop(event: CdkDragDrop<any>) {
     const tab = event.item.data as Tab;
-    // Cast the data to our specific type
     const targetPane = event.container.data as 'left' | 'right';
-
     if (tab.pane !== targetPane) {
       this.tabService.moveTab(tab.id, targetPane);
     }
   }
+
   toggleMessages() {
     this.showMessages = !this.showMessages;
-
   }
 
   popOutComponent(type: 'video' | 'chat') {
     const url = `/${type}-standalone?id=${this.activeChannel?._id}`;
     window.open(url, '_blank', 'nodeIntegration=no,contextIsolation=yes,width=800,height=600');
-
   }
-
-
 }

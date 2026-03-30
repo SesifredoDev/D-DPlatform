@@ -1,0 +1,143 @@
+<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!isSyncing || isHosting">
+  <div class="drawer-toggle" (click)="showLibraryOverlay = !showLibraryOverlay">
+    <span class="material-icons">{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</span>
+    <span class="toggle-text">{{ showLibraryOverlay ? 'CLOSE LIBRARY' : 'OPEN MAP LIBRARY' }}</span>
+  </div>
+
+  <div class="drawer-content">
+    <div class="library-grid">
+      <div class="library-card new-map-card" (click)="createNewMap()">
+        <div class="thumbnail-placeholder">
+          <span class="material-icons">add_location_alt</span>
+        </div>
+        <span class="map-label">Create New</span>
+      </div>
+
+      <ng-container *ngFor="let map of mapLibrary">
+        <div class="library-card" *ngIf="!map.isArchived" (click)="loadFromLibrary(map)">
+          <div class="thumbnail" [style.backgroundImage]="'url(' + map.data.mapUrl + ')'">
+            <div class="card-actions">
+              <button (click)="toggleArchive(map, $event)" title="Archive" [disabled]="map.id == currentMapId" *ngIf="map.id !== currentMapId">
+                <span class="material-icons">inventory_2</span>
+              </button>
+            </div>
+            <div class="overlay-stats">
+              <span class="material-icons">history</span>
+              {{ map.lastSaved | date:'shortDate' }}
+            </div>
+          </div>
+          <span class="map-label">{{ map.name }}</span>
+        </div>
+      </ng-container>
+    </div>
+
+    <hr class="divider" *ngIf="mapLibrary.length > 0">
+
+    <div class="archive-section" *ngIf="mapLibrary.length > 0">
+      <h4><span class="material-icons">archive</span> Archived Maps</h4>
+      <div class="library-grid">
+        <ng-container *ngFor="let map of mapLibrary">
+          <div class="library-card archived" *ngIf="map.isArchived">
+            <div class="thumbnail" [style.backgroundImage]="'url(' + map.data.mapUrl + ')'">
+              <div class="card-actions">
+                <button (click)="toggleArchive(map, $event)" title="Restore">
+                  <span class="material-icons">unarchive</span>
+                </button>
+                <button (click)="deleteMap(map, $event)" class="btn-danger" title="Delete" >
+                  <span class="material-icons">delete_forever</span>
+                </button>
+              </div>
+            </div>
+            <span class="map-label">{{ map.name }}</span>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="current-map-indicator" *ngIf="currentMapName">
+  <span class="material-icons">auto_stories</span> {{ currentMapName }}
+</div>
+
+<div id="toolbar-wrapper">
+
+
+  <div id="toolbar">
+    <!-- Map Management Tools -->
+    <div class="tool-group" *ngIf="!isSyncing || isHosting">
+      <button mat-icon-button (click)="saveCurrentMap(false)" title="Save Changes">
+        <mat-icon>save</mat-icon>
+      </button>
+      <button mat-icon-button (click)="saveCurrentMap(true)" title="Save As New">
+        <mat-icon>library_add</mat-icon>
+      </button>
+      <label class="custom-file-upload icon-btn" title="Upload Background Map">
+        <mat-icon>image</mat-icon>
+        <input type="file" (change)="onMapUpload($event)" accept="image/*" />
+      </label>
+    </div>
+
+    <!-- Core Interaction Tools -->
+    <div class="tool-group">
+      <button mat-icon-button [class.active]="activeTool === 'select'" (click)="setTool('select')" title="Select/Move">
+        <mat-icon>near_me</mat-icon>
+      </button>
+      <button mat-icon-button [class.active]="activeTool === 'line'" (click)="setMeasureTool('line')" title="Measure Line">
+        <mat-icon>straighten</mat-icon>
+      </button>
+      <button mat-icon-button [class.active]="activeTool === 'radius'" (click)="setMeasureTool('radius')" title="Measure Radius">
+        <mat-icon>blur_circular</mat-icon>
+      </button>
+    </div>
+
+    <!-- Wall/Drawing Tools (DM Only) -->
+    <div class="tool-group" *ngIf="!isSyncing || isHosting" >
+      <button mat-icon-button [class.active]="activeTool === 'draw'" (click)="setTool('draw')" title="Draw Walls">
+        <mat-icon>edit_road</mat-icon>
+      </button>
+      <button mat-icon-button [class.active]="activeTool === 'delete'" (click)="setTool('delete')" title="Erase Walls">
+        <mat-icon>auto_fix_off</mat-icon>
+      </button>
+    </div>
+
+    <!-- Token Management & Lighting (DM Only) -->
+    <div class="tool-group" *ngIf="isHosting">
+      <button mat-icon-button (click)="addPlayer()" title="Add Player Token">
+        <mat-icon>person_add</mat-icon>
+      </button>
+      <button mat-icon-button (click)="addToken()" title="Add Monster Token">
+        <mat-icon>person</mat-icon>
+      </button>
+      <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" title="Toggle Lighting Engine">
+        <mat-icon>{{ lightingEnabled ? 'lightbulb' : 'lightbulb_outline' }}</mat-icon>
+      </button>
+    </div>
+
+    <!-- Session Management -->
+    <div class="tool-group">
+      <ng-container *ngIf="!isSyncing; else sessionActive">
+        <button mat-icon-button (click)="startHostingSession()" title="Start Hosting Session">
+          <mat-icon>login</mat-icon>
+        </button>
+        <button mat-icon-button (click)="joinSession()" title="Join Session">
+          <mat-icon>group_add</mat-icon>
+        </button>
+      </ng-container>
+      <ng-template #sessionActive>
+        <button mat-icon-button (click)="stopSession()" title="Leave Session">
+          <mat-icon>logout</mat-icon>
+        </button>
+      </ng-template>
+    </div>
+
+    <!-- Settings/Utilities -->
+    <div class="tool-group" *ngIf="!isSyncing || isHosting">
+      <div class="input-wrapper" title="Grid Size (px)">
+        <mat-icon class="tiny">grid_on</mat-icon>
+        <input type="number" [value]="engine?.gridSize" (change)="engine.updateGridSize($any($event.target).value)">
+      </div>
+    </div>
+  </div>
+</div>
+
+<div #vttContainer id="vtt-container"></div>
