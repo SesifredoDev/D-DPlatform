@@ -1,209 +1,126 @@
 import { Injectable } from '@angular/core';
-import { io, Socket } from 'socket.io-client';
-import * as mediasoupClient from 'mediasoup-client';
+import {
+  Room,
+  RoomEvent,
+  RemoteParticipant,
+  RemoteTrack,
+  RemoteTrackPublication,
+  Track,
+  LocalVideoTrack,
+  LocalAudioTrack,
+  createLocalVideoTrack,
+  createLocalAudioTrack
+} from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
-import { Device, Transport } from 'mediasoup-client/types';
 import { environment } from '../../../../environments/environment';
 import { TokenService } from '../auth/token';
 
 @Injectable({ providedIn: 'root' })
 export class Video {
-  private socket: Socket;
-  private device!: Device;
-  private sendTransport!: Transport;
-  private recvTransport!: Transport;
-  private joinedChannel: string | null = null;
-
-  public remoteStreams$ = new BehaviorSubject<
-    { id: string; stream: MediaStream; userData: any }[]
-  >([]);
-
-  // Spotify sync stream
+  private room: Room;
+  public remoteStreams$ = new BehaviorSubject<any[]>([]);
   public spotifySync$ = new Subject<any>();
 
-  private streamList: Map<
-    string,
-    { stream: MediaStream; producerIds: Set<string>; userData: any }
-  > = new Map();
-
-  private lastBytes: { [key: string]: number } = {};
-
-  private readonly iceServers = [
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ];
-
   constructor(private tokenService: TokenService) {
-    this.socket = io(environment.videoServerUrl || 'http://localhost', {
-      path: '/video/',
-      withCredentials: true,
-      transports: ['websocket'],
-      auth: (cb) => {
-        cb({ token: this.tokenService.getAccessToken() });
-      }
+    this.room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
     });
 
-    this.registerCoreListeners();
+    this.setupRoomListeners();
   }
 
-  async initVideoCall(channelId: string, initialData: any) {
-    this.joinedChannel = channelId;
-
-    const rtpCapabilities = await new Promise<any>((resolve) =>
-      this.socket.emit('getRouterRtpCapabilities', channelId, resolve)
-    );
-
-    if (!rtpCapabilities || rtpCapabilities.error) throw new Error('Failed to get router RTP capabilities');
-
-    this.device = new mediasoupClient.Device();
-    await this.device.load({ routerRtpCapabilities: rtpCapabilities });
-
-    await this.createSendTransport(channelId);
-    await this.createRecvTransport(channelId);
-
-    const existingProducers = await this.getExistingProducers(channelId);
-    for (const pid of existingProducers) await this.consume(channelId, pid);
-  }
-
-  // Spotify Control
-  sendSpotifyCommand(command: string, data: any) {
-    if (this.joinedChannel) {
-      this.socket.emit('spotify-command', { channelId: this.joinedChannel, command, data });
-    }
-  }
-
-  private async createSendTransport(channelId: string) {
-    const res = await new Promise<any>((resolve) =>
-      this.socket.emit('createWebRtcTransport', { channelId, direction: 'send' }, resolve)
-    );
-
-    if (!res || res.error) throw new Error(res?.error || 'Failed to create send transport');
-
-    this.sendTransport = this.device.createSendTransport({ ...res.params, iceServers: this.iceServers });
-
-    this.sendTransport.on('connect', ({ dtlsParameters }, cb) => {
-      this.socket.emit('transport-connect', { channelId, direction: 'send', dtlsParameters }, cb);
-    });
-
-    this.sendTransport.on('produce', ({ kind, rtpParameters }, cb) => {
-      this.socket.emit('transport-produce', { channelId, kind, rtpParameters }, (resp: any) => {
-          if (!resp || resp.error) return cb({ id: '' });
-          cb({ id: resp.id });
+  private setupRoomListeners() {
+    this.room
+      .on(RoomEvent.TrackSubscribed, () => this.emitParticipants())
+      .on(RoomEvent.TrackUnsubscribed, () => this.emitParticipants())
+      .on(RoomEvent.ParticipantConnected, () => this.emitParticipants())
+      .on(RoomEvent.ParticipantDisconnected, () => this.emitParticipants())
+      .on(RoomEvent.ParticipantMetadataChanged, () => this.emitParticipants())
+      .on(RoomEvent.DataReceived, (payload: Uint8Array) => {
+        try {
+          const data = JSON.parse(new TextDecoder().decode(payload));
+          if (data.type === 'spotify-sync') this.spotifySync$.next(data.state);
+        } catch (e) {
+          console.error('Failed to parse data message', e);
         }
-      );
-    });
+      });
   }
 
-  private async createRecvTransport(channelId: string) {
-    const res = await new Promise<any>((resolve) =>
-      this.socket.emit('createWebRtcTransport', { channelId, direction: 'recv' }, resolve)
-    );
+  async initVideoCall(channelId: string, character: any) {
+    const token = await this.getLiveKitToken(channelId, character.name);
+    await this.room.connect(environment.livekitUrl, token);
 
-    if (!res || res.error) throw new Error(res?.error || 'Failed to create receive transport');
-    this.recvTransport = this.device.createRecvTransport({ ...res.params, iceServers: this.iceServers });
-    this.recvTransport.on('connect', ({ dtlsParameters }, cb) => {
-      this.socket.emit('transport-connect', { channelId, direction: 'recv', dtlsParameters }, cb);
-    });
+    if (character) {
+        await this.room.localParticipant.setMetadata(JSON.stringify(character));
+    }
+
+    this.emitParticipants();
+  }
+
+  async updateUserData(channelId: string, character: any) {
+    if (this.room.state === 'connected') {
+      await this.room.localParticipant.setMetadata(JSON.stringify(character));
+    }
   }
 
   async startProducing(stream: MediaStream) {
-    if (!this.sendTransport) throw new Error('Send transport not ready');
-    for (const track of stream.getTracks()) {
-      try {
-        if (track.kind === 'video') {
-          await this.sendTransport.produce({
-            track,
-            encodings: [
-              { rid: 'r0', maxBitrate: 150000, scaleResolutionDownBy: 4 },
-              { rid: 'r1', maxBitrate: 600000, scaleResolutionDownBy: 2 },
-              { rid: 'r2', maxBitrate: 4000000, scaleResolutionDownBy: 1 },
-            ],
-            codecOptions: { videoGoogleStartBitrate: 1500 }
-          });
-        } else if (track.kind === 'audio') {
-          await this.sendTransport.produce({
-            track,
-            codecOptions: { opusStereo: true, opusDtx: true, opusFec: true }
-          });
-        }
-      } catch (err) { console.error('Failed to produce track', err); }
+    const videoTrack = stream.getVideoTracks()[0];
+    const audioTrack = stream.getAudioTracks()[0];
+
+    if (videoTrack) {
+      await this.room.localParticipant.publishTrack(videoTrack, { name: 'video' });
+    }
+    if (audioTrack) {
+      await this.room.localParticipant.publishTrack(audioTrack, { name: 'audio' });
     }
   }
 
-  private async consume(channelId: string, producerId: string) {
-    if (!this.recvTransport) return;
-    const params = await new Promise<any>((resolve) =>
-      this.socket.emit('consume', { channelId, remoteProducerId: producerId, rtpCapabilities: this.device.rtpCapabilities }, resolve)
-    );
-    if (!params || params.error) return;
-    const consumer = await this.recvTransport.consume(params);
-    let entry = this.streamList.get(params.remoteSocketId);
-    if (!entry) {
-      entry = { stream: new MediaStream(), producerIds: new Set(), userData: params.userData || {} };
-      this.streamList.set(params.remoteSocketId, entry);
-    }
-    entry.stream.addTrack(consumer.track);
-    entry.producerIds.add(producerId);
-    this.socket.emit('resume-consumer', { consumerId: consumer.id });
-    this.emitStreams();
+  sendSpotifyCommand(command: string, data: any) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'spotify-sync', command, data }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
-  async getExistingProducers(channelId: string): Promise<string[]> {
-    return new Promise((resolve) => {
-      this.socket.emit('getProducers', channelId, (producerIds: string[]) => resolve(producerIds || []));
-    });
-  }
-
-  updateUserData(channelId: string, data: any) {
-    this.socket.emit('update-user-data', { channelId, data });
-  }
-
-  private registerCoreListeners() {
-    this.socket.on('new-producer', ({ producerId }) => {
-      if (this.joinedChannel) this.consume(this.joinedChannel, producerId);
-    });
-
-    this.socket.on('producer-closed', ({ producerId }) => this.removeProducer(producerId));
-
-    this.socket.on('peer-updated', ({ socketId, data }) => {
-      const entry = this.streamList.get(socketId);
-      if (entry) {
-        entry.userData = data;
-        this.emitStreams();
-      }
-    });
-
-    this.socket.on('spotify-state-sync', (state) => {
-        this.spotifySync$.next(state);
-    });
-  }
-
-  async leaveCall(channelId: string) {
-    this.joinedChannel = null;
-    if (this.sendTransport) this.sendTransport.close();
-    if (this.recvTransport) this.recvTransport.close();
-    this.socket.emit('leave-room', { channelId });
-    this.streamList.clear();
-    this.emitStreams();
-  }
-
-  private removeProducer(producerId: string) {
-    for (const [socketId, entry] of this.streamList.entries()) {
-      if (entry.producerIds.has(producerId)) {
-        entry.producerIds.delete(producerId);
-        if (entry.producerIds.size === 0) this.streamList.delete(socketId);
-        break;
-      }
-    }
-    this.emitStreams();
-  }
-
-  private emitStreams() {
-    const arr = Array.from(this.streamList.entries()).map(([id, value]) => ({
-      id,
-      userData: value.userData,
-      stream: new MediaStream(value.stream.getTracks()),
+  private emitParticipants() {
+    const participants = Array.from(this.room.remoteParticipants.values()).map(p => ({
+      id: p.identity,
+      userData: this.parseMetadata(p.metadata),
+      stream: this.getStreamFromParticipant(p)
     }));
-    this.remoteStreams$.next(arr);
+    this.remoteStreams$.next(participants);
+  }
+
+  private parseMetadata(metadata: string | undefined): any {
+    try {
+      return metadata ? JSON.parse(metadata) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private getStreamFromParticipant(participant: RemoteParticipant): MediaStream {
+    const stream = new MediaStream();
+    participant.getTrackPublications().forEach(pub => {
+      if (pub.track && pub.track.mediaStreamTrack) {
+        stream.addTrack(pub.track.mediaStreamTrack);
+      }
+    });
+    return stream;
+  }
+
+  async leaveCall(channelId?: string) {
+    await this.room.disconnect();
+    this.remoteStreams$.next([]);
+  }
+
+  private async getLiveKitToken(room: string, identity: string) {
+    const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+        throw new Error('Failed to fetch LiveKit token');
+    }
+    const data = await res.json();
+    return data.token;
   }
 }

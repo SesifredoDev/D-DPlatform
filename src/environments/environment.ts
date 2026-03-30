@@ -1,5 +1,6 @@
 export const environment = {
   production: true,
-  apiURL: 'http://localhost:5000/',
+  apiURL: 'http://localhost/api/',
   videoServerUrl: 'http://localhost',
+  livekitUrl: "ws://localhost/livekit"
 };

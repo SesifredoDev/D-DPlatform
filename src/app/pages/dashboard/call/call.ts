@@ -12,19 +12,21 @@ import {
   QueryList
 } from '@angular/core';
 import { Video } from '../../../shared/services/video/video';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
 import { ICharacter } from '../../../shared/models/user/character.model';
 import { TabService } from '../../../shared/services/tab/tab-service';
-import { SpotifyService, SpotifySearchResult } from '../../../shared/services/playlist/spotify.service';
+import { SpotifyService } from '../../../shared/services/playlist/spotify.service';
 import { ActivatedRoute } from '@angular/router';
+import { SpotifyPlayer } from './spotify-player/spotify-player';
 
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe],
-  styleUrls: ['./call.scss']
+  styleUrls: ['./call.scss'],
+  standalone: true,
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -45,10 +47,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isVideoOff = false;
 
   // Spotify Control
-  spotifySearch: string = '';
-  searchResults: SpotifySearchResult[] = [];
   showSpotify: boolean = false;
-  private spotifySyncSub!: Subscription;
 
   private streamSub!: Subscription;
 
@@ -87,70 +86,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         });
       });
     });
-
-    // Spotify Sync Handling
-    this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
-      if (!state.uri || !this.localStream) return;
-
-      const currentState = await this.spotify.getPlaybackState();
-
-      // Sync if different track or significantly different time
-      if (!currentState || currentState.track_window.current_track.uri !== state.uri || Math.abs(currentState.position - state.position) > 3000) {
-        if (!state.paused) {
-          const drift = Date.now() - state.timestamp;
-          await this.spotify.play(state.uri, state.position + drift);
-        } else {
-          await this.spotify.pause();
-        }
-      }
-    });
-  }
-
-  async syncSpotifyCommand(command: string) {
-    if (!this.localStream) return;
-    const state = await this.spotify.getPlaybackState();
-    if (!state) return;
-
-    this.videoService.sendSpotifyCommand(command, {
-      uri: state.track_window.current_track.uri,
-      position: state.position,
-      paused: state.paused
-    });
-  }
-
-  async doSpotifySearch() {
-    if (!this.spotifySearch) return;
-    this.searchResults = await this.spotify.search(this.spotifySearch);
-  }
-
-  async playTrack(item: SpotifySearchResult) {
-    if (!this.localStream) return;
-    await this.spotify.play(item.uri);
-    this.searchResults = [];
-    this.spotifySearch = '';
-
-    this.videoService.sendSpotifyCommand('play', {
-      uri: item.uri,
-      position: 0,
-      paused: false
-    });
-  }
-
-  async togglePlay() {
-    if (!this.localStream) return;
-    this.spotify.togglePlay();
-    setTimeout(async () => {
-      const state = await this.spotify.getPlaybackState();
-      this.videoService.sendSpotifyCommand(state.paused ? 'pause' : 'play', {
-        uri: state.track_window.current_track.uri,
-        position: state.position,
-        paused: state.paused
-      });
-    }, 500);
-  }
-
-  updateVolume(event: any) {
-    this.spotify.setVolume(event.target.value);
   }
 
   async ngOnChanges(changes: SimpleChanges) {
@@ -256,7 +191,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   ngOnDestroy() {
     if (this.streamSub) this.streamSub.unsubscribe();
-    if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     this.leaveCall();
   }
 }

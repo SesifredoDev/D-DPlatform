@@ -4,6 +4,8 @@ const path = require('path');
 
 const isDev = !app.isPackaged;
 
+app.commandLine.appendSwitch('enable-widevine');
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -14,36 +16,35 @@ function createWindow() {
         : path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Enable standard plugins
       plugins: true,
       webSecurity: true,
-      // Spotify requires a real browser User-Agent to allow playback
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36'
     }
   });
 
-  // Handle Permission Requests for Protected Content (EME)
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications'];
-    if (allowedPermissions.includes(permission)) {
-      return callback(true);
-    }
-    callback(false);
+    const allowedPermissions = [
+      'media',
+      'mediaKeySystem',
+      'protectedMediaIdentifier',
+      'geolocation',
+      'notifications'
+    ];
+    callback(allowedPermissions.includes(permission));
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:4200');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, 'dist/d-d-platform/browser/index.html'));
-  }
+  mainWindow.loadURL('http://localhost:4200');
 }
 
-// Clean up command line switches (removing manual widevine paths unless you have the DLLs)
-// app.commandLine.appendSwitch('widevine-cdm-path', ...);
-
 app.whenReady().then(async () => {
-  await components.whenReady();
-  console.log('components ready:', components.status());
+  try {
+    // Request Widevine component
+    await components.whenReady();
+    console.log('[DRM] Components status:', components.status());
+  } catch (e) {
+    console.error('[DRM] Failed to initialize components:', e);
+  }
+
   createWindow();
 });
 
