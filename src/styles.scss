@@ -36,3 +36,128 @@ body {
   height: 100%;
 }
 /* You can add global styles to this file, and also import other style files */
+
+.token-config-menu {
+  padding: 1rem;
+  .mat-mdc-menu-panel {
+    background-color: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    min-width: 300px;
+    backdrop-filter: blur(10px);
+  }
+
+  .menu-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    .menu-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 5px;
+      color: var(--accent);
+
+      h3 { margin: 0; font-weight: 600; font-size: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+      .material-icons { font-size: 20px; }
+    }
+
+    .token-preview-area {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      padding: 10px 0;
+
+      .preview-circle {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        border-style: solid;
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        transition: all 0.2s;
+      }
+
+      .icon-upload-btn {
+        position: absolute;
+        bottom: 5px;
+        right: 50%;
+        transform: translateX(45px);
+        background: var(--accent);
+        color: white;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+        border: 2px solid #1a1a1a;
+        transition: transform 0.2s;
+
+        &:hover { transform: translateX(45px) scale(1.1); background: var(--accent-hover); }
+        .material-icons { font-size: 16px; }
+      }
+    }
+
+    .config-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .checkbox-container {
+      margin-top: -10px;
+      .mat-mdc-checkbox { --mdc-checkbox-selected-focus-icon-color: var(--accent); }
+    }
+
+    .color-picker-section {
+      .section-label { font-size: 11px; text-transform: uppercase; color: #777; letter-spacing: 1px; display: block; margin-bottom: 8px; }
+
+      .color-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 8px;
+
+        .color-swatch {
+          aspect-ratio: 1;
+          border-radius: 6px;
+          cursor: pointer;
+          border: 2px solid transparent;
+          transition: transform 0.1s;
+
+          &:hover { transform: scale(1.1); }
+          &.active { border-color: white; box-shadow: 0 0 10px rgba(255,255,255,0.3); }
+        }
+      }
+    }
+
+    .menu-footer {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      padding-top: 15px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+
+      button[mat-raised-button] {
+        flex: 1;
+        margin-left: 10px;
+        background-color: var(--accent);
+        font-weight: 500;
+      }
+    }
+
+    /* Compact Field Styling */
+    ::ng-deep .compact {
+      .mat-mdc-form-field-flex { background-color: rgba(255,255,255,0.05) !important; padding: 0 12px !important; }
+      .mat-mdc-form-field-infix { padding: 12px 0 !important; min-height: unset !important; }
+      .mat-mdc-floating-label { top: 22px !important; }
+    }
+  }
+}

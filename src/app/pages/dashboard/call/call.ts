@@ -9,7 +9,9 @@ import {
   SimpleChanges,
   HostListener,
   ViewChildren,
-  QueryList
+  QueryList,
+  Output,
+  EventEmitter
 } from '@angular/core';
 import { Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
@@ -20,17 +22,22 @@ import { TabService } from '../../../shared/services/tab/tab-service';
 import { SpotifyService } from '../../../shared/services/playlist/spotify.service';
 import { ActivatedRoute } from '@angular/router';
 import { SpotifyPlayer } from './spotify-player/spotify-player';
+import { MatIconModule } from '@angular/material/icon';
 
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer]
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
   @Input() character!: ICharacter;
+
+  @Output() hostVtt = new EventEmitter<string>();
+  @Output() joinVtt = new EventEmitter<string>();
+  @Output() stopVtt = new EventEmitter<string>();
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
@@ -50,6 +57,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   showSpotify: boolean = false;
 
   private streamSub!: Subscription;
+  private spotifySyncSub!: Subscription;
+  private spotifyActionSub!: Subscription;
 
   constructor(
     private videoService: Video,
@@ -85,6 +94,41 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           }
         });
       });
+    });
+
+    // Handle Incoming Spotify Sync from Remote Users
+    this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
+      if (!state.uri || !this.localStream) return;
+
+      const currentState = await this.spotify.getPlaybackState();
+
+      // Determine if we need to sync
+      const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
+      const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
+      const adjustedPosition = state.position + drift;
+      const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
+      const isDifferentStatus = currentState?.paused !== state.paused;
+
+      if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
+        if (!state.paused) {
+          await this.spotify.play(state.uri, adjustedPosition, true);
+        } else {
+          // If paused, we only care about track/position if it's different
+          if (isDifferentTrack) {
+             await this.spotify.play(state.uri, state.position, true);
+             setTimeout(() => this.spotify.pause(true), 500);
+          } else {
+             await this.spotify.pause(true);
+          }
+        }
+      }
+    });
+
+    // Handle Local Spotify Actions (send to others)
+    this.spotifyActionSub = this.spotify.syncAction$.subscribe(action => {
+      if (this.localStream) {
+        this.videoService.sendSpotifyCommand(action.command, action.data);
+      }
     });
   }
 
@@ -162,6 +206,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.isAudioMuted = false;
     this.isVideoOff = false;
     this.showSpotify = false;
+    this.stopVtt.emit(this.channelId);
   }
 
   toggleAudio() {
@@ -191,6 +236,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   ngOnDestroy() {
     if (this.streamSub) this.streamSub.unsubscribe();
+    if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
+    if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
     this.leaveCall();
+  }
+
+  startVttHosting() {
+    this.hostVtt.emit(this.channelId);
+  }
+
+  startVttJoining() {
+    this.joinVtt.emit(this.channelId);
   }
 }

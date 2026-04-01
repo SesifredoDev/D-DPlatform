@@ -1,8 +1,8 @@
 import { Injectable } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
-import { VttEngine } from '../../../shared/modules/vttEngine/vttEngine.js';
 import {TokenService} from '../auth/token';
 import {ICharacter} from '../../models/user/character.model';
+import {VttEngine} from '../../modules/vttEngine/VttEngine';
 
 @Injectable({ providedIn: 'root' })
 export class VttSync {

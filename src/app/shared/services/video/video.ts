@@ -9,7 +9,8 @@ import {
   LocalVideoTrack,
   LocalAudioTrack,
   createLocalVideoTrack,
-  createLocalAudioTrack
+  createLocalAudioTrack,
+  DataPacket_Kind
 } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -20,6 +21,7 @@ export class Video {
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
   public spotifySync$ = new Subject<any>();
+  public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
 
   constructor(private tokenService: TokenService) {
     this.room = new Room({
@@ -35,12 +37,29 @@ export class Video {
       .on(RoomEvent.TrackSubscribed, () => this.emitParticipants())
       .on(RoomEvent.TrackUnsubscribed, () => this.emitParticipants())
       .on(RoomEvent.ParticipantConnected, () => this.emitParticipants())
-      .on(RoomEvent.ParticipantDisconnected, () => this.emitParticipants())
+      .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+          this.emitParticipants();
+          if (this.vttSession$.value.hostId === participant.identity) {
+              this.vttSession$.next({ active: false, roomId: null, hostId: null });
+          }
+      })
       .on(RoomEvent.ParticipantMetadataChanged, () => this.emitParticipants())
-      .on(RoomEvent.DataReceived, (payload: Uint8Array) => {
+      .on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
         try {
           const data = JSON.parse(new TextDecoder().decode(payload));
-          if (data.type === 'spotify-sync') this.spotifySync$.next(data.state);
+          if (data.type === 'spotify-sync') {
+            this.spotifySync$.next({
+              ...data.data,
+              from: participant?.identity,
+              command: data.command
+            });
+          } else if (data.type === 'vtt-session') {
+            this.vttSession$.next({
+              active: data.command === 'start',
+              roomId: data.roomId,
+              hostId: data.command === 'start' ? participant?.identity || null : null
+            });
+          }
         } catch (e) {
           console.error('Failed to parse data message', e);
         }
@@ -78,8 +97,31 @@ export class Video {
 
   sendSpotifyCommand(command: string, data: any) {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({ type: 'spotify-sync', command, data }));
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'spotify-sync',
+      command,
+      data: {
+        ...data,
+        timestamp: Date.now()
+      }
+    }));
     this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  sendVttCommand(command: 'start' | 'stop', roomId: string) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'vtt-session',
+      command,
+      roomId
+    }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+
+    if (command === 'start') {
+        this.vttSession$.next({ active: true, roomId, hostId: this.room.localParticipant.identity });
+    } else {
+        this.vttSession$.next({ active: false, roomId: null, hostId: null });
+    }
   }
 
   private emitParticipants() {
@@ -110,8 +152,12 @@ export class Video {
   }
 
   async leaveCall(channelId?: string) {
+    if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
+        this.sendVttCommand('stop', this.vttSession$.value.roomId!);
+    }
     await this.room.disconnect();
     this.remoteStreams$.next([]);
+    this.vttSession$.next({ active: false, roomId: null, hostId: null });
   }
 
   private async getLiveKitToken(room: string, identity: string) {

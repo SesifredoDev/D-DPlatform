@@ -1,11 +1,6 @@
 import {ChangeDetectorRef, Component, HostListener, OnInit} from '@angular/core';
 import {MatButtonModule} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
-import {AuthService} from '../../shared/services/auth/auth';
-
-import {dndbeyond} from '../../shared/services/character/dndbeyond/dndbeyond';
-import {CreateCharacterComponent} from '../character/create/create';
-import {MatDialog} from '@angular/material/dialog';
 import {CharacterService} from '../../shared/services/character/character';
 import {SidePanel} from './side-panel/side-panel';
 import {Call} from './call/call';
@@ -16,11 +11,11 @@ import {Tab, TabService} from '../../shared/services/tab/tab-service';
 import {CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup} from '@angular/cdk/drag-drop';
 import {CharacterViewer} from './character-viewer/character-viewer';
 import {VttCanvas} from './vtt-canvas/vtt-canvas';
-import {ICharacter} from '../../shared/models/user/character.model';
+import {SpotifyPlayer} from './call/spotify-player/spotify-player';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [MatButtonModule, SidePanel, Call, TextChannel, MatIconModule, CdkDropList, CdkDrag, CdkDropListGroup, CharacterViewer, VttCanvas],
+  imports: [MatButtonModule, SidePanel, Call, TextChannel, MatIconModule, CdkDropList, CdkDrag, CdkDropListGroup, CharacterViewer, VttCanvas, SpotifyPlayer],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
@@ -41,6 +36,9 @@ export class Dashboard implements OnInit {
   leftWidth: number = window.innerWidth / 2;
   isResizing = false;
 
+  vttHostSessionId: string | null = null;
+  vttJoinSessionId: string | null = null;
+
   get activeLeftTab() { return this.leftTabs.find(t => t.active); }
   get activeRightTab() { return this.rightTabs.find(t => t.active); }
 
@@ -59,7 +57,7 @@ export class Dashboard implements OnInit {
         this.setupActiveCharacterListener();
     });
 
-    this.channelService.getChannelObservable().subscribe(channel => {
+    this.channelService.getChannelObservable().subscribe((channel: any) => {
       if (channel && channel._id) {
         this.tabService.openTab(channel._id, channel.name, channel.type);
       }
@@ -89,6 +87,23 @@ export class Dashboard implements OnInit {
         this.activeCharacterID = character._id === '0' ? undefined : character._id;
       }
     });
+  }
+
+  onHostVtt(channelId: string) {
+    this.vttHostSessionId = channelId;
+    this.vttJoinSessionId = null;
+    this.tabService.openTab(channelId, 'VTT', 'vtt', 'right');
+  }
+
+  onJoinVtt(channelId: string) {
+    this.vttJoinSessionId = channelId;
+    this.vttHostSessionId = null;
+    this.tabService.openTab(channelId, 'VTT', 'vtt', 'right');
+  }
+
+  onStopVtt(channelId: string) {
+    if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
+    if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
   }
 
   startResizing(event: MouseEvent) {

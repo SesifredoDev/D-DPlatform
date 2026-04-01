@@ -1,14 +1,14 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-import {ICharacter} from '../../models/user/character.model';
-import {Video} from '../video/video';
+import { ICharacter } from '../../models/user/character.model';
+import { Video } from '../video/video';
 
 export interface Tab {
   id: string;
   title: string;
-  type: 'text' | 'call' | 'character';
+  type: 'text' | 'call' | 'character' | 'vtt' | 'spotify';
   pane: 'left' | 'right';
-  active: boolean; // Added to track selection
+  active: boolean;
   character?: ICharacter;
 }
 
@@ -20,20 +20,16 @@ export class TabService {
 
   constructor(private videoService: Video) {}
 
-  openTab(id: string, title: string, type: string, pane: "left" | "right" = 'left', character?: ICharacter) {
+  openTab(id: string, title: string, type: 'text' | 'call' | 'character' | 'vtt' | 'spotify', pane: "left" | "right" = 'left', character?: ICharacter) {
     const current = this.tabs.value;
-    // If tab exists, just select it; otherwise add it
     if (current.find(t => t.id === id)) {
       this.selectTab(id);
     } else {
-      // @ts-ignore
       const newTab: Tab = { id, title, type, pane, active: true };
       if(character){
         newTab.character = character;
       }
-      // Deactivate others in the same pane
       const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
-      console.log(updated)
       this.tabs.next([...updated, newTab]);
     }
   }
@@ -58,18 +54,13 @@ export class TabService {
 
   closeTab(id: string) {
     const tabToRemove = this.tabs.value.find(t => t.id === id);
-
-    // If the tab being closed is a call, trigger the leave logic
     if (tabToRemove && tabToRemove.type === 'call') {
       this.videoService.leaveCall(id);
     }
-
     this.tabs.next(this.tabs.value.filter(t => t.id !== id));
   }
 
   closeAllTabs() {
     this.tabs.next([]);
-
-
   }
 }

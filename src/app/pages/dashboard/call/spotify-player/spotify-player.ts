@@ -1,9 +1,11 @@
 import { Component, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
 import { SpotifyService, SpotifySearchResult } from '../../../../shared/services/playlist/spotify.service';
-import { Video } from '../../../../shared/services/video/video';
+import { TabService } from '../../../../shared/services/tab/tab-service';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
+
+type ResultGroup = { [key: string]: SpotifySearchResult[] };
 
 @Component({
   selector: 'app-spotify-player',
@@ -14,92 +16,139 @@ import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
 })
 export class SpotifyPlayer implements OnInit, OnDestroy {
   @Input() isCallActive: boolean = false;
+  @Input() isTab: boolean = false;
   @Output() close = new EventEmitter<void>();
 
   spotifySearch: string = '';
-  searchResults: SpotifySearchResult[] = [];
+  groupedResults: ResultGroup = {};
+  activeCategory: string = 'all';
   showDevicePicker: boolean = false;
-  private spotifySyncSub!: Subscription;
+  showPinnedPulldown: boolean = false;
+  showQueue: boolean = false;
+  isLoading: boolean = false;
+  activeSidebarTab: 'playlists' | 'recent' | 'pinned' = 'playlists';
+
+  // Profile View
+  showProfile: boolean = false;
+  profileData: any = null;
+  profileItems: SpotifySearchResult[] = [];
+
+  readonly categories = [
+    { id: 'all', label: 'All' },
+    { id: 'track', label: 'Tracks' },
+    { id: 'playlist', label: 'Playlists' },
+    { id: 'album', label: 'Albums' },
+    { id: 'artist', label: 'Artists' },
+    { id: 'show', label: 'Podcasts' }
+  ];
 
   constructor(
     public spotify: SpotifyService,
-    private videoService: Video
+    private tabService: TabService
   ) {}
 
-  ngOnInit() {
-    // Spotify Sync Handling
-    this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
-      if (!state.uri || !this.isCallActive) return;
-
-      const currentState = await this.spotify.getPlaybackState();
-
-      // Sync if different track or significantly different time
-      if (!currentState || (currentState.track_window?.current_track?.uri !== state.uri) || Math.abs(currentState.position - state.position) > 4000) {
-        if (!state.paused) {
-          const drift = Date.now() - state.timestamp;
-          await this.spotify.play(state.uri, state.position + drift);
-        } else {
-          await this.spotify.pause();
-        }
-      }
-    });
-  }
+  ngOnInit() {}
 
   async doSpotifySearch() {
     if (!this.spotifySearch) return;
-    this.searchResults = await this.spotify.search(this.spotifySearch);
+
+    if (this.spotifySearch.includes('open.spotify.com/') || this.spotifySearch.startsWith('spotify:')) {
+      await this.handleSpotifyLink(this.spotifySearch);
+      return;
+    }
+
+    this.isLoading = true;
+    this.showProfile = false;
+    try {
+      const results = await this.spotify.search(this.spotifySearch);
+
+      this.groupedResults = results.reduce((acc: ResultGroup, item) => {
+        const type = (item.type === 'episode' || item.type === 'audiobook') ? 'show' : item.type;
+        if (!acc[type]) acc[type] = [];
+        acc[type].push(item);
+        return acc;
+      }, {});
+
+      this.activeCategory = 'all';
+      this.showQueue = false;
+    } finally {
+      this.isLoading = false;
+    }
   }
 
-  async playTrack(item: SpotifySearchResult) {
-    if (!this.isCallActive) return;
-    await this.spotify.play(item.uri);
-    this.searchResults = [];
-    this.spotifySearch = '';
+  private async handleSpotifyLink(link: string) {
+    let uri = link;
+    if (link.includes('open.spotify.com/')) {
+      const parts = link.split('?')[0].split('/');
+      const type = parts[parts.length - 2];
+      const id = parts[parts.length - 1];
+      uri = `spotify:${type}:${id}`;
+    }
 
-    this.videoService.sendSpotifyCommand('play', {
-      uri: item.uri,
-      position: 0,
-      paused: false
-    });
+    await this.playTrack({ uri });
+    this.spotifySearch = '';
+  }
+
+  get filteredResults(): SpotifySearchResult[] {
+    if (this.activeCategory === 'all') {
+      return Object.values(this.groupedResults).flat().slice(0, 30);
+    }
+    return this.groupedResults[this.activeCategory] || [];
+  }
+
+  openAsTab() {
+    this.tabService.openTab('spotify-main', 'Spotify', 'spotify', 'right');
+    this.close.emit();
+  }
+
+  async playTrack(item: any) {
+    const uri = item.uri || item.track?.uri || item.item?.uri;
+    await this.spotify.play(uri);
+
+    if (this.spotifySearch) {
+      this.groupedResults = {};
+      this.spotifySearch = '';
+    }
+    this.showPinnedPulldown = false;
+    this.showQueue = false;
+  }
+
+  async viewProfile(id: string | undefined, type: "artist" | "user") {
+    if (!id) return;
+    this.isLoading = true;
+    this.showQueue = false;
+    this.showProfile = true;
+    this.profileData = null;
+    this.profileItems = [];
+
+    try {
+      if (type === 'artist') {
+        this.profileData = await this.spotify.getArtist(id);
+        this.profileItems = await this.spotify.getArtistAlbums(id);
+      } else {
+        this.profileData = await this.spotify.getUser(id);
+        this.profileItems = await this.spotify.getUserPlaylists(id);
+      }
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   async togglePlay() {
-    if (!this.isCallActive) return;
     await this.spotify.togglePlay();
-    setTimeout(async () => {
-      const state = await this.spotify.getPlaybackState();
-      if (state) {
-        this.videoService.sendSpotifyCommand(state.paused ? 'pause' : 'play', {
-          uri: state.track_window?.current_track?.uri,
-          position: state.position,
-          paused: state.paused
-        });
-      }
-    }, 800);
+  }
+
+  async toggleShuffle() {
+    const currentState = this.spotify.shuffleState$.value;
+    await this.spotify.toggleShuffle(!currentState);
   }
 
   async nextTrack() {
     await this.spotify.nextTrack();
-    this.syncCurrentState('next');
   }
 
   async previousTrack() {
     await this.spotify.previousTrack();
-    this.syncCurrentState('previous');
-  }
-
-  private async syncCurrentState(command: string) {
-    if (!this.isCallActive) return;
-    setTimeout(async () => {
-      const state = await this.spotify.getPlaybackState();
-      if (state && state.track_window?.current_track) {
-        this.videoService.sendSpotifyCommand(command, {
-          uri: state.track_window.current_track.uri,
-          position: state.position,
-          paused: state.paused
-        });
-      }
-    }, 1000);
   }
 
   async transferPlayback(deviceId: string) {
@@ -107,11 +156,9 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
     this.showDevicePicker = false;
   }
 
-  updateVolume(event: any) {
-    this.spotify.setVolume(event.target.value);
+  async updateVolume(event: any) {
+    await this.spotify.setVolume(event.target.value);
   }
 
-  ngOnDestroy() {
-    if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
-  }
+  ngOnDestroy() {}
 }

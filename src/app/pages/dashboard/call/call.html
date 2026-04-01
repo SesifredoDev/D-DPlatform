@@ -127,6 +127,14 @@
             <svg *ngIf="isVideoOff" viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3.27,2L2,3.27L4.73,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16C16.2,18 16.39,17.92 16.54,17.82L19.73,21L21,19.73L3.27,2M17,10.5L21,6.5V17.5L18.53,15.03L17,13.5V10.5M14.73,16H6.73L4.73,14V8H6.73L14.73,16M16,6A1,1 0 0,1 17,7V8.82L14.18,6H16Z" /></svg>
           </button>
 
+          <button (click)="startVttHosting()" class="btn-action" title="Host VTT">
+            <mat-icon>meeting_room</mat-icon>
+          </button>
+
+          <button (click)="startVttJoining()" class="btn-action" title="Join VTT">
+            <mat-icon>group_add</mat-icon>
+          </button>
+
           <button (click)="leaveCall()" class="btn-action btn-danger" title="Leave Call">
             <svg viewBox="0 0 24 24" width="24" height="24">
               <path fill="currentColor" d="M12,9C10.4,9 8.85,9.25 7.4,9.72V12.82C7.4,13.22 7.17,13.56 6.84,13.72C5.86,14.21 4.97,14.84 4.17,15.57C4,15.75 3.75,15.86 3.5,15.86C3.2,15.86 2.95,15.74 2.77,15.56L0.29,13.08C0.11,12.9 0,12.65 0,12.38C0,12.1 0.11,11.85 0.29,11.67C3.38,8.77 7.49,7 12,7C16.51,7 20.62,8.77 23.71,11.67C23.89,11.85 24,12.1 24,12.38C24,12.65 23.89,12.9 23.71,13.08L21.23,15.56C21.05,15.74 20.8,15.86 20.5,15.86C20.25,15.86 20,15.75 19.82,15.57C19.03,14.84 18.14,14.21 17.16,13.72C16.83,13.56 16.6,13.22 16.6,12.82V9.72C15.15,9.25 13.6,9 12,9Z" />
@@ -134,6 +142,6 @@
           </button>
         </ng-container>
       </div>
-
-
     </div>
+  </div>
+</div>

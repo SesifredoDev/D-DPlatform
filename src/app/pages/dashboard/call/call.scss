@@ -80,8 +80,10 @@
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   z-index: 200;
-  width: 450px;
-  max-width: 90vw;
+  width: 50%;
+  height: 70%;
+  max-height: 60vh;
+  min-width: 20vw;
 }
 
 .video-box {

@@ -1,4 +1,4 @@
-<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!isSyncing || isHosting">
+<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!syncService.isConnected || syncService.isHosting">
   <div class="drawer-toggle" (click)="showLibraryOverlay = !showLibraryOverlay">
     <span class="material-icons">{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</span>
     <span class="toggle-text">{{ showLibraryOverlay ? 'CLOSE LIBRARY' : 'OPEN MAP LIBRARY' }}</span>
@@ -64,7 +64,7 @@
 
   <div id="toolbar">
     <!-- Map Management Tools -->
-    <div class="tool-group" *ngIf="!isSyncing || isHosting">
+    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
       <button mat-icon-button (click)="saveCurrentMap(false)" title="Save Changes">
         <mat-icon>save</mat-icon>
       </button>
@@ -91,7 +91,7 @@
     </div>
 
     <!-- Wall/Drawing Tools (DM Only) -->
-    <div class="tool-group" *ngIf="!isSyncing || isHosting" >
+    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting" >
       <button mat-icon-button [class.active]="activeTool === 'draw'" (click)="setTool('draw')" title="Draw Walls">
         <mat-icon>edit_road</mat-icon>
       </button>
@@ -101,7 +101,7 @@
     </div>
 
     <!-- Token Management & Lighting (DM Only) -->
-    <div class="tool-group" *ngIf="isHosting">
+    <div class="tool-group" *ngIf="syncService.isHosting">
       <button mat-icon-button (click)="addPlayer()" title="Add Player Token">
         <mat-icon>person_add</mat-icon>
       </button>
@@ -115,23 +115,16 @@
 
     <!-- Session Management -->
     <div class="tool-group">
-      <ng-container *ngIf="!isSyncing; else sessionActive">
-        <button mat-icon-button (click)="startHostingSession()" title="Start Hosting Session">
-          <mat-icon>login</mat-icon>
-        </button>
-        <button mat-icon-button (click)="joinSession()" title="Join Session">
-          <mat-icon>group_add</mat-icon>
-        </button>
-      </ng-container>
-      <ng-template #sessionActive>
-        <button mat-icon-button (click)="stopSession()" title="Leave Session">
-          <mat-icon>logout</mat-icon>
-        </button>
-      </ng-template>
+      <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" title="Host Session">
+        <mat-icon>podcasts</mat-icon>
+      </button>
+      <button mat-icon-button *ngIf="syncService.isConnected" (click)="stopSession()" title="Stop Session" color="warn">
+        <mat-icon>stop_circle</mat-icon>
+      </button>
     </div>
 
     <!-- Settings/Utilities -->
-    <div class="tool-group" *ngIf="!isSyncing || isHosting">
+    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
       <div class="input-wrapper" title="Grid Size (px)">
         <mat-icon class="tiny">grid_on</mat-icon>
         <input type="number" [value]="engine?.gridSize" (change)="engine.updateGridSize($any($event.target).value)">
@@ -141,3 +134,73 @@
 </div>
 
 <div #vttContainer id="vtt-container"></div>
+
+<!-- Hidden Trigger for Token Menu -->
+<div style="visibility: hidden; position: fixed"
+     [style.left]="menuTopLeftPosition.x"
+     [style.top]="menuTopLeftPosition.y"
+     [matMenuTriggerFor]="tokenMenu">
+</div>
+
+<mat-menu #tokenMenu="matMenu" class="token-config-menu">
+  <div class="menu-content" (click)="$event.stopPropagation()">
+    <div class="menu-header">
+      <span class="material-icons">settings</span>
+      <h3>Token Config</h3>
+    </div>
+
+    <div class="token-preview-area">
+      <div class="preview-circle" [style.background-image]="tokenEditConfig.icon ? 'url(' + tokenEditConfig.icon + ')' : 'none'"
+           [style.background-color]="!tokenEditConfig.icon ? tokenEditConfig.color : 'transparent'"
+           [style.border-color]="tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : '#fff'"
+           [style.border-width]="tokenEditConfig.forceBorder ? '4px' : '2px'">
+      </div>
+      <label class="icon-upload-btn">
+        <span class="material-icons">photo_camera</span>
+        <input type="file" (change)="onTokenIconUpload($event)" accept="image/*" hidden>
+      </label>
+    </div>
+
+    <mat-form-field appearance="fill" class="full-width compact">
+      <mat-label>Name</mat-label>
+      <input matInput [(ngModel)]="tokenEditConfig.name">
+    </mat-form-field>
+
+    <div class="config-row">
+      <mat-form-field appearance="fill" class="half-width compact">
+        <mat-label>Size</mat-label>
+        <mat-select [(ngModel)]="tokenEditConfig.size">
+          <mat-option [value]="0.5">Small (0.5)</mat-option>
+          <mat-option [value]="1">Standard (1)</mat-option>
+          <mat-option [value]="2">Large (2)</mat-option>
+          <mat-option [value]="3">Huge (3)</mat-option>
+        </mat-select>
+      </mat-form-field>
+
+      <div class="checkbox-container">
+        <mat-checkbox [(ngModel)]="tokenEditConfig.forceBorder">Border</mat-checkbox>
+      </div>
+    </div>
+
+    <div class="color-picker-section">
+      <span class="section-label">{{ tokenEditConfig.forceBorder ? 'Border Color' : 'Token Color' }}</span>
+      <div class="color-grid">
+        <div *ngFor="let color of colorPresets"
+             class="color-swatch"
+             [style.background-color]="color"
+             [class.active]="(tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : tokenEditConfig.color) === color"
+             (click)="selectColor(color)">
+        </div>
+      </div>
+    </div>
+
+    <div class="menu-footer">
+      <button mat-icon-button color="warn" (click)="deleteSelectedToken()" title="Delete Token">
+        <mat-icon>delete</mat-icon>
+      </button>
+      <button mat-raised-button color="primary" (click)="applyTokenConfig()">
+        Save Changes
+      </button>
+    </div>
+  </div>
+</mat-menu>

@@ -22,13 +22,18 @@
       @for (tab of leftTabs; track tab.id) {
         <div [hidden]="!tab.active" class="full-height">
           @if (tab.type === 'call') {
-            <app-video-call [channelId]="tab.id" [character]="activeCharacter"></app-video-call>
+            <app-video-call [channelId]="tab.id" [character]="activeCharacter"
+                            (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
           } @else if (tab.type === 'text') {
             <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
           } @else if(tab.type ==='character'){
             <app-character-viewer [character]="tab.character"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
-            <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"></app-vtt-canvas>
+            <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+                            [isHostVttSession]="tab.id === vttHostSessionId"
+                            [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
+          } @else if (tab.type === 'spotify') {
+            <app-spotify-player [isCallActive]="true"></app-spotify-player>
           }
         </div>
       }
@@ -59,13 +64,18 @@
         @for (tab of rightTabs; track tab.id) {
           <div [hidden]="!tab.active" class="full-height">
             @if (tab.type === 'call') {
-              <app-video-call [channelId]="tab.id" [character]="activeCharacter"></app-video-call>
+              <app-video-call [channelId]="tab.id" [character]="activeCharacter"
+                              (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
             } @else if (tab.type === 'text') {
               <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
             } @else if(tab.type ==='character'){
               <app-character-viewer [character]="tab.character"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
-              <app-vtt-canvas  [serverId]="tab.id" [character]="activeCharacter"></app-vtt-canvas>
+              <app-vtt-canvas  [serverId]="tab.id" [character]="activeCharacter"
+                               [isHostVttSession]="tab.id === vttHostSessionId"
+                               [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
+            } @else if (tab.type === 'spotify') {
+              <app-spotify-player [isCallActive]="true"></app-spotify-player>
             }
           </div>
         }

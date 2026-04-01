@@ -157,33 +157,9 @@ export class VttEngine {
     // 2. Rescale and reposition all existing tokens
     this.tokenLayer.getChildren().forEach(group => {
       const token = group.tokenReference;
-
-      // Recalculate snap position for the new grid size
-      const tileX = Math.floor(group.x() / this.gridSize);
-      const tileY = Math.floor(group.y() / this.gridSize);
-      const centerX = (tileX * this.gridSize) + (this.gridSize / 2);
-      const centerY = (tileY * this.gridSize) + (this.gridSize / 2);
-
-      group.position({ x: centerX, y: centerY });
-
-      // Resize the visuals inside the group
-      const circle = group.findOne('Circle');
-      const text = group.findOne('Text');
-      const img = group.findOne('Image');
-
-      if (circle) circle.radius(this.gridSize / 2.2);
-
-      if (img) {
-        img.width(this.gridSize * 0.9);
-        img.height(this.gridSize * 0.9);
-        img.x(-(this.gridSize * 0.45));
-        img.y(-(this.gridSize * 0.45));
-      }
-
-      if (text) {
-        text.width(this.gridSize);
-        text.x(-(this.gridSize / 2));
-        text.y((this.gridSize / 2) + 2);
+      if (token) {
+        token.initVisuals();
+        token.snapToGrid();
       }
     });
 
@@ -278,11 +254,15 @@ export class VttEngine {
 
   addToken(x, y, options = {}, remote = false) {
     // 1. Check if token already exists to prevent duplicates
-    const existing = this.tokenLayer.findOne('#' + options.id);
-    if (existing) {
+    const existingGroup = this.tokenLayer.findOne('#' + options.id);
+    if (existingGroup) {
       if (remote) {
-        existing.x(x);
-        existing.y(y);
+        const token = existingGroup.tokenReference;
+        if (token) {
+          token.updateConfig(options);
+          existingGroup.x(x);
+          existingGroup.y(y);
+        }
         this.tokenLayer.batchDraw();
       }
 
@@ -296,14 +276,25 @@ export class VttEngine {
     console.log(token.id);
 
     if (!remote) {
-      const broadcastOptions = {
-        ...options,
-        id: token.id // Use the ID generated/confirmed by the Token instance
-      };
+      const broadcastOptions = this.getTokenConfig(token);
       this.stage.fire('tokenAdded', { x, y, options: broadcastOptions, remote: false });
     }
 
     this.updateLighting();
+  }
+
+  getTokenConfig(token) {
+    return {
+      id: token.id,
+      name: token.name,
+      color: token.color,
+      icon: token.imageUrl,
+      ownerId: token.ownerId,
+      isPlayer: token.isPlayer,
+      size: token.size,
+      forceBorder: token.forceBorder,
+      borderColor: token.borderColor
+    };
   }
 
   animateTokenMove(tokenId, newX, newY) {
@@ -356,14 +347,10 @@ export class VttEngine {
       tokens: this.tokenLayer.getChildren().map(group => {
         const ref = group.tokenReference;
         return {
-          id: group.id(),             // The UUID we set in Token.js
+          id: group.id(),
           x: group.x(),
           y: group.y(),
-          name: ref.name,
-          color: ref.color,
-          icon: ref.imageUrl,        // Use the reference to get original data
-          ownerId: ref.ownerId,
-          isPlayer: ref.isPlayer
+          ...this.getTokenConfig(ref)
         };
       }),
       mapUrl: this.currentMapUrl || null,
@@ -394,11 +381,7 @@ export class VttEngine {
       if (config.tokens) {
         config.tokens.forEach(t => {
           this.addToken(t.x, t.y, {
-            id: t.id,
-            name: t.name,
-            color: t.color,
-            ownerId: t.ownerId,
-            icon: t.icon
+            ...t
           }, true);
         });
       }
