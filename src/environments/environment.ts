@@ -1,8 +1,8 @@
 export const environment = {
   production: true,
-  apiURL: 'http://167.172.57.130/api/',
-  videoServerUrl: 'http://167.172.57.130',
-  livekitUrl: "ws://167.172.57.130/livekit",
-  messageUrl: "ws://167.172.57.130",
-  mapUrl: "ws://167.172.57.130"
+  apiURL: 'https://dissertation.pchaffey.me/api/',
+  videoServerUrl: 'https://dissertation.pchaffey.me',
+  livekitUrl: "wss://dissertation.pchaffey.me/livekit",
+  messageUrl: "wss://dissertation.pchaffey.me",
+  mapUrl: "wss://dissertation.pchaffey.me"
 };
