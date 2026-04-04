@@ -13,6 +13,7 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar'; // Import MatSnackBar and MatSnackBarModule
 import {AuthService} from '../../shared/services/auth/auth';
 
 @Component({
@@ -27,6 +28,7 @@ import {AuthService} from '../../shared/services/auth/auth';
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
+    MatSnackBarModule, // Add MatSnackBarModule to imports
   ],
   templateUrl: './auth.html',
   styleUrl: './auth.scss',
@@ -37,7 +39,8 @@ export class Auth {
 
   constructor(
     private fb: FormBuilder,
-    private authService: AuthService
+    private authService: AuthService,
+    private snackBar: MatSnackBar // Inject MatSnackBar
   ) {
     this.loginForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
@@ -81,9 +84,15 @@ export class Auth {
     ).subscribe({
       next: res => {
         console.log('REGISTER SUCCESS:', res);
+        this.snackBar.open('User registered successfully!', 'Close', {
+          duration: 3000,
+        });
       },
       error: err => {
         console.error('REGISTER ERROR:', err);
+        this.snackBar.open('Registration failed. Please try again.', 'Close', {
+          duration: 3000,
+        });
       },
     });
   }

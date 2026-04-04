@@ -55,6 +55,13 @@ export class SpotifyService {
   // Event emitted when local user takes an action that should be synced
   public syncAction$ = new Subject<{ command: string, data: any }>();
 
+  // Track the last state we synced to avoid loops and detect external changes
+  private lastSyncedUri: string | null = null;
+  private lastSyncedPaused: boolean | null = null;
+  private lastSyncedPosition: number = 0;
+  private lastCheckTime: number = 0;
+  private isFirstPoll: boolean = true;
+
   private readonly API_BASE = 'https://api.spotify.com/v1';
   // Use the VPS IP for the backend API
   private readonly BACKEND_API = `${environment.apiURL}`;
@@ -113,6 +120,7 @@ export class SpotifyService {
       )
       .subscribe(state => {
         if (state) {
+          this.checkAndEmitSync(state);
           this.isPaused$.next(state.paused);
           this.shuffleState$.next(state.shuffle_state);
           this.currentTrack$.next(state.track_window?.current_track);
@@ -132,6 +140,45 @@ export class SpotifyService {
       this.pollingSub.unsubscribe();
       this.pollingSub = null;
     }
+  }
+
+  private checkAndEmitSync(state: any) {
+    if (!state) return;
+    const now = Date.now();
+    const newUri = state.track_window?.current_track?.uri;
+    const newPaused = state.paused;
+    const newPosition = state.position;
+    const newContextUri = state.context?.uri;
+
+    let isSeeked = false;
+    // Only detect seeks if we are playing and were playing before
+    if (newUri && this.lastSyncedUri === newUri && !newPaused && !this.lastSyncedPaused) {
+        const expectedPosition = this.lastSyncedPosition + (now - this.lastCheckTime);
+        if (Math.abs(newPosition - expectedPosition) > 10000) { // 10s threshold
+            isSeeked = true;
+        }
+    }
+
+    const hasChanged = newUri && (newUri !== this.lastSyncedUri || newPaused !== this.lastSyncedPaused || isSeeked);
+
+    if (hasChanged) {
+      // Don't emit on the very first poll to avoid blasting current state upon app load
+      if (!this.isFirstPoll) {
+        this.syncAction$.next({
+          command: isSeeked ? 'seek' : 'sync',
+          data: { uri: newUri, position: newPosition, paused: newPaused, contextUri: newContextUri }
+        });
+      }
+      this.lastSyncedUri = newUri;
+      this.lastSyncedPaused = newPaused;
+      this.lastSyncedPosition = newPosition;
+      this.lastCheckTime = now;
+    } else if (newUri) {
+        // Keep tracking position even if no change emitted
+        this.lastSyncedPosition = newPosition;
+        this.lastCheckTime = now;
+    }
+    this.isFirstPoll = false;
   }
 
   async loadSavedPlaylists() {
@@ -249,6 +296,16 @@ export class SpotifyService {
 
     this.player.addListener('player_state_changed', (state: any) => {
       if (!state) return;
+
+      // Normalize SDK state for checkAndEmitSync
+      const normalizedState = {
+          paused: state.paused,
+          position: state.position,
+          track_window: state.track_window,
+          context: state.context
+      };
+      this.checkAndEmitSync(normalizedState);
+
       this.currentTrack$.next(state.track_window.current_track);
       this.isPaused$.next(state.paused);
       this.shuffleState$.next(state.shuffle);
@@ -354,23 +411,36 @@ export class SpotifyService {
     } catch (err) { return null; }
   }
 
-  async play(uri?: string, positionMs: number = 0, skipSync: boolean = false): Promise<any> {
+  async play(uri?: string, positionMs: number = 0, skipSync: boolean = false, contextUri?: string): Promise<any> {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId || !this.accessToken) return null;
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     let body: any = { position_ms: positionMs };
-    if (uri) {
-      if (uri.includes(':track:')) body.uris = [uri];
+
+    if (contextUri) {
+        body.context_uri = contextUri;
+        if (uri && uri !== contextUri) {
+            body.offset = { uri: uri };
+        }
+    } else if (uri) {
+      if (uri.includes(':track:') || uri.includes(':episode:')) body.uris = [uri];
       else body.context_uri = uri;
     }
+
     try {
       const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/play?device_id=${targetId}`, body, { headers }));
       setTimeout(() => this.loadQueue(), 1000);
 
+      const effectiveUri = uri || this.currentTrack$.value?.uri;
+      this.lastSyncedUri = effectiveUri;
+      this.lastSyncedPaused = false;
+      this.lastSyncedPosition = positionMs;
+      this.lastCheckTime = Date.now();
+
       if (!skipSync) {
         this.syncAction$.next({
           command: 'play',
-          data: { uri, position: positionMs, paused: false }
+          data: { uri: effectiveUri, position: positionMs, paused: false, contextUri: contextUri || (effectiveUri?.includes(':track:') ? undefined : effectiveUri) }
         });
       }
 
@@ -384,15 +454,40 @@ export class SpotifyService {
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/pause?device_id=${targetId}`, {}, { headers }));
 
+    this.lastSyncedPaused = true;
+    const state = await this.getPlaybackState();
+    this.lastSyncedPosition = state?.position || 0;
+    this.lastCheckTime = Date.now();
+
     if (!skipSync) {
-        const state = await this.getPlaybackState();
+        this.lastSyncedUri = state?.track_window?.current_track?.uri;
         this.syncAction$.next({
             command: 'pause',
-            data: { uri: state?.track_window?.current_track?.uri, position: state?.position, paused: true }
+            data: { uri: this.lastSyncedUri, position: this.lastSyncedPosition, paused: true, contextUri: state?.context?.uri }
         });
     }
 
     return res;
+  }
+
+  async seek(positionMs: number, skipSync: boolean = false) {
+    const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
+    if (!targetId || !this.accessToken) return;
+    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    try {
+      await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/seek?position_ms=${positionMs}&device_id=${targetId}`, {}, { headers }));
+
+      this.lastSyncedPosition = positionMs;
+      this.lastCheckTime = Date.now();
+
+      if (!skipSync) {
+        const state = await this.getPlaybackState();
+        this.syncAction$.next({
+          command: 'seek',
+          data: { uri: state?.track_window?.current_track?.uri, position: positionMs, paused: state?.paused, contextUri: state?.context?.uri }
+        });
+      }
+    } catch (err) {}
   }
 
   async nextTrack(skipSync: boolean = false) {
@@ -402,15 +497,19 @@ export class SpotifyService {
     const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/next?device_id=${targetId}`, {}, { headers }));
     setTimeout(() => this.loadQueue(), 1000);
 
-    if (!skipSync) {
-        setTimeout(async () => {
-            const state = await this.getPlaybackState();
+    setTimeout(async () => {
+        const state = await this.getPlaybackState();
+        this.lastSyncedUri = state?.track_window?.current_track?.uri;
+        this.lastSyncedPaused = state?.paused;
+        this.lastSyncedPosition = state?.position || 0;
+        this.lastCheckTime = Date.now();
+        if (!skipSync) {
             this.syncAction$.next({
                 command: 'next',
-                data: { uri: state?.track_window?.current_track?.uri, position: 0, paused: false }
+                data: { uri: this.lastSyncedUri, position: 0, paused: false, contextUri: state?.context?.uri }
             });
-        }, 500);
-    }
+        }
+    }, 500);
 
     return res;
   }
@@ -422,15 +521,19 @@ export class SpotifyService {
     const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/previous?device_id=${targetId}`, {}, { headers }));
     setTimeout(() => this.loadQueue(), 1000);
 
-    if (!skipSync) {
-        setTimeout(async () => {
-            const state = await this.getPlaybackState();
+    setTimeout(async () => {
+        const state = await this.getPlaybackState();
+        this.lastSyncedUri = state?.track_window?.current_track?.uri;
+        this.lastSyncedPaused = state?.paused;
+        this.lastSyncedPosition = state?.position || 0;
+        this.lastCheckTime = Date.now();
+        if (!skipSync) {
             this.syncAction$.next({
                 command: 'previous',
-                data: { uri: state?.track_window?.current_track?.uri, position: 0, paused: false }
+                data: { uri: this.lastSyncedUri, position: 0, paused: false, contextUri: state?.context?.uri }
             });
-        }, 500);
-    }
+        }
+    }, 500);
 
     return res;
   }
@@ -468,7 +571,8 @@ export class SpotifyService {
           paused: state.paused,
           position: state.position,
           shuffle_state: state.shuffle,
-          track_window: state.track_window
+          track_window: state.track_window,
+          context: state.context
         };
       }
     }
@@ -481,7 +585,8 @@ export class SpotifyService {
         paused: !state.is_playing,
         position: state.progress_ms,
         shuffle_state: state.shuffle_state,
-        track_window: { current_track: state.item ? { uri: state.item.uri, name: state.item.name, album: state.item.album, artists: state.item.artists } : null }
+        track_window: { current_track: state.item ? { uri: state.item.uri, name: state.item.name, album: state.item.album, artists: state.item.artists } : null },
+        context: state.context
       };
     } catch (e) { return null; }
   }

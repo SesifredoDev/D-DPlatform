@@ -144,22 +144,38 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
       if (!state.uri || !this.localStream) return;
       const currentState = await this.spotify.getPlaybackState();
+
       const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
       const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
-      const adjustedPosition = state.position + drift;
+      const adjustedPosition = state.position + (state.paused ? 0 : drift);
       const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
       const isDifferentStatus = currentState?.paused !== state.paused;
 
-      if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
+      if (state.command === 'seek') {
+        if (currentState?.track_window?.current_track?.uri === state.uri) {
+          await this.spotify.seek(adjustedPosition, true);
+        }
+      } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
         if (!state.paused) {
-          await this.spotify.play(state.uri, adjustedPosition, true);
+          // If track changed or large drift, play/sync
+          if (isDifferentTrack || isDifferentPosition) {
+             await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
+          } else {
+             await this.spotify.togglePlay(true); // Just unpause
+          }
         } else {
           if (isDifferentTrack) {
-             await this.spotify.play(state.uri, state.position, true);
-             setTimeout(() => this.spotify.pause(true), 500);
+             // Load the track then pause it
+             await this.spotify.play(state.uri, state.position, true, state.contextUri);
+             setTimeout(() => this.spotify.pause(true), 1000);
           } else {
              await this.spotify.pause(true);
           }
+        }
+
+        // Specific seek if track is same but position is off
+        if (!isDifferentTrack && isDifferentPosition && !state.paused) {
+            await this.spotify.seek(adjustedPosition, true);
         }
       }
     });
@@ -178,7 +194,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.videoService.sendSpotifyCommand('sync', {
             uri: state.track_window.current_track.uri,
             position: state.position,
-            paused: state.paused
+            paused: state.paused,
+            contextUri: state.context?.uri
           });
         }
 
