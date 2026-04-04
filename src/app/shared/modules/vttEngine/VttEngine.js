@@ -17,8 +17,8 @@ export class VttEngine {
     this.isDM = false
     this.stage = new Konva.Stage({
       container: containerId,
-      width: this.containerId.getBoundingClientRect().width,
-      height: this.containerId.getBoundingClientRect().height,
+      width: containerId.getBoundingClientRect().width,
+      height: containerId.getBoundingClientRect().height,
       draggable: true
     });
 
@@ -42,8 +42,14 @@ export class VttEngine {
     this.initDefaultMap();
     this.initZoom();
     this.initInteraction();
+  }
 
-    // REMOVED window resize listener to avoid resize loops with ResizeObserver in component
+  setContainer(container) {
+    this.containerId = container;
+    this.stage.container(container);
+    this.stage.width(container.getBoundingClientRect().width);
+    this.stage.height(container.getBoundingClientRect().height);
+    this.stage.batchDraw();
   }
 
   initInteraction() {

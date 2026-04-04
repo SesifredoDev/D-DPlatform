@@ -5,8 +5,7 @@ import {
   OnDestroy,
   ViewChild,
   ElementRef,
-  OnChanges,
-  SimpleChanges,
+  OnChanges,SimpleChanges,
   HostListener,
   ViewChildren,
   QueryList,
@@ -25,13 +24,15 @@ import { ActivatedRoute } from '@angular/router';
 import { SpotifyPlayer } from './spotify-player/spotify-player';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { Theme, ThemeOption, ThemeService } from '../../../shared/services/theme/theme.service';
+import { MatMenuModule } from '@angular/material/menu';
 
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule]
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -60,8 +61,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isPreviewVideoOff = false;
   isJoining = false;
 
-  // Spotify Control
+  // UI States
   showSpotify: boolean = false;
+  showThemePicker: boolean = false;
+
+  // Theme state
+  activeThemeSession: Theme | null = null;
+  availableThemes: ThemeOption[] = [];
 
   // VTT Session state
   vttSession: { active: boolean, roomId: string | null, hostId: string | null } = { active: false, roomId: null, hostId: null };
@@ -71,6 +77,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private streamSub!: Subscription;
   private spotifySyncSub!: Subscription;
   private spotifyActionSub!: Subscription;
+  private spotifyStateRequestSub!: Subscription;
+  private themeSyncSub!: Subscription;
   private vttSub!: Subscription;
 
   private isComponentDestroying = false;
@@ -80,8 +88,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private tabService: TabService,
     public spotify: SpotifyService,
     private route: ActivatedRoute,
-    private cdr: ChangeDetectorRef
-  ) {}
+    private cdr: ChangeDetectorRef,
+    public themeService: ThemeService
+  ) {
+    this.availableThemes = this.themeService.availableThemes;
+  }
 
   async ngOnInit() {
     this.route.queryParams.subscribe(params => {
@@ -157,6 +168,30 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (this.localStream) {
         this.videoService.sendSpotifyCommand(action.command, action.data);
       }
+    });
+
+    this.spotifyStateRequestSub = this.videoService.spotifyStateRequest$.subscribe(async (req) => {
+      // If we are currently playing/have a session, broadcast the state so the new person can sync
+      if (this.localStream) {
+        const state = await this.spotify.getPlaybackState();
+        if (state && state.track_window?.current_track) {
+          this.videoService.sendSpotifyCommand('sync', {
+            uri: state.track_window.current_track.uri,
+            position: state.position,
+            paused: state.paused
+          });
+        }
+
+        // Also sync theme if one is active
+        if (this.activeThemeSession) {
+          this.videoService.sendThemeUpdate(this.activeThemeSession);
+        }
+      }
+    });
+
+    this.themeSyncSub = this.videoService.themeSync$.subscribe(theme => {
+      this.activeThemeSession = theme;
+      this.themeService.applyTemporaryTheme(theme);
     });
 
     this.vttSub = this.videoService.vttSession$.subscribe(session => {
@@ -266,6 +301,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         }
       }, 100);
 
+      // 7. Request Spotify state and Theme from other participants
+      this.videoService.requestSpotifyState();
+
     } catch (err) {
       console.error('[CRITICAL] Join call failed:', err);
       // Clean up on failure
@@ -283,6 +321,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   async leaveCall() {
     await this.videoService.leaveCall(this.channelId);
+    this.themeService.revertToSavedTheme();
+    this.activeThemeSession = null;
     this.localStream = null;
     this.remoteStreams = [];
     this.showSpotify = false;
@@ -335,6 +375,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  syncTheme(theme: Theme) {
+    this.activeThemeSession = theme;
+    this.themeService.applyTemporaryTheme(theme);
+    this.videoService.sendThemeUpdate(theme);
+  }
+
+  previewTheme(theme: Theme) {
+    this.themeService.applyTemporaryTheme(theme);
+  }
+
+  clearThemePreview() {
+    if (this.activeThemeSession) {
+      this.themeService.applyTemporaryTheme(this.activeThemeSession);
+    } else {
+      this.themeService.revertToSavedTheme();
+    }
+  }
+
   @HostListener('window:beforeunload')
   async handleBeforeUnload() {
     this.isComponentDestroying = true;
@@ -347,6 +405,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
+    if (this.spotifyStateRequestSub) this.spotifyStateRequestSub.unsubscribe();
+    if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
 
     // If the videoService is still connected to this channel, it means the tab is being moved,

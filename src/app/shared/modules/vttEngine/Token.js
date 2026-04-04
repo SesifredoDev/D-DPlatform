@@ -195,6 +195,14 @@ class Token {
         y: centerY
       });
     });
+
+    this.group.on('contextmenu', (e) => {
+      e.evt.preventDefault();
+      this.engine.stage.fire('tokenContextMenu', {
+        token: this,
+        evt: e.evt
+      });
+    });
   }
 }
 

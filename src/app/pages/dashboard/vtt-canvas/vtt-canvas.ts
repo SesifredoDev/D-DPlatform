@@ -85,7 +85,15 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
   constructor(private dialog: MatDialog, public syncService: VttSync  ) { }
 
   ngAfterViewInit() {
-    this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
+    // Check if VttSync service already has an engine for this room
+    if (this.syncService.currentRoomId === this.serverId && this.syncService.getEngine()) {
+      this.engine = this.syncService.getEngine()!;
+      // Re-attach the engine to the new container element
+      this.engine.setContainer(this.container.nativeElement);
+      this.engine.stage.batchDraw(); // Redraw to reflect new container
+    } else {
+      this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
+    }
 
     this.engine.stage.on('tokenContextMenu', (data: any) => {
       this.onTokenContextMenu(data);
@@ -121,7 +129,15 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
       this.engine.setPermissions(false);
       this.engine.isDM = false;
     } else if (!this.isHostVttSession && !this.isJoiningVttSession && this.syncService.isConnected) {
-      this.syncService.stopSyncing();
+      // If the component is no longer marked as hosting or joining, but the service is still connected
+      // to this room, it means the tab is being moved/closed without explicit stop.
+      // We only stop syncing if the serverId doesn't match the currentRoomId in the service,
+      // or if the component is explicitly telling it to stop.
+      if (this.syncService.currentRoomId === this.serverId) {
+        // Do nothing, let the service maintain the connection
+      } else {
+        this.syncService.stopSyncing(true); // Force stop if it's a different room or no longer active
+      }
     }
   }
 
@@ -140,6 +156,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
 
   stopSession() {
       this.vttSessionStopped.emit(this.serverId);
+      this.syncService.stopSyncing(true); // Explicitly stop when button is pressed
   }
 
   ngOnDestroy() {
@@ -149,7 +166,15 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     if (this.hostDisconnectedSub) {
       this.hostDisconnectedSub.unsubscribe();
     }
-    this.syncService.stopSyncing();
+
+    // Only stop syncing if the service is no longer managing this specific room,
+    // or if the component is being completely destroyed (e.g., tab closed).
+    // If the service is still connected to this room, it means the tab is being moved.
+    if (this.syncService.currentRoomId === this.serverId) {
+      // Do nothing, the service maintains the connection
+    } else {
+      this.syncService.stopSyncing(true); // Force stop if it's a different room or no longer active
+    }
   }
 
   private handleResize() {

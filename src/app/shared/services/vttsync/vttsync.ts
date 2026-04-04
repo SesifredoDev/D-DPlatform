@@ -43,7 +43,6 @@ export class VttSync {
         if (payload.hostId !== this.socket?.id) {
             this.hostDisconnected$.next(false);
             if (this.isHosting) {
-                // Someone else took over hosting
                 this.isHosting = false;
                 if (this.engine) this.engine.setPermissions(false);
             }
@@ -53,20 +52,33 @@ export class VttSync {
     return this.socket;
   }
   startHosting(engine: VttEngine, roomId: string) {
+    const isReattaching = this.currentRoomId === roomId && this.isHosting && this.isConnected;
+
     this.currentRoomId = roomId;
     this.isHosting = true;
     this.isConnected = true;
     this.engine = engine;
 
     const socket = this.getSocket();
+
+    // If we're reattaching, we don't want to overwrite the server's state with a (possibly blank) engine config.
+    // Instead, we just re-join as host.
     socket.emit('host-session', {
       roomId,
-      initialState: engine.getRawConfig()
+      initialState: isReattaching ? null : engine.getRawConfig()
     });
 
     socket.off('remote-action');
     socket.on('remote-action', (payload: any) => {
       this.handleRemoteAction(engine, payload);
+    });
+
+    socket.off('map-update');
+    socket.on('map-update', (config: any) => {
+      // If we reattached but somehow the engine is blanker than the server,
+      // or if we're a new host taking over, load the state.
+      if (isReattaching && engine.currentMapUrl) return;
+      engine.loadConfigFromObject(config);
     });
 
     this.attachEngineListeners(engine);
@@ -75,16 +87,14 @@ export class VttSync {
   }
 
   joinSession(engine: VttEngine, roomId: string, character: ICharacter) {
-    this.currentRoomId = roomId;
+    const isReattaching = this.currentRoomId === roomId && !this.isHosting && this.isConnected;
 
+    this.currentRoomId = roomId;
     this.isHosting = false;
     this.isConnected = true;
-
     this.engine = engine;
 
-
     engine.setLocalCharacter(character);
-    console.log(character)
 
     const socket = this.getSocket();
     socket.emit('join-session', { roomId, character });
@@ -95,7 +105,10 @@ export class VttSync {
     socket.off('session-ended');
 
     socket.on('map-update', (config: any) => {
-      engine.loadConfigFromObject(config);
+      // Only load if we don't already have a map loaded or if we're not reattaching
+      if (!isReattaching || !engine.currentMapUrl) {
+          engine.loadConfigFromObject(config);
+      }
     });
 
     socket.on('remote-action', (payload: any) => {
@@ -104,19 +117,19 @@ export class VttSync {
 
     socket.on('error', (msg: string) => {
       console.warn('VTT Sync Error:', msg);
-      // We don't alert here to avoid annoying popups if it's just a "room doesn't exist yet"
-      // while we're waiting for a host.
     });
 
     socket.on('session-ended', () => {
       alert('The DM has ended the session.');
-      this.stopSyncing();
+      this.stopSyncing(true);
     });
 
     this.attachEngineListeners(engine);
   }
 
-  stopSyncing() {
+  stopSyncing(force: boolean = false) {
+    if (!force) return;
+
     if (this.socket && this.currentRoomId) {
       if (this.isHosting) {
         this.socket.emit('stop-hosting', this.currentRoomId);
@@ -128,6 +141,7 @@ export class VttSync {
     this.isHosting = false;
     this.isConnected = false;
     this.hostDisconnected$.next(false);
+    this.engine = null;
   }
 
   broadcastAction(action: string, data: any) {

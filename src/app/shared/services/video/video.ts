@@ -4,17 +4,21 @@ import {
   RoomEvent,
   RemoteParticipant,
   RoomConnectOptions,
-  setLogLevel
+  setLogLevel,
+  DataPacket_Kind
 } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
+import { Theme } from '../theme/theme.service';
 
 @Injectable({ providedIn: 'root' })
 export class Video {
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
   public spotifySync$ = new Subject<any>();
+  public themeSync$ = new Subject<Theme>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
+  public spotifyStateRequest$ = new Subject<{ from: string }>();
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
@@ -35,7 +39,13 @@ export class Video {
     this.room
       .on(RoomEvent.TrackSubscribed, () => this.emitParticipants())
       .on(RoomEvent.TrackUnsubscribed, () => this.emitParticipants())
-      .on(RoomEvent.ParticipantConnected, () => this.emitParticipants())
+      .on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
+          this.emitParticipants();
+          // When someone new joins, if we are the host of a VTT session, broadcast it again
+          if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
+              this.sendVttCommand('start', this.vttSession$.value.roomId!);
+          }
+      })
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
           this.emitParticipants();
           if (this.vttSession$.value.hostId === participant.identity) {
@@ -52,6 +62,10 @@ export class Video {
               from: participant?.identity,
               command: data.command
             });
+          } else if (data.type === 'spotify-state-request') {
+            this.spotifyStateRequest$.next({ from: participant?.identity || '' });
+          } else if (data.type === 'theme-sync') {
+            this.themeSync$.next(data.theme);
           } else if (data.type === 'vtt-session') {
             this.vttSession$.next({
               active: data.command === 'start',
@@ -126,6 +140,23 @@ export class Video {
         ...data,
         timestamp: Date.now()
       }
+    }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  sendThemeUpdate(theme: Theme) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'theme-sync',
+      theme
+    }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  requestSpotifyState() {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'spotify-state-request'
     }));
     this.room.localParticipant.publishData(payload, { reliable: true });
   }

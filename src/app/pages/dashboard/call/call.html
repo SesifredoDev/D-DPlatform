@@ -197,11 +197,43 @@
           <button *ngIf="vttSession.active && vttSession.hostId !== character.name" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
             <mat-icon>group_add</mat-icon>
           </button>
+
+          <!-- Custom Theme Picker Toggle -->
+          <button (click)="showThemePicker = !showThemePicker" class="btn-action" [class.active]="showThemePicker" matTooltip="Atmosphere Settings">
+            <mat-icon>palette</mat-icon>
+          </button>
+
           <button (click)="leaveCall()" class="btn-action btn-danger" matTooltip="Leave Call">
             <mat-icon>call_end</mat-icon>
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Theme Picker Custom Overlay -->
+    <div class="theme-picker-overlay glass" *ngIf="showThemePicker">
+        <div class="overlay-header">
+            <h3>Atmosphere</h3>
+            <button class="btn-close" (click)="showThemePicker = false">
+                <mat-icon>close</mat-icon>
+            </button>
+        </div>
+
+        <div class="theme-scroll-area" (click)="$event.stopPropagation()">
+          @for (t of availableThemes; track t.id) {
+            <div class="theme-item"
+                 (click)="syncTheme(t.id)"
+                 (mouseenter)="previewTheme(t.id)"
+                 (mouseleave)="clearThemePreview()">
+              <div class="theme-swatch" [class.active]="activeThemeSession === t.id">
+                  <div class="swatch-split primary" [style.background]="t.primary"></div>
+                  <div class="swatch-split secondary" [style.background]="t.secondary"></div>
+                  <mat-icon *ngIf="activeThemeSession === t.id">check</mat-icon>
+              </div>
+              <span class="theme-label">{{ t.name }}</span>
+            </div>
+          }
+        </div>
     </div>
   }
 

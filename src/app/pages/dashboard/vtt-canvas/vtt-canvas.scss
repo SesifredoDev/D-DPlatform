@@ -8,7 +8,7 @@
   height: 100%;
   position: relative;
   overflow: hidden;
-  background-color: var(--background-alt);
+  background-color: var(--background);
 }
 
 /* --- Map Drawer --- */
@@ -19,15 +19,15 @@
   transform: translateX(-50%) translateY(calc(100% - 40px));
   width: 90%;
   max-width: 900px;
-  background: rgba(30, 31, 34, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-  border: 1px solid var(--outline);
+  border: 2px solid var(--outline);
   border-bottom: none;
   z-index: 1000;
   transition: transform 0.4s cubic-bezier(0.19, 1, 0.22, 1);
-  box-shadow: var(--shadow-4);
+  box-shadow: 0 -10px 30px rgba(0,0,0,0.5), 0 0 20px var(--primary-glow);
 
   &.open {
     transform: translateX(-50%) translateY(0);
@@ -41,15 +41,16 @@
   justify-content: center;
   gap: 12px;
   cursor: pointer;
-  font-weight: 700;
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  color: var(--on-surface-muted);
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 2px;
+  background: var(--primary);
+  color: #fff;
   text-transform: uppercase;
-  transition: color var(--transition-standard);
+  transition: all var(--transition-standard);
 
   &:hover {
-    color: white;
+    filter: brightness(1.2);
     mat-icon { transform: translateY(-2px); }
   }
 
@@ -60,9 +61,10 @@
   padding: var(--space-m);
   max-height: 300px;
   overflow-x: auto;
+  background: var(--surface);
 
-  &::-webkit-scrollbar { height: 4px; }
-  &::-webkit-scrollbar-thumb { background: var(--outline); border-radius: 10px; }
+  &::-webkit-scrollbar { height: 6px; }
+  &::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 10px; }
 }
 
 .library-grid {
@@ -78,8 +80,8 @@
 
   &:hover {
     transform: translateY(-4px);
-    .thumbnail { border-color: var(--brand-blue); box-shadow: 0 4px 15px rgba(0,0,0,0.4); }
-    .map-label { color: white; }
+    .thumbnail { border-color: var(--primary); box-shadow: 0 0 15px var(--primary-glow); }
+    .map-label { color: var(--primary); }
   }
 
   .thumbnail, .thumbnail-placeholder {
@@ -89,7 +91,7 @@
     background-size: cover;
     background-position: center;
     background-color: rgba(0,0,0,0.3);
-    border: 1px solid var(--outline);
+    border: 2px solid var(--outline);
     position: relative;
     overflow: hidden;
     transition: all var(--transition-standard);
@@ -98,38 +100,32 @@
   .thumbnail-placeholder {
     display: flex; align-items: center; justify-content: center;
     border: 2px dashed var(--outline);
-    color: var(--on-surface-muted);
+    color: var(--on-background);
     mat-icon { font-size: 32px; width: 32px; height: 32px; }
   }
 
   .map-label {
-    display: block; margin-top: 8px; font-size: 12px; font-weight: 600;
-    text-align: center; color: var(--on-surface-muted);
+    display: block; margin-top: 8px; font-size: 12px; font-weight: 700;
+    text-align: center; color: var(--on-background);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-
-  .overlay-stats {
-    position: absolute; bottom: 0; width: 100%;
-    background: linear-gradient(transparent, rgba(0,0,0,0.8));
-    font-size: 10px; padding: 12px 8px 6px;
-    display: flex; align-items: center; gap: 4px; color: white;
-    mat-icon { font-size: 14px; width: 14px; height: 14px; }
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
   }
 }
 
 /* --- Map Indicator --- */
 .current-map-indicator {
   position: absolute; top: 16px; left: 16px; z-index: 100;
-  background: rgba(30, 31, 34, 0.6);
-  backdrop-filter: blur(10px);
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
   padding: 8px 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--outline);
-  font-size: 12px; font-weight: 600;
+  border: 2px solid var(--primary);
+  font-size: 12px; font-weight: 800;
   display: flex; align-items: center; gap: 8px;
-  color: white;
+  color: var(--on-background);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.4), 0 0 10px var(--primary-glow);
   pointer-events: none;
-  mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--brand-blue); }
+  mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--primary); }
 }
 
 /* --- VTT Toolbar --- */
@@ -142,13 +138,12 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: rgba(30, 31, 34, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
   padding: 10px;
   border-radius: var(--radius-xl);
-  border: 1px solid var(--outline);
-  box-shadow: var(--shadow-4);
+  border: 2px solid var(--outline);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 20px var(--primary-glow);
   width: fit-content;
 }
 
@@ -163,31 +158,32 @@
 
 /* --- Buttons --- */
 button[mat-icon-button] {
-  width: 40px !important;
-  height: 40px !important;
-  border-radius: var(--radius-l) !important;
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: var(--radius-m) !important;
   background: transparent !important;
-  color: var(--on-surface-muted) !important;
+  color: var(--on-background) !important;
   transition: all 0.2s ease !important;
 
-  mat-icon { font-size: 20px; width: 20px; height: 20px; }
+  mat-icon { font-size: 22px; width: 22px; height: 22px; }
 
   &:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
-    color: white !important;
-    transform: translateX(2px);
+    background: var(--primary-glow) !important;
+    color: var(--primary) !important;
+    transform: scale(1.1);
   }
 
   &.active {
-    background: var(--brand-blue-alpha) !important;
-    color: white !important;
-    border: 1px solid var(--brand-blue) !important;
+    background: var(--primary) !important;
+    color: #fff !important;
+    box-shadow: 0 0 15px var(--primary-glow);
+    border: none !important;
   }
 
   &.active-light {
-    background: rgba(254, 231, 92, 0.2) !important;
-    color: #fee75c !important;
-    border: 1px solid #fee75c !important;
+    background: #fee75c !important;
+    color: #000 !important;
+    box-shadow: 0 0 15px rgba(254, 231, 92, 0.6);
   }
 }
 
@@ -199,21 +195,20 @@ button[mat-icon-button] {
   gap: 4px;
   padding: 4px;
 
-  .tiny { font-size: 14px; color: var(--on-surface-variant); }
+  .tiny { font-size: 14px; color: var(--primary); }
 
   input[type="number"] {
-    width: 36px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--outline);
-    color: white;
-    font-size: 10px;
-    font-weight: 700;
+    width: 40px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid var(--primary);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
     text-align: center;
-    padding: 4px 0;
+    padding: 6px 0;
     border-radius: var(--radius-s);
     outline: none;
-    &:focus { border-color: var(--brand-blue); }
-    &::-webkit-inner-spin-button { display: none; }
+    &:focus { box-shadow: 0 0 8px var(--primary-glow); }
   }
 }
 
@@ -221,57 +216,7 @@ button[mat-icon-button] {
 #vtt-container {
   width: 100%;
   height: 100%;
-  background-color: #0b0b0d;
-  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+  background-color: var(--background);
+  background-image: radial-gradient(circle at 1px 1px, var(--outline) 1px, transparent 0);
   background-size: 50px 50px;
-  cursor: crosshair;
-}
-
-#vtt-container:active { cursor: grabbing; }
-
-/* --- Token Menu Styles --- */
-::ng-deep .token-config-menu {
-  .mat-mdc-menu-panel {
-    background: rgba(30, 31, 34, 0.9) !important;
-    backdrop-filter: blur(20px) !important;
-    border: 1px solid var(--outline) !important;
-    border-radius: var(--radius-xl) !important;
-    padding: 20px !important;
-    max-width: 320px !important;
-  }
-
-  .menu-header {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 16px; color: white;
-    h3 { margin: 0; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
-    mat-icon { font-size: 20px; color: var(--brand-blue); }
-  }
-
-  .token-preview-area {
-    position: relative; display: flex; justify-content: center; margin-bottom: 20px;
-    .preview-circle {
-      width: 70px; height: 70px; border-radius: var(--radius-round);
-      background-size: cover; background-position: center; border: 2px solid white;
-      box-shadow: var(--shadow-2);
-    }
-    .icon-upload-btn {
-      position: absolute; bottom: 0; right: 50%; transform: translateX(40px);
-      background: var(--brand-blue); color: white; width: 28px; height: 28px;
-      border-radius: var(--radius-round); display: flex; align-items: center; justify-content: center;
-      cursor: pointer; border: 2px solid #1e1f22;
-      mat-icon { font-size: 14px; width: 14px; height: 14px; }
-    }
-  }
-
-  .color-grid {
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-top: 8px;
-    .color-swatch {
-      aspect-ratio: 1; border-radius: 4px; cursor: pointer; border: 2px solid transparent;
-      &.active { border-color: white; box-shadow: 0 0 8px rgba(255,255,255,0.4); }
-    }
-  }
-
-  .menu-footer {
-    display: flex; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--outline);
-    button[mat-raised-button] { flex: 1; background: var(--brand-blue); font-weight: 700; }
-  }
 }
