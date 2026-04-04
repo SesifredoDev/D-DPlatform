@@ -1,10 +1,5 @@
-
-// Include theming for Angular Material with `mat.theme()`.
-// This Sass mixin will define CSS variables that are used for styling Angular Material
-// components according to the Material 3 design spec.
-// Learn more about theming and how to use it for your application's
-// custom components at https://material.angular.dev/guide/theming
 @use '@angular/material' as mat;
+@import 'styles/themes/variables';
 
 html {
   height: 100%;
@@ -19,31 +14,44 @@ html {
 }
 
 body {
-  // Default the application to a light color theme. This can be changed to
-  // `dark` to enable the dark color theme, or to `light dark` to defer to the
-  // user's system settings.
   color-scheme: dark;
-
-  // Set a default background, font and text colors for the application using
-  // Angular Material's system-level CSS variables. Learn more about these
-  // variables at https://material.angular.dev/guide/system-variables
-  background-color: var(--mat-sys-surface);
-  color: var(--mat-sys-on-surface);
+  background-color: var(--background);
+  color: var(--on-background);
   font: var(--mat-sys-body-medium);
-
-  // Reset the user agent margin.
   margin: 0;
   height: 100%;
 }
-/* You can add global styles to this file, and also import other style files */
+
+/* =============================================================================
+   GLOBAL DIALOG GLASS OVERRIDES (Angular Material)
+   ============================================================================= */
+
+::ng-deep .glass-dialog-container {
+  .mat-mdc-dialog-container {
+    --mdc-dialog-container-color: transparent !important;
+    --mdc-dialog-container-elevation-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .mat-mdc-dialog-surface {
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+}
+
+/* =============================================================================
+   CUSTOM UI COMPONENTS
+   ============================================================================= */
 
 .token-config-menu {
-  padding: 1rem;
+  padding: var(--space-m);
+
   .mat-mdc-menu-panel {
-    background-color: #1a1a1a;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.8);
+    background-color: var(--surface);
+    border: 1px solid var(--surface-variant);
+    border-radius: var(--radius-l);
+    box-shadow: var(--shadow-3);
     padding: 20px;
     min-width: 300px;
     backdrop-filter: blur(10px);
@@ -52,7 +60,7 @@ body {
   .menu-content {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-m);
 
     .menu-header {
       display: flex;
@@ -74,13 +82,13 @@ body {
       .preview-circle {
         width: 80px;
         height: 80px;
-        border-radius: 50%;
+        border-radius: var(--radius-round);
         border-style: solid;
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-        transition: all 0.2s;
+        box-shadow: var(--shadow-2);
+        transition: all var(--transition-fast);
       }
 
       .icon-upload-btn {
@@ -92,14 +100,14 @@ body {
         color: white;
         width: 32px;
         height: 32px;
-        border-radius: 50%;
+        border-radius: var(--radius-round);
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-        border: 2px solid #1a1a1a;
-        transition: transform 0.2s;
+        box-shadow: var(--shadow-1);
+        border: 2px solid var(--surface);
+        transition: transform var(--transition-fast);
 
         &:hover { transform: translateX(45px) scale(1.1); background: var(--accent-hover); }
         .material-icons { font-size: 16px; }
@@ -108,32 +116,34 @@ body {
 
     .config-row {
       display: flex;
-      gap: 12px;
+      gap: var(--space-s);
       align-items: center;
     }
 
-    .checkbox-container {
-      margin-top: -10px;
-      .mat-mdc-checkbox { --mdc-checkbox-selected-focus-icon-color: var(--accent); }
-    }
-
     .color-picker-section {
-      .section-label { font-size: 11px; text-transform: uppercase; color: #777; letter-spacing: 1px; display: block; margin-bottom: 8px; }
+      .section-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--on-surface-variant);
+        letter-spacing: 1px;
+        display: block;
+        margin-bottom: var(--space-s);
+      }
 
       .color-grid {
         display: grid;
         grid-template-columns: repeat(6, 1fr);
-        gap: 8px;
+        gap: var(--space-s);
 
         .color-swatch {
           aspect-ratio: 1;
-          border-radius: 6px;
+          border-radius: var(--radius-s);
           cursor: pointer;
           border: 2px solid transparent;
-          transition: transform 0.1s;
+          transition: transform var(--transition-fast);
 
           &:hover { transform: scale(1.1); }
-          &.active { border-color: white; box-shadow: 0 0 10px rgba(255,255,255,0.3); }
+          &.active { border-color: var(--on-surface); box-shadow: 0 0 10px rgba(255,255,255,0.3); }
         }
       }
     }
@@ -143,7 +153,7 @@ body {
       justify-content: space-between;
       margin-top: 10px;
       padding-top: 15px;
-      border-top: 1px solid rgba(255,255,255,0.1);
+      border-top: 1px solid var(--surface-variant);
 
       button[mat-raised-button] {
         flex: 1;
@@ -151,13 +161,6 @@ body {
         background-color: var(--accent);
         font-weight: 500;
       }
-    }
-
-    /* Compact Field Styling */
-    ::ng-deep .compact {
-      .mat-mdc-form-field-flex { background-color: rgba(255,255,255,0.05) !important; padding: 0 12px !important; }
-      .mat-mdc-form-field-infix { padding: 12px 0 !important; min-height: unset !important; }
-      .mat-mdc-floating-label { top: 22px !important; }
     }
   }
 }

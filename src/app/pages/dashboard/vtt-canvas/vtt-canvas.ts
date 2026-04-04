@@ -13,14 +13,15 @@ import { MatInputModule } from '@angular/material/input';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
 import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
+import {Subscription} from 'rxjs';
 
 @Component({
   selector: 'app-vtt-canvas',
+  standalone: true,
   imports: [
     DatePipe,
     NgForOf,
     NgIf,
-    NgStyle,
     MatIconButton,
     MatIcon,
     MatMenuModule,
@@ -74,15 +75,17 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     '#2E2E2E', '#ffffff', '#ffeb3b', '#e91e63', '#9c27b0'
   ];
 
+  public showHostTakeover = false;
+  private hostDisconnectedSub!: Subscription;
+
   // Expose sync state to UI
   get isSyncing() { return this.syncService.isConnected; }
   get isHosting() { return this.syncService.isHosting; }
 
-  constructor(private dialog: MatDialog, public syncService: VttSync) { }
+  constructor(private dialog: MatDialog, public syncService: VttSync  ) { }
 
   ngAfterViewInit() {
     this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
-    console.log("Character loaded!"+ this.character);
 
     this.engine.stage.on('tokenContextMenu', (data: any) => {
       this.onTokenContextMenu(data);
@@ -91,9 +94,13 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     this.loadLibrary();
 
     this.resizeObserver = new ResizeObserver(() => {
-      this.handleResize();
+      window.requestAnimationFrame(() => this.handleResize());
     });
     this.resizeObserver.observe(this.container.nativeElement);
+
+    this.hostDisconnectedSub = this.syncService.hostDisconnected$.subscribe(disconnected => {
+        this.showHostTakeover = disconnected && !this.isHosting;
+    });
 
     this.handleSyncState();
   }
@@ -108,16 +115,27 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     if (this.isHostVttSession && !this.syncService.isHosting) {
       this.syncService.startHosting(this.engine, this.serverId);
       this.engine.setPermissions(true);
+      this.engine.isDM = true;
     } else if (this.isJoiningVttSession && !this.syncService.isConnected) {
-      this.syncService.joinSession(this.engine, this.serverId, this.character);
+      this.joinSession();
       this.engine.setPermissions(false);
+      this.engine.isDM = false;
     } else if (!this.isHostVttSession && !this.isJoiningVttSession && this.syncService.isConnected) {
       this.syncService.stopSyncing();
     }
   }
 
+  joinSession() {
+    this.syncService.joinSession(this.engine, this.serverId, this.character);
+    this.engine.setPermissions(false);
+    this.engine.isDM = false;
+  }
+
   startHostingSession() {
-      this.vttSessionHosted.emit(this.serverId);
+      this.syncService.startHosting(this.engine, this.serverId);
+      this.engine.setPermissions(true);
+      this.engine.isDM = true;
+      this.showHostTakeover = false;
   }
 
   stopSession() {
@@ -128,22 +146,30 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
+    if (this.hostDisconnectedSub) {
+      this.hostDisconnectedSub.unsubscribe();
+    }
     this.syncService.stopSyncing();
   }
 
   private handleResize() {
     if (this.engine && this.container) {
-      const width = this.container.nativeElement.getBoundingClientRect().width;
-      const height = this.container.nativeElement.getBoundingClientRect().height;
-      this.engine.stage.width(width);
-      this.engine.stage.height(height);
-      this.engine.centerMap();
+      const rect = this.container.nativeElement.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+
+      // Only resize if values actually changed to prevent loop
+      if (this.engine.stage.width() !== width || this.engine.stage.height() !== height) {
+        this.engine.stage.width(width);
+        this.engine.stage.height(height);
+        this.engine.centerMap();
+        this.engine.stage.batchDraw();
+      }
     }
   }
 
   // --- Token Context Menu ---
   onTokenContextMenu({ token, evt }: any) {
-    // Only DM or Owner can edit
     if (!token.checkPermissions()) return;
 
     this.selectedToken = token;
@@ -210,14 +236,12 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
 
   setMeasureTool(tool: 'line' | 'radius' | 'none') {
     this.activeTool = tool;
-    // Turn off wall modes if we start measuring
     this.engine.wallManager.setMode('none');
     this.engine.setMeasurementMode(tool);
   }
 
   setTool(mode: 'select' | 'draw' | 'delete') {
     this.activeTool = mode;
-    // Turn off measurement mode if we switch to a standard tool
     this.engine.setMeasurementMode('none');
 
     if (mode === 'select') {
@@ -294,7 +318,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     this.engine.loadConfigFromObject(map.data);
     this.showLibraryOverlay = false;
 
-    // Broadcast the full new map state if we are currently syncing
     if (this.isSyncing) {
       this.syncService.broadcastAction('map-load', this.engine.getRawConfig());
     }

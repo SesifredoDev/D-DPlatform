@@ -1,5 +1,5 @@
 import {ChangeDetectorRef, Component, HostListener, OnInit} from '@angular/core';
-import {MatButtonModule} from '@angular/material/button';
+import {MatButtonModule, MatIconButton} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
 import {CharacterService} from '../../shared/services/character/character';
 import {SidePanel} from './side-panel/side-panel';
@@ -12,54 +12,75 @@ import {CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup} from '@angular/cdk/
 import {CharacterViewer} from './character-viewer/character-viewer';
 import {VttCanvas} from './vtt-canvas/vtt-canvas';
 import {SpotifyPlayer} from './call/spotify-player/spotify-player';
+import {Video} from '../../shared/services/video/video';
+import {CommonModule} from '@angular/common';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [MatButtonModule, SidePanel, Call, TextChannel, MatIconModule, CdkDropList, CdkDrag, CdkDropListGroup, CharacterViewer, VttCanvas, SpotifyPlayer],
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatButtonModule,
+    MatIconButton,
+    SidePanel,
+    Call,
+    TextChannel,
+    MatIconModule,
+    CdkDropList,
+    CdkDrag,
+    CdkDropListGroup,
+    CharacterViewer,
+    VttCanvas,
+    SpotifyPlayer
+  ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
 export class Dashboard implements OnInit {
-
-  showMessages = false;
-  showVideo = false;
-  activeChannel: any = null;
-  messageChannelID: string = "";
-
-  userInfo: any = null;
-
-  activeCharacter: any = null;
-  activeCharacterID: string | undefined;
 
   leftTabs: Tab[] = [];
   rightTabs: Tab[] = [];
   leftWidth: number = window.innerWidth / 2;
   isResizing = false;
 
+  userInfo: any = null;
+  activeCharacter: any = null;
+  activeCharacterID: string | undefined;
+
   vttHostSessionId: string | null = null;
   vttJoinSessionId: string | null = null;
 
-  get activeLeftTab() { return this.leftTabs.find(t => t.active); }
-  get activeRightTab() { return this.rightTabs.find(t => t.active); }
-
-
-  constructor(private tabService: TabService, private characterService: CharacterService, private userService: UserService,private channelService: ChannelService) {
-  }
+  constructor(
+    private tabService: TabService,
+    private characterService: CharacterService,
+    private userService: UserService,
+    private channelService: ChannelService,
+    private videoService: Video,
+    private cdr: ChangeDetectorRef
+  ) {}
 
   ngOnInit() {
     this.tabService.tabs$.subscribe(tabs => {
       this.leftTabs = tabs.filter(t => t.pane === 'left');
       this.rightTabs = tabs.filter(t => t.pane === 'right');
+      this.cdr.detectChanges();
     });
 
-    this.userService.getMe().subscribe(user =>{
-        this.userInfo = user;
-        this.setupActiveCharacterListener();
+    this.userService.getMe().subscribe(user => {
+      this.userInfo = user;
+      this.setupActiveCharacterListener();
     });
 
     this.channelService.getChannelObservable().subscribe((channel: any) => {
       if (channel && channel._id) {
         this.tabService.openTab(channel._id, channel.name, channel.type);
+      }
+    });
+
+    this.videoService.vttSession$.subscribe(session => {
+      if (!session.active) {
+        this.vttHostSessionId = null;
+        this.vttJoinSessionId = null;
       }
     });
   }
@@ -70,16 +91,8 @@ export class Dashboard implements OnInit {
         this.activeCharacter = {
           _id: this.userInfo._id || '0',
           ownerId: this.userInfo._id,
-          servers: [],
           name: this.userInfo.username || 'User',
-          baseStats: {
-            strength: 0,
-            dexterity: 0,
-            constitution: 0,
-            intelligence: 0,
-            wisdom: 0,
-            charisma: 0
-          },
+          baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
           classes: []
         };
       } else if (character) {
@@ -87,23 +100,6 @@ export class Dashboard implements OnInit {
         this.activeCharacterID = character._id === '0' ? undefined : character._id;
       }
     });
-  }
-
-  onHostVtt(channelId: string) {
-    this.vttHostSessionId = channelId;
-    this.vttJoinSessionId = null;
-    this.tabService.openTab(channelId, 'VTT', 'vtt', 'right');
-  }
-
-  onJoinVtt(channelId: string) {
-    this.vttJoinSessionId = channelId;
-    this.vttHostSessionId = null;
-    this.tabService.openTab(channelId, 'VTT', 'vtt', 'right');
-  }
-
-  onStopVtt(channelId: string) {
-    if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
-    if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
   }
 
   startResizing(event: MouseEvent) {
@@ -143,12 +139,31 @@ export class Dashboard implements OnInit {
     }
   }
 
-  toggleMessages() {
-    this.showMessages = !this.showMessages;
+  getAppIcon(type: string): string {
+    switch (type) {
+      case 'text': return 'chat';
+      case 'call': return 'videocam';
+      case 'character': return 'person';
+      case 'vtt': return 'map';
+      case 'spotify': return 'music_note';
+      default: return 'window';
+    }
   }
 
-  popOutComponent(type: 'video' | 'chat') {
-    const url = `/${type}-standalone?id=${this.activeChannel?._id}`;
-    window.open(url, '_blank', 'nodeIntegration=no,contextIsolation=yes,width=800,height=600');
+  onHostVtt(channelId: string) {
+    this.vttHostSessionId = channelId;
+    this.vttJoinSessionId = null;
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', 'right');
+  }
+
+  onJoinVtt(channelId: string) {
+    this.vttJoinSessionId = channelId;
+    this.vttHostSessionId = null;
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', 'right');
+  }
+
+  onStopVtt(channelId: string) {
+    if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
+    if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
   }
 }

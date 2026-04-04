@@ -1,72 +1,117 @@
-@if (character){
+@if (character) {
+  <div class="character-viewer-container">
 
+    <!-- Character Header (Glass) -->
+    <header class="character-header">
+      <div class="header-main">
+        <div class="avatar-wrapper">
+          <img [src]="character.icon || 'https://www.gravatar.com/avatar/'+character._id+'?d=identicon'" class="char-avatar" alt="Character Icon">
+        </div>
+        <div class="char-meta">
+          <h1 class="char-name">{{ character.name }}</h1>
+          <div class="char-subtext">
+            <span class="race">{{ character.race || 'Unknown Race' }}</span>
+            <span class="divider">•</span>
+            <span class="classes-summary">
+              @for (cls of character.classes; track cls; let last = $last) {
+                Level {{ cls.level }} {{ cls.className }}{{ last ? '' : ', ' }}
+              }
+            </span>
+          </div>
+        </div>
+      </div>
 
-<!-- Tabs -->
-<mat-tab-group class="viewer-tabs">
-    <mat-tab *ngIf="character?.ddbId" label="DnD Beyond Charcater Sheet">
-      <iframe [src]="ddbUrl" class="viewer-frame" loading="lazy"></iframe>
-    </mat-tab>
-
-    <mat-tab *ngIf="pdfUrl" label="Provided PDF">
-      <mat-card class="character-card" >
-        <mat-card-header>
-          <img
-            *ngIf="character.icon"
-            mat-card-avatar
-            [src]="character.icon"
-            alt="Character icon"
-          />
-
-          <mat-card-title>{{ character.name }}</mat-card-title>
-          <mat-card-subtitle>
-            {{ character.race || 'Unknown Race' }}
-          </mat-card-subtitle>
-        </mat-card-header>
-
-        <mat-card-content>
-          <!-- Classes -->
-          <section class="classes">
-            <div *ngFor="let cls of character.classes">
-              <strong>{{ cls.className }}</strong>
-              <span *ngIf="cls.subclassName">
-          ({{ cls.subclassName }})
-        </span>
-              – Level {{ cls.level }}
+      <div class="header-stats">
+        @if (character.ac) {
+          <div class="quick-stat ac-pill">
+            <mat-icon>shield</mat-icon>
+            <div class="stat-content">
+              <span class="label">Armor Class</span>
+              <span class="value">{{ character.ac }}</span>
             </div>
-          </section>
+          </div>
+        }
+      </div>
+    </header>
 
-          <!-- Base Stats -->
-          <section class="stats-grid">
-            <div class="stat" *ngFor="let stat of character.baseStats | keyvalue">
-              <div class="stat-name">{{ stat.key | titlecase }}</div>
-              <div class="stat-value">{{ stat.value }}</div>
-              <div class="stat-mod">
-                {{ modifier(stat.value) }}
+    <!-- Main Content Area -->
+    <div class="viewer-content">
+
+      <mat-tab-group class="modern-tabs" mat-stretch-tabs="false">
+
+        <!-- Stats Overview Tab -->
+        <mat-tab label="Overview">
+          <div class="overview-grid">
+
+            <!-- Left Column: Core Stats -->
+            <div class="stats-column">
+              <h3 class="section-title">Ability Scores</h3>
+              <div class="stats-grid">
+                @for (stat of character.baseStats | keyvalue; track stat.key) {
+                  <div class="stat-card">
+                    <span class="stat-label">{{ stat.key | slice:0:3 | uppercase }}</span>
+                    <span class="stat-value">{{ stat.value }}</span>
+                    <span class="stat-mod" [class.positive]="modifierValue(stat.value) >= 0">
+                      {{ modifier(stat.value) }}
+                    </span>
+                  </div>
+                }
               </div>
             </div>
-          </section>
 
-          <div class="ac" *ngIf="character.ac">
-            <strong>Armor Class:</strong> {{ character.ac }}
+            <!-- Right Column: Classes & Extra Info -->
+            <div class="info-column">
+              <h3 class="section-title">Class Details</h3>
+              <div class="class-list">
+                @for (cls of character.classes; track cls) {
+                  <div class="class-card">
+                    <div class="class-header">
+                      <span class="class-name">{{ cls.className }}</span>
+                      <span class="class-level">Lv {{ cls.level }}</span>
+                    </div>
+                    @if (cls.subclassName) {
+                      <div class="subclass-name">{{ cls.subclassName }}</div>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+
           </div>
-        </mat-card-content>
-      </mat-card>
-      <pdf-viewer
-        [src]="pdfUrl"
-        [render-text]="true"
-        [original-size]="false"
-        [zoom]="zoom"
-        [page]="page"
+        </mat-tab>
 
-        style="display: block; height: 80vh"
-      >
-      </pdf-viewer>
-    </mat-tab>
+        <!-- PDF View Tab -->
+        @if (pdfUrl) {
+          <mat-tab label="Sheet (PDF)">
+            <div class="pdf-container">
+              <pdf-viewer
+                [src]="pdfUrl"
+                [render-text]="true"
+                [original-size]="false"
+                [zoom]="zoom"
+                [page]="page"
+                class="pdf-view"
+              ></pdf-viewer>
+            </div>
+          </mat-tab>
+        }
 
-  <mat-tab *ngIf="!ddbUrl && !pdfUrl" label="No Sheet">
-    <div class="empty-state">
-      No D&D Beyond character or PDF available.
+        <!-- D&D Beyond Tab -->
+        @if (character.ddbId) {
+          <mat-tab label="D&D Beyond">
+            <div class="iframe-container">
+              <iframe [src]="ddbUrl" class="ddb-frame" loading="lazy"></iframe>
+            </div>
+          </mat-tab>
+        }
+
+      </mat-tab-group>
+
     </div>
-  </mat-tab>
-</mat-tab-group>
+  </div>
+} @else {
+  <div class="empty-state">
+    <mat-icon>person_off</mat-icon>
+    <p>No character selected</p>
+  </div>
 }

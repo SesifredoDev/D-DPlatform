@@ -1,7 +1,6 @@
-// src/app/shared/modules/vttEngine/Token.js
+
 import Konva from 'konva';
 
-// noinspection JSAnnotator
 class Token {
   constructor(x, y, engine, options = {}) {
     this.engine = engine;
@@ -32,8 +31,8 @@ class Token {
   }
 
   checkPermissions() {
-    const isDM = this.engine.isDM; // Assuming engine tracks if user is host
-    const currentUserId = this.engine.currentUserId; // You'll need to pass this to the engine
+    const isDM = this.engine.isDM;
+    const currentUserId = this.engine.currentUserId;
     return isDM || (this.ownerId === currentUserId);
   }
 
@@ -140,19 +139,12 @@ class Token {
   snapToGrid() {
     const size = this.engine.gridSize;
 
-    // For multi-tile tokens, we might want to snap differently,
-    // but standard behavior is snapping the center to a grid intersection or center.
-    // If size is 1, it snaps to center of tile.
-    // If size is 2, it snaps to grid intersection (between 4 tiles).
-    // Let's use a simpler approach for now: snap based on size.
-
     let centerX, centerY;
     if (this.size % 2 === 0) {
-      // Even sizes snap to grid intersections
       centerX = Math.round(this.group.x() / size) * size;
       centerY = Math.round(this.group.y() / size) * size;
     } else if (this.size === 0.5) {
-       // Small tokens snap to quarter tiles? Let's just snap to tile centers for now.
+       // Small tokens snap to quarter tiles
        const tileX = Math.floor(this.group.x() / size);
        const tileY = Math.floor(this.group.y() / size);
        centerX = (tileX * size) + (size / 2);
@@ -178,18 +170,29 @@ class Token {
 
   initEvents() {
     this.group.on('dragmove', () => {
-      this.engine.updateLighting();
+      this.engine.updateLighting(); //
     });
 
     this.group.on('dragend', () => {
-      this.snapToGrid();
-    });
+      const size = this.engine.gridSize; //
 
-    this.group.on('contextmenu', (e) => {
-      e.evt.preventDefault();
-      this.engine.stage.fire('tokenContextMenu', {
-        token: this,
-        evt: e.evt
+      const tileX = Math.floor(this.group.x() / size); //
+      const tileY = Math.floor(this.group.y() / size); //
+
+      const centerX = (tileX * size) + (size / 2); //
+      const centerY = (tileY * size) + (size / 2); //
+
+      this.group.position({ x: centerX, y: centerY }); //
+      this.engine.updateLighting(); //
+
+      this.group.getLayer().batchDraw(); //
+
+      console.log(`${this.name} snapped to center of tile [${tileX}, ${tileY}]`); //
+
+      this.engine.stage.fire('tokenMoved', {
+        id: this.group.id(),
+        x: centerX,
+        y: centerY
       });
     });
   }

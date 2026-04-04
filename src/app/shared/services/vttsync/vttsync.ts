@@ -3,6 +3,9 @@ import { io, Socket } from 'socket.io-client';
 import {TokenService} from '../auth/token';
 import {ICharacter} from '../../models/user/character.model';
 import {VttEngine} from '../../modules/vttEngine/VttEngine';
+import {Video} from '../video/video';
+import {environment} from '../../../../environments/environment';
+import { BehaviorSubject } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
 export class VttSync {
@@ -11,11 +14,14 @@ export class VttSync {
   public isHosting = false;
   public isConnected = false;
   private engine: VttEngine| null = null;
-  constructor(private tokenService: TokenService) {
+
+  public hostDisconnected$ = new BehaviorSubject<boolean>(false);
+
+  constructor(private tokenService: TokenService, private callService: Video) {
   }
   private getSocket(): Socket {
     if (!this.socket) {
-      this.socket = io('http://localhost', {
+      this.socket = io(`${environment.mapUrl}`, {
         path: '/map/',
         withCredentials: true,
         transports: ['websocket'],
@@ -26,6 +32,22 @@ export class VttSync {
 
       this.socket.on('connect_error', (err) => {
         console.error('Socket Connection Error:', err.message);
+      });
+
+      this.socket.on('host-disconnected', () => {
+        console.warn('The DM has disconnected. You can assume hosting.');
+        this.hostDisconnected$.next(true);
+      });
+
+      this.socket.on('host-changed', (payload: any) => {
+        if (payload.hostId !== this.socket?.id) {
+            this.hostDisconnected$.next(false);
+            if (this.isHosting) {
+                // Someone else took over hosting
+                this.isHosting = false;
+                if (this.engine) this.engine.setPermissions(false);
+            }
+        }
       });
     }
     return this.socket;
@@ -48,6 +70,8 @@ export class VttSync {
     });
 
     this.attachEngineListeners(engine);
+    this.callService.sendVttCommand("start", roomId);
+    this.hostDisconnected$.next(false);
   }
 
   joinSession(engine: VttEngine, roomId: string, character: ICharacter) {
@@ -79,8 +103,9 @@ export class VttSync {
     });
 
     socket.on('error', (msg: string) => {
-      alert(msg);
-      this.stopSyncing();
+      console.warn('VTT Sync Error:', msg);
+      // We don't alert here to avoid annoying popups if it's just a "room doesn't exist yet"
+      // while we're waiting for a host.
     });
 
     socket.on('session-ended', () => {
@@ -102,6 +127,7 @@ export class VttSync {
     this.currentRoomId = null;
     this.isHosting = false;
     this.isConnected = false;
+    this.hostDisconnected$.next(false);
   }
 
   broadcastAction(action: string, data: any) {
@@ -175,12 +201,10 @@ export class VttSync {
         break;
 
       case 'wall-added':
-        // Call a new method to add just one wall without clearing
         engine.wallManager.addSingleWall(data.points);
         break;
 
       case 'wall-deleted':
-        // Find and destroy the specific wall segment
         engine.wallManager.deleteWallByPoints(data.points);
         break;
 
@@ -199,7 +223,6 @@ export class VttSync {
         break;
 
       case 'grid-size-change':
-        // Use the remote flag 'true' to avoid infinite broadcast loops
         engine.updateGridSize(data.size, true);
         break;
 
@@ -207,15 +230,11 @@ export class VttSync {
         engine.setBackground(data.url, true);
         break;
 
-      // ADD THIS NEW CASE:
       case 'map-load':
-        // The DM loaded a completely new map. This data contains
-        // the full config (tokens, walls, grid, background).
         engine.loadConfigFromObject(data);
         break;
 
       case 'measure-sync':
-        // Direct the packet to the MeasurementManager
         if (engine.measurementManager) {
           engine.measurementManager.handleRemoteAction(data);
         }
@@ -228,40 +247,25 @@ export class VttSync {
     engine.stage.batchDraw();
   }
 
-  // Add this to vttsync.ts
-
-  /**
-   * Adds a character token to the map from an external component.
-   * @param engine The current active VttEngine instance
-   * @param character The ICharacter data to use for the token
-   * @param x Optional X coordinate (defaults to center of view)
-   * @param y Optional Y coordinate (defaults to center of view)
-   */
   addCharacterToken(engine: VttEngine, character: ICharacter, x?: number, y?: number) {
     if (!this.isConnected || !this.currentRoomId) {
       console.error('Cannot add token: Not connected to a session.');
       return;
     }
 
-    // 1. Determine position (default to 100,100 if not provided)
     const posX = x ?? 100;
     const posY = y ?? 100;
 
-    // 2. Prepare the token options based on the ICharacter model
     const tokenOptions = {
-      id: crypto.randomUUID(),     // Unique ID for sync
-      name: character.name,        // From ICharacter
-      icon: character.icon,        // Image URL from ICharacter
-      ownerId: character.ownerId,  // For permission checks
-      isPlayer: true               // Flags it as a player token
+      id: crypto.randomUUID(),
+      name: character.name,
+      icon: character.icon,
+      ownerId: character.ownerId,
+      isPlayer: true
     };
 
-    // 3. Add to local engine immediately
-    // Note: 'remote: false' ensures we don't trigger an infinite loop
-    // if the engine emits 'tokenAdded' back to the service.
     engine.addToken(posX, posY, tokenOptions, false);
 
-    // 4. Broadcast to the server so other players see it
     this.broadcastAction('token-added', {
       x: posX,
       y: posY,

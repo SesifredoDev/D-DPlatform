@@ -32,7 +32,12 @@
 
             "assets": [
               "src/assets",
-              "src/preload.js"
+              "src/preload.js",
+              {
+                "glob": "**/*",
+                "input": "src/app/assets",
+                "output": "assets"
+              }
             ],
 
             "styles": [

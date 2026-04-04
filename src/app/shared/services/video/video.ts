@@ -3,18 +3,11 @@ import {
   Room,
   RoomEvent,
   RemoteParticipant,
-  RemoteTrack,
-  RemoteTrackPublication,
-  Track,
-  LocalVideoTrack,
-  LocalAudioTrack,
-  createLocalVideoTrack,
-  createLocalAudioTrack,
-  DataPacket_Kind
+  RoomConnectOptions,
+  setLogLevel
 } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-import { TokenService } from '../auth/token';
 
 @Injectable({ providedIn: 'root' })
 export class Video {
@@ -23,7 +16,13 @@ export class Video {
   public spotifySync$ = new Subject<any>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
 
-  constructor(private tokenService: TokenService) {
+  private localStream: MediaStream | null = null;
+  public currentChannelId: string | null = null;
+
+  constructor() {
+    // Enable verbose logging to help debug ICE issues
+    setLogLevel('debug');
+
     this.room = new Room({
       adaptiveStream: true,
       dynacast: true,
@@ -67,14 +66,34 @@ export class Video {
   }
 
   async initVideoCall(channelId: string, character: any) {
-    const token = await this.getLiveKitToken(channelId, character.name);
-    await this.room.connect(environment.livekitUrl, token);
-
-    if (character) {
-        await this.room.localParticipant.setMetadata(JSON.stringify(character));
+    if (this.room.state === 'connected' && this.currentChannelId === channelId) {
+      console.log('[Video] Already connected to room:', channelId);
+      return;
     }
 
-    this.emitParticipants();
+    try {
+      const data = await this.getLiveKitConnectionInfo(channelId, character.name);
+      console.log('[Video] Connection Info Received:', data);
+
+      const connectOptions: RoomConnectOptions = {
+        autoSubscribe: true,
+        rtcConfig: {
+          iceServers: data.iceServers
+        }
+      };
+      await this.room.connect(environment.livekitUrl, data.token, connectOptions);
+      this.currentChannelId = channelId;
+      console.log('[Video] Connected to room:', channelId);
+
+      if (character) {
+          await this.room.localParticipant.setMetadata(JSON.stringify(character));
+      }
+
+      this.emitParticipants();
+    } catch (error) {
+      console.error('[Video] Connection error:', error);
+      throw error;
+    }
   }
 
   async updateUserData(channelId: string, character: any) {
@@ -84,6 +103,9 @@ export class Video {
   }
 
   async startProducing(stream: MediaStream) {
+    if (this.localStream === stream && this.room.localParticipant.getTrackPublications().length > 0) return;
+    this.localStream = stream;
+
     const videoTrack = stream.getVideoTracks()[0];
     const audioTrack = stream.getAudioTracks()[0];
 
@@ -155,18 +177,28 @@ export class Video {
     if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
         this.sendVttCommand('stop', this.vttSession$.value.roomId!);
     }
+
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(t => t.stop());
+    }
+
     await this.room.disconnect();
     this.remoteStreams$.next([]);
     this.vttSession$.next({ active: false, roomId: null, hostId: null });
+    this.localStream = null;
+    this.currentChannelId = null;
   }
 
-  private async getLiveKitToken(room: string, identity: string) {
+  getLocalStream() {
+    return this.localStream;
+  }
+
+  private async getLiveKitConnectionInfo(room: string, identity: string) {
     const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
     const res = await fetch(url);
     if (!res.ok) {
-        throw new Error('Failed to fetch LiveKit token');
+        throw new Error('Failed to fetch LiveKit connection info');
     }
-    const data = await res.json();
-    return data.token;
+    return await res.json();
   }
 }

@@ -6,49 +6,60 @@ import {MatCardModule} from '@angular/material/card';
 import {MatTabsModule} from '@angular/material/tabs';
 import { PdfViewerModule } from 'ng2-pdf-viewer';
 import {MatIconButton} from '@angular/material/button';
+import {MatIconModule} from '@angular/material/icon';
+import {MatTooltipModule} from '@angular/material/tooltip';
+
 @Component({
   selector: 'app-character-viewer',
   templateUrl: './character-viewer.html',
   styleUrls: ['./character-viewer.scss'],
   standalone: true,
   imports: [
-
     CommonModule,
     TitleCasePipe,
     KeyValuePipe,
     MatCardModule,
     MatTabsModule,
-
+    MatIconModule,
+    MatTooltipModule,
     PdfViewerModule,
     MatIconButton
   ]
 })
-export class CharacterViewer  implements OnInit, OnChanges{
+export class CharacterViewer implements OnInit, OnChanges {
   @Input() character!: ICharacter | undefined;
 
-  zoom = 1;
+  zoom = 1.0;
   page = 1;
-  ddbUrl: SafeResourceUrl ="";
+  ddbUrl: SafeResourceUrl = "";
   pdfUrl: string | null | undefined = "";
+
   constructor(private sanitizer: DomSanitizer) {}
+
   ngOnInit() {
-    if(!this.character)return;
-    this.ddbUrl = this.sanitizer.bypassSecurityTrustResourceUrl(
-      `https://www.dndbeyond.com/characters/${this.character.ddbId}`
-    );
+    if (!this.character) return;
+
+    if (this.character.ddbId) {
+      this.ddbUrl = this.sanitizer.bypassSecurityTrustResourceUrl(
+        `https://www.dndbeyond.com/characters/${this.character.ddbId}`
+      );
+    }
 
     this.pdfUrl = this.character.pdfLink;
   }
+
   ngOnChanges(changes: SimpleChanges) {
-    if(changes["character"].currentValue) this.ngOnInit();
+    if (changes["character"] && changes["character"].currentValue) {
+      this.ngOnInit();
+    }
   }
 
+  modifierValue(stat: number): number {
+    return Math.floor((stat - 10) / 2);
+  }
 
-
-  get modifier(): (stat: number) => string {
-    return (stat: number) => {
-      const mod = Math.floor((stat - 10) / 2);
-      return mod >= 0 ? `+${mod}` : `${mod}`;
-    };
+  modifier(stat: number): string {
+    const mod = this.modifierValue(stat);
+    return mod >= 0 ? `+${mod}` : `${mod}`;
   }
 }

@@ -2,6 +2,7 @@
 
 <main class="editor-area" [class.resizing-active]="isResizing" cdkDropListGroup>
 
+  <!-- LEFT PANE -->
   <div class="pane"
        id="left-pane"
        cdkDropList
@@ -11,8 +12,13 @@
 
     <div class="tab-bar">
       @for (tab of leftTabs; track tab.id) {
-        <div class="tab" [class.active]="tab.active" cdkDrag [cdkDragData]="tab" (click)="selectTab(tab)">
-          {{ tab.title }}
+        <div class="tab"
+             [class.active]="tab.active"
+             cdkDrag
+             [cdkDragData]="tab"
+             (click)="selectTab(tab)">
+          <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
+          <span class="tab-title">{{ tab.title }}</span>
           <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
         </div>
       }
@@ -40,27 +46,34 @@
     </div>
   </div>
 
+  <!-- RESIZER -->
   @if (rightTabs.length > 0) {
     <div class="resizer-handle" (mousedown)="startResizing($event)"></div>
   }
 
+  <!-- RIGHT PANE -->
   <div class="pane right-pane"
-       [class.hidden]="rightTabs.length === 0"
+       [class.empty]="rightTabs.length === 0"
        cdkDropList
        [cdkDropListData]="'right'"
        (cdkDropListDropped)="onDrop($event)">
 
-    <div class="tab-bar">
-      @for (tab of rightTabs; track tab.id) {
-        <div class="tab" [class.active]="tab.active" cdkDrag [cdkDragData]="tab" (click)="selectTab(tab)">
-          {{ tab.title }}
-          <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
-        </div>
-      }
-    </div>
+    @if (rightTabs.length > 0) {
+      <div class="tab-bar">
+        @for (tab of rightTabs; track tab.id) {
+          <div class="tab"
+               [class.active]="tab.active"
+               cdkDrag
+               [cdkDragData]="tab"
+               (click)="selectTab(tab)">
+            <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
+            <span class="tab-title">{{ tab.title }}</span>
+            <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
+          </div>
+        }
+      </div>
 
-    <div class="pane-content">
-      @if (rightTabs.length > 0) {
+      <div class="pane-content">
         @for (tab of rightTabs; track tab.id) {
           <div [hidden]="!tab.active" class="full-height">
             @if (tab.type === 'call') {
@@ -71,18 +84,24 @@
             } @else if(tab.type ==='character'){
               <app-character-viewer [character]="tab.character"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
-              <app-vtt-canvas  [serverId]="tab.id" [character]="activeCharacter"
-                               [isHostVttSession]="tab.id === vttHostSessionId"
-                               [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
+              <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+                              [isHostVttSession]="tab.id === vttHostSessionId"
+                              [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
               <app-spotify-player [isCallActive]="true"></app-spotify-player>
             }
           </div>
         }
-      } @else {
-        <div class="drop-hint">Drop tab here to split view</div>
-      }
-    </div>
+      </div>
+    } @else {
+      <!-- Drop Zone for Empty Right Pane -->
+      <div class="drop-zone-placeholder">
+        <div class="hint-content">
+          <mat-icon>view_sidebar</mat-icon>
+          <span>Drag here to split view</span>
+        </div>
+      </div>
+    }
   </div>
 
 </main>

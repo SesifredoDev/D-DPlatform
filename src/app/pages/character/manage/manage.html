@@ -1,60 +1,85 @@
-<div class="management-container">
-  <div class="header">
-    <h1>Your Characters</h1>
-    <dir>
-
-      <button mat-raised-button color="primary" (click)="openCreateDialog()">
-        <mat-icon>add</mat-icon> New Character
+<div class="glass-management-container">
+  <header class="management-header">
+    <div class="header-content">
+      <mat-icon class="title-icon">group</mat-icon>
+      <h1 class="management-title">Your Chronicle of Heroes</h1>
+    </div>
+    <div class="header-actions">
+      <button mat-raised-button class="btn-new-char" (click)="openCreateDialog()">
+        <mat-icon>auto_awesome</mat-icon> Summon New Hero
       </button>
-      <button MatFab color="secondary" routerLink="../">
+      <button mat-icon-button (click)="closeManager()" class="btn-close-manager">
         <mat-icon>close</mat-icon>
       </button>
-    </dir>
-  </div>
+    </div>
+  </header>
 
   <div class="character-grid">
-    <mat-card *ngFor="let char of characters"
-              [class.active-card]="selectedCharacterId === char._id"
-              class="character-card">
+    @for (char of characters; track char._id) {
+      <div class="character-glass-card"
+           [class.active-card]="selectedCharacterId === char._id">
 
-      <div class="card-content">
-        <img [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'" class="char-icon">
+        <div class="card-body">
+          <div class="char-portrait-container">
+            <img [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'" class="char-portrait">
+            <span class="level-badge">LVL {{ getTotalLevel(char) }}</span>
+          </div>
 
-        <div class="char-info">
-          <mat-card-title>{{ char.name }}</mat-card-title>
-          <mat-card-subtitle>{{ char.race }} | AC: {{ char.ac }}</mat-card-subtitle>
+          <div class="char-info">
+            <h2 class="char-name">{{ char.name }}</h2>
+            <div class="char-sub-stats">
+              <span class="race-text">{{ char.race }}</span>
+              <span class="separator">•</span>
+              <span class="ac-stat">AC {{ char.ac }}</span>
+            </div>
 
-          <div class="class-chips">
-            <mat-chip-set>
-              <mat-chip *ngFor="let c of char.classes">
-                {{ c.className }} {{ c.level }}
-              </mat-chip>
-            </mat-chip-set>
+            <div class="class-chips">
+              @for (c of char.classes; track c) {
+                <span class="class-chip">{{ c.className }} {{ c.level }}</span>
+              }
+            </div>
           </div>
         </div>
+
+        <div class="card-footer">
+          <div class="footer-actions-left">
+            @if (char.ddbId) {
+              <button mat-icon-button (click)="syncWithDdb(char)" matTooltip="Sync with D&D Beyond" class="action-btn">
+                <mat-icon>sync</mat-icon>
+              </button>
+            }
+            <button mat-icon-button (click)="editCharacter(char)" matTooltip="Edit Character" class="action-btn">
+              <mat-icon>edit</mat-icon>
+            </button>
+            <button mat-icon-button (click)="deleteCharacter(char)" matTooltip="Delete Character" class="action-btn btn-danger">
+              <mat-icon>delete</mat-icon>
+            </button>
+          </div>
+
+          <button mat-button [matMenuTriggerFor]="serverMenu" class="btn-assign-servers">
+            <mat-icon>dns</mat-icon> Servers
+          </button>
+          <mat-menu #serverMenu="matMenu" class="server-assign-menu">
+            <div class="menu-title">ASSIGN TO SERVER</div>
+            @for (server of availableServers; track server._id) {
+              <button mat-menu-item (click)="toggleServer(char, server._id)">
+                <mat-icon>{{ isAssigned(char, server._id) ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
+                <span>{{ server.name }}</span>
+              </button>
+            }
+          </mat-menu>
+        </div>
+
       </div>
-
-      <mat-divider></mat-divider>
-
-      <mat-card-actions>
-
-        @if (char.ddbId) {
-          <button mat-icon-button color="accent" (click)="syncWithDdb(char)" matTooltip="Sync with D&D Beyond">
-            <mat-icon>sync</mat-icon>
-          </button>
-        }
-        <button mat-icon-button color="primary" (click)="editCharacter(char)" matTooltip="Edit Character">
-          <mat-icon>edit</mat-icon>
+    } @empty {
+      <div class="empty-state-glass">
+        <mat-icon>person_off</mat-icon>
+        <h3>No Heroes Yet</h3>
+        <p>Summon your first character to begin your adventure!</p>
+        <button mat-raised-button class="btn-new-char" (click)="openCreateDialog()">
+          <mat-icon>auto_awesome</mat-icon> Summon New Hero
         </button>
-
-        <button mat-button [matMenuTriggerFor]="serverMenu">Assign Servers</button>
-        <mat-menu #serverMenu="matMenu">
-          <button mat-menu-item *ngFor="let server of availableServers" (click)="toggleServer(char, server._id)">
-            <mat-icon>{{ isAssigned(char, server._id) ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
-            <span>{{ server.name }}</span>
-          </button>
-        </mat-menu>
-      </mat-card-actions>
-    </mat-card>
+      </div>
+    }
   </div>
 </div>

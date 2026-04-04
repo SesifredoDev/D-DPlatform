@@ -1,138 +1,340 @@
-.rpg-chat-container {
+/* ================================
+   TEXT CHANNEL (MODERN GLASS)
+================================ */
+
+.chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 10px;
-  //background: var(--mat-sys-surface-container-low);
-}
-
-.parchment-scroll {
-  flex: 1;
-  color: var(--mat-sys-on-tertiary-container);
-  border: 8px solid var(--mat-sys-outline-variant);
-  border-image: linear-gradient(
-      to bottom,
-      var(--mat-sys-outline),
-      var(--mat-sys-outline-variant)
-  ) 1;
-
-  box-shadow: inset 0 0 50px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.4);
+  position: relative;
+  background: transparent;
   overflow: hidden;
-  margin-bottom: 10px;
 }
 
-.message-list {
-  height: 100%;
-  overflow-y: auto;
-  padding: 20px !important;
-  mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
-}
+/* =================================
+   MESSAGES VIEWPORT
+================================= */
 
-.message-entry {
+.messages-viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
   display: flex;
-  margin-bottom: 20px;
-  border-bottom: 1px dashed var(--mat-sys-outline-variant);
-  padding-bottom: 10px;
+  flex-direction: column;
 
-  .avatar-frame {
-    position: relative;
-    margin-right: 15px;
+  // Top/Bottom Fade effects
+  &::before, &::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 40px;
+    z-index: 2;
+    pointer-events: none;
+  }
 
-    .rpg-avatar {
-      width: 50px;
-      height: 50px;
-      border: 2px solid var(--mat-sys-outline);
+  &::before {
+    top: 0;
+    background: linear-gradient(180deg, rgba(25, 26, 31, 0.5) 0%, transparent 100%);
+  }
+
+  &::after {
+    bottom: 0;
+    background: linear-gradient(0deg, rgba(25, 26, 31, 0.5) 0%, transparent 100%);
+  }
+
+  .messages-scroller {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 16px;
+    scroll-behavior: smooth;
+
+    // Modern Scrollbar
+    &::-webkit-scrollbar { width: 4px; }
+    &::-webkit-scrollbar-track { background: transparent; }
+    &::-webkit-scrollbar-thumb {
+      background: var(--outline);
+      border-radius: var(--radius-pill);
+      &:hover { background: var(--brand-blue-alpha); }
     }
   }
 }
 
-.scribe-name {
-  font-family: 'Cinzel', serif;
-  font-weight: bold;
-  color: White;
-  font-size: 1.1rem;
-}
+/* =================================
+   MESSAGE ITEM DESIGN
+================================= */
 
-.ink-text {
-  font-family: 'EB Garamond', serif;
-  font-size: 1.1rem;
-  line-height: 1.4;
-  display: block;
-    white-space: pre-wrap; // This is crucial for rendering the multi-lines
-    word-wrap: break-word;
+.message-item {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  margin-bottom: 2px;
+  border-radius: var(--radius-m);
+  position: relative;
+  transition: all 0.1s ease;
+  min-height: 44px;
 
-  // Ensure markdown paragraphs don't add double spacing
-  p {
-    margin: 5px 0;
-  }
+  &:hover {
+    background: rgba(255, 255, 255, 0.03);
 
-  // Style for code snippets (useful for magic spells or mechanics)
-  code {
-    background: var(--mat-sys-surface-container-high);
-    padding: 2px 4px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-  }
-
-  // Style for blockquotes (ideal for "old whispers" or "ancient texts")
-  blockquote {
-    border-left: 3px solid var(--mat-sys-primary);
-    padding-left: 10px;
-    margin-left: 0;
-    font-style: italic;
-    color: var(--mat-sys-on-surface-variant);
+    .message-actions { opacity: 1; transform: translateY(-50%) scale(1); }
+    .timestamp { opacity: 1; }
   }
 }
 
-.command-bar {
-  background: var(--mat-sys-surface-container);
-  padding: 10px;
-  border-radius: 8px;
-  border-top: 2px solid var(--mat-sys-secondary); // Accent line
+.avatar-column {
+  flex-shrink: 0;
+  width: 42px;
+  padding-top: 4px;
 
-  .ink-input {
-    width: 100%;
-    // We let the MatFormField handle its own internal M3 variables.
-    // If you need to force a color, use the sys variables:
-    --mdc-outlined-text-field-focus-outline-color: var(--mat-sys-primary);
-    --mdc-outlined-text-field-outline-color: var(--mat-sys-outline);
+  .user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-l);
+    object-fit: cover;
+    border: 1px solid var(--outline);
+    box-shadow: var(--shadow-1);
+    transition: transform 0.2s ease;
+
+    &:hover { transform: scale(1.1); border-color: var(--brand-blue); }
   }
 }
 
-.chronicle-time{
-  margin-left: 20px;
+.content-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-// Custom Scrollbar using theme variables
-.message-list::-webkit-scrollbar {
-  width: 8px;
-}
-.message-list::-webkit-scrollbar-track {
-  background: var(--mat-sys-surface-container-lowest);
-}
-.message-list::-webkit-scrollbar-thumb {
-  background: var(--mat-sys-secondary-fixed-dim);
-  border-radius: 10px;
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+
+  .author-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--on-background);
+    cursor: pointer;
+    letter-spacing: -0.2px;
+
+    &:hover { color: var(--brand-blue); text-decoration: underline; }
+  }
+
+  .timestamp {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--on-surface-muted);
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+  }
 }
 
+/* =================================
+   MESSAGE CONTENT (MARKDOWN)
+================================= */
+
+.message-text {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--on-surface);
+  word-wrap: break-word;
+  word-break: break-word;
+
+  ::ng-deep {
+    p { margin: 0 0 6px 0; }
+    p:last-child { margin-bottom: 0; }
+
+    code {
+      background: rgba(114, 137, 218, 0.1);
+      color: #b9c7ff;
+      padding: 2px 6px;
+      border-radius: var(--radius-s);
+      font-family: 'Fira Code', monospace;
+      font-size: 12.5px;
+      border: 1px solid var(--brand-blue-alpha);
+    }
+
+    blockquote {
+      border-left: 4px solid var(--brand-blue-alpha);
+      background: rgba(114, 137, 218, 0.05);
+      padding: 10px 16px;
+      margin: 8px 0;
+      border-radius: 0 var(--radius-l) var(--radius-l) 0;
+      font-style: italic;
+      color: var(--on-surface-variant);
+    }
+
+    a {
+      color: var(--brand-blue);
+      text-decoration: none;
+      &:hover { text-decoration: underline; }
+    }
+
+    img {
+      max-width: min(100%, 500px);
+      border-radius: var(--radius-l);
+      margin: 10px 0;
+      border: 1px solid var(--outline);
+      box-shadow: var(--shadow-2);
+    }
+  }
+}
+
+/* =================================
+   MESSAGE ACTIONS (HOVER)
+================================= */
+
+.message-actions {
+  position: absolute;
+  top: 0;
+  right: 16px;
+  transform: translateY(-40%) scale(0.95);
+  display: flex;
+  gap: 4px;
+  background: rgba(30, 31, 34, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-m);
+  padding: 2px 4px;
+  opacity: 0;
+  z-index: 10;
+  transition: all 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  box-shadow: var(--shadow-2);
+
+  .action-btn {
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    color: var(--on-surface-muted);
+
+    mat-icon { font-size: 18px; width: 18px; height: 18px; }
+
+    &:hover { color: var(--brand-blue); background: rgba(255, 255, 255, 0.05); }
+  }
+}
+
+/* =================================
+   INPUT CONTAINER
+================================= */
+
+.input-container {
+  padding: 16px 24px 24px 24px;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+}
+
+.input-box {
+  background: rgba(43, 45, 49, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-l);
+  display: flex;
+  padding: 10px 14px;
+  gap: 12px;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+
+  &:focus-within {
+    background: rgba(43, 45, 49, 0.7);
+    border-color: var(--brand-blue-alpha);
+    box-shadow: 0 4px 20px rgba(114, 137, 218, 0.15);
+  }
+
+  textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--on-background);
+    font-family: var(--font-family-main);
+    font-size: 14.5px;
+    line-height: 1.5;
+    resize: none;
+    padding: 4px 0;
+    max-height: 300px;
+    &::placeholder { color: var(--on-surface-variant); opacity: 0.6; }
+    &:focus { outline: none; }
+  }
+
+  .input-actions {
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 2px;
+
+    .send-btn {
+      width: 36px;
+      height: 36px;
+      color: var(--on-surface-muted);
+      transition: all 0.2s ease;
+      opacity: 0.4;
+
+      mat-icon { font-size: 20px; width: 20px; height: 20px; }
+
+      &.can-send {
+        opacity: 1;
+        color: var(--brand-blue);
+        &:hover { transform: scale(1.1) rotate(-5deg); color: var(--brand-blue-hover); }
+      }
+    }
+  }
+}
+
+/* =================================
+   NEW MESSAGE INDICATOR
+================================= */
 
 .new-message-indicator {
   position: absolute;
-  bottom: 90px;
-  right: 24px;
-
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: var(--brand-blue);
+  color: white;
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
   display: flex;
   align-items: center;
-  gap: 6px;
-
-  background: #2b1e14;
-  color: #f5e6c8;
-  padding: 6px 12px;
-  border-radius: 999px;
+  gap: 10px;
   cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px rgba(114, 137, 218, 0.4);
+  font-size: 12.5px;
+  font-weight: 700;
+  transition: all 0.2s ease;
 
-  mat-icon {
-    font-size: 18px;
+  &:hover { background: var(--brand-blue-hover); transform: translateX(-50%) translateY(-2px); }
+  mat-icon { font-size: 18px; width: 18px; height: 18px; }
+}
+
+/* =================================
+   EMPTY STATE
+================================= */
+
+.empty-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+  color: var(--on-surface-muted);
+
+  .empty-icon-wrapper {
+    width: 80px;
+    height: 80px;
+    background: var(--surface-light);
+    border-radius: var(--radius-round);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    mat-icon { font-size: 40px; width: 40px; height: 40px; color: var(--brand-blue-alpha); }
   }
+
+  h3 { color: white; font-size: 24px; margin-bottom: 12px; font-weight: 700; }
+  p { max-width: 320px; line-height: 1.6; opacity: 0.7; }
 }

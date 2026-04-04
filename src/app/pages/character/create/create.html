@@ -1,120 +1,193 @@
-<h2 mat-dialog-title>Add New Character</h2>
+<div class="glass-dialog-container">
 
-<mat-dialog-content class="mat-typography">
-  <form [formGroup]="charForm">
-    <mat-tab-group dynamicHeight>
+  <header class="dialog-header">
+    <div class="header-content">
+      <mat-icon class="title-icon">person_add</mat-icon>
+      <h2 class="dialog-title">Summon New Character</h2>
+    </div>
+    <button mat-icon-button (click)="close()" class="close-btn">
+      <mat-icon>close</mat-icon>
+    </button>
+  </header>
 
-      <mat-tab label="Import">
-        <div class="tab-container">
-          <p class="instruction-text">Import your character directly from D&D Beyond to auto-fill the form.</p>
-          <div class="import-section">
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>D&D Beyond Character Link</mat-label>
-              <input matInput formControlName="ddbUrl" placeholder="https://www.dndbeyond.com/characters/...">
-              <button mat-icon-button matSuffix (click)="importFromDdb()" type="button" [disabled]="isImporting">
-                <mat-icon [class.rotating]="isImporting">{{ isImporting ? 'sync' : 'download' }}</mat-icon>
+  <mat-dialog-content class="modern-dialog-content">
+    <form [formGroup]="charForm">
+
+      <mat-tab-group class="modern-tabs" dynamicHeight mat-stretch-tabs="false">
+
+        <!-- 1. ORIGIN & IMPORT -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>auto_fix_high</mat-icon>
+            <span>Origin</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <section class="import-glass-box">
+              <div class="section-header">
+                <h3>D&D Beyond Import</h3>
+                <span class="badge">Recommended</span>
+              </div>
+              <p class="description">Paste your character URL to auto-fill stats, classes, and bio.</p>
+
+              <div class="import-input-row">
+                <mat-form-field appearance="outline" class="glass-field">
+                  <input matInput formControlName="ddbUrl" placeholder="https://www.dndbeyond.com/characters/...">
+                  <button mat-icon-button matSuffix (click)="importFromDdb()" type="button" [disabled]="isImporting" class="import-btn">
+                    <mat-icon [class.rotating]="isImporting">{{ isImporting ? 'sync' : 'download' }}</mat-icon>
+                  </button>
+                </mat-form-field>
+              </div>
+            </section>
+
+            <div class="divider-text"><span>OR MANUAL ENTRY</span></div>
+
+            <div class="form-grid">
+              <mat-form-field appearance="outline" class="glass-field">
+                <mat-label>Character Name</mat-label>
+                <mat-icon matPrefix>badge</mat-icon>
+                <input matInput formControlName="name" placeholder="Name">
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="glass-field">
+                <mat-label>Race</mat-label>
+                <mat-icon matPrefix>egg_alt</mat-icon>
+                <input matInput formControlName="race" placeholder="Race">
+              </mat-form-field>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- 2. ATTRIBUTES & COMBAT -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>military_tech</mat-icon>
+            <span>Attributes</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <div class="ac-center-box">
+              <div class="ac-input-wrapper">
+                <mat-icon class="ac-icon">shield</mat-icon>
+                <div class="ac-fields">
+                  <label>ARMOR CLASS</label>
+                  <input type="number" formControlName="ac" placeholder="10">
+                </div>
+              </div>
+            </div>
+
+            <h3 class="pane-title">Ability Scores</h3>
+            <div class="stats-grid">
+              @for (stat of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']; track stat) {
+                <div class="stat-card">
+                  <label>{{ stat | slice:0:3 | uppercase }}</label>
+                  <input type="number" [formControlName]="stat">
+                  <div class="stat-mod">{{ modifier(charForm.get(stat)?.value || 10) }}</div>
+                </div>
+              }
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- 3. VOCATIONS -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>menu_book</mat-icon>
+            <span>Vocations</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <header class="section-action-header">
+              <p>Manage your multiclassing levels.</p>
+              <button mat-button class="add-class-btn" type="button" (click)="addClass()">
+                <mat-icon>add</mat-icon> ADD CLASS
               </button>
-              <mat-hint>Paste link and click the icon to auto-fill</mat-hint>
-            </mat-form-field>
-          </div>
+            </header>
 
-          <div class="form-row">
-            <mat-form-field appearance="outline" class="flex-2">
-              <mat-label>Character Name</mat-label>
-              <input matInput formControlName="name">
-            </mat-form-field>
+            <div formArrayName="classes" class="class-cards-list">
+              @for (c of classArray.controls; track $index; let i = $index) {
+                <div [formGroupName]="i" class="class-glass-card">
+                  <div class="card-inputs">
+                    <mat-form-field appearance="fill" class="compact-field flex-2">
+                      <mat-label>Class</mat-label>
+                      <input matInput formControlName="className" placeholder="Warlock">
+                    </mat-form-field>
 
-            <mat-form-field appearance="outline" class="flex-1">
-              <mat-label>Race</mat-label>
-              <input matInput formControlName="race">
-            </mat-form-field>
-          </div>
-        </div>
-      </mat-tab>
+                    <mat-form-field appearance="fill" class="compact-field flex-2">
+                      <mat-label>Subclass</mat-label>
+                      <input matInput formControlName="subclassName" placeholder="Archfey">
+                    </mat-form-field>
 
-      <mat-tab label="Combat & Stats">
-        <div class="tab-container">
-          <div class="ac-section">
-            <mat-form-field appearance="outline">
-              <mat-label>Armor Class (AC)</mat-label>
-              <input matInput type="number" formControlName="ac">
-              <mat-icon matPrefix>shield</mat-icon>
-            </mat-form-field>
-          </div>
+                    <mat-form-field appearance="fill" class="compact-field flex-1">
+                      <mat-label>Lv</mat-label>
+                      <input matInput type="number" formControlName="level">
+                    </mat-form-field>
+                  </div>
 
-          <div class="stats-grid">
-            <mat-form-field *ngFor="let stat of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']" appearance="fill">
-              <mat-label>{{ stat | titlecase }}</mat-label>
-              <input matInput type="number" [formControlName]="stat">
-            </mat-form-field>
-          </div>
-        </div>
-      </mat-tab>
-      <mat-tab label="Classes (Optional)">
-        <div class="tab-container">
-          <div class="section-header">
-            <p>Manage your multiclassing levels below.</p>
-            <button mat-stroked-button color="primary" type="button" (click)="addClass()">
-              <mat-icon>add</mat-icon> Add Class
-            </button>
-          </div>
+                  <button mat-icon-button color="warn" (click)="removeClass(i)" class="delete-card-btn">
+                    <mat-icon>delete_outline</mat-icon>
+                  </button>
+                </div>
+              }
 
-          <div formArrayName="classes" class="class-list">
-            <div *ngFor="let c of classArray.controls; let i = index" [formGroupName]="i" class="class-row">
-
-              <mat-form-field appearance="outline" class="flex-2">
-                <mat-label>Class Name</mat-label>
-                <input matInput formControlName="className" placeholder="e.g. Warlock">
-              </mat-form-field>
-
-              <mat-form-field appearance="outline" class="flex-2">
-                <mat-label>Subclass</mat-label>
-                <input matInput formControlName="subclassName" placeholder="e.g. Archfey">
-              </mat-form-field>
-
-              <mat-form-field appearance="outline" class="flex-1">
-                <mat-label>Level</mat-label>
-                <input matInput type="number" formControlName="level">
-              </mat-form-field>
-
-              <button mat-icon-button color="warn" (click)="removeClass(i)" type="button">
-                <mat-icon>delete</mat-icon>
-              </button>
-            </div>
-
-            <div *ngIf="classArray.length === 0" class="empty-state">
-              <p>No classes added. This character will be saved without class info.</p>
+              @if (classArray.length === 0) {
+                <div class="empty-state-glass">
+                  <mat-icon>history_edu</mat-icon>
+                  <p>No classes added yet.</p>
+                </div>
+              }
             </div>
           </div>
-        </div>
-      </mat-tab>
+        </mat-tab>
 
-      <mat-tab label="Media">
-        <div class="tab-container">
-          <div class="upload-section">
-            <div class="upload-box">
-              <mat-icon color="primary">image</mat-icon>
-              <label>Profile Icon</label>
-              <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*">
-              <small *ngIf="charForm.get('iconUrl')?.value">Currently using DDB Image</small>
-            </div>
+        <!-- 4. VISUALS -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>image</mat-icon>
+            <span>Media</span>
+          </ng-template>
 
-            <div class="upload-box">
-              <mat-icon color="accent">picture_as_pdf</mat-icon>
-              <label>Character PDF (Optional)</label>
-              <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
+          <div class="tab-pane">
+            <div class="media-upload-grid">
+
+              <div class="upload-zone glass" [class.has-file]="charForm.get('iconUrl')?.value">
+                <div class="upload-preview">
+                  @if (charForm.get('iconUrl')?.value) {
+                    <img [src]="charForm.get('iconUrl')?.value" class="preview-img">
+                  } @else {
+                    <mat-icon>portrait</mat-icon>
+                  }
+                </div>
+                <div class="upload-info">
+                  <label>Profile Icon</label>
+                  <span>Select an avatar image</span>
+                  <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*">
+                </div>
+              </div>
+
+              <div class="upload-zone glass">
+                <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
+                <div class="upload-info">
+                  <label>Character PDF</label>
+                  <span>Full character sheet (optional)</span>
+                  <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
+                </div>
+              </div>
+
             </div>
           </div>
-        </div>
-      </mat-tab>
+        </mat-tab>
 
-    </mat-tab-group>
-  </form>
-</mat-dialog-content>
+      </mat-tab-group>
+    </form>
+  </mat-dialog-content>
 
-<mat-dialog-actions align="end">
-  <button mat-button (click)="close()">Cancel</button>
-  <button mat-raised-button color="primary" (click)="submitForm()" [disabled]="charForm.invalid">
-    <mat-icon>save</mat-icon> Save Character
-  </button>
-</mat-dialog-actions>
+  <footer class="dialog-footer">
+    <button mat-button class="btn-cancel" (click)="close()">CANCEL</button>
+    <button mat-raised-button class="btn-summon" (click)="submitForm()" [disabled]="charForm.invalid">
+      <mat-icon>auto_awesome</mat-icon>
+      <span>SUMMON CHARACTER</span>
+    </button>
+  </footer>
+
+</div>

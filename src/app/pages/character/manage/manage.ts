@@ -1,45 +1,51 @@
-import { Component } from '@angular/core';
-
-
-import {  OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { MatDialog } from '@angular/material/dialog';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatChipsModule } from '@angular/material/chips';
 import { CharacterService } from '../../../shared/services/character/character';
-import {ICharacter} from '../../../shared/models/user/character.model';
-import {CreateCharacterComponent} from '../create/create';
-import {MatMenuModule} from '@angular/material/menu';
-import {MatDividerModule} from '@angular/material/divider';
+import { ICharacter } from '../../../shared/models/user/character.model';
+import { CreateCharacterComponent } from '../create/create';
+import { MatMenuModule } from '@angular/material/menu';
+import { MatDividerModule } from '@angular/material/divider';
 import { Edit } from '../edit/edit';
-import {dndbeyond} from '../../../shared/services/character/dndbeyond/dndbeyond';
-import {Validators} from '@angular/forms';
-import {ServerService} from '../../../shared/services/server/server';
-import {IServer} from '../../../shared/models/server/server.model';
-import {RouterLink} from '@angular/router';
+import { dndbeyond } from '../../../shared/services/character/dndbeyond/dndbeyond';
+import { ServerService } from '../../../shared/services/server/server';
+import { IServer } from '../../../shared/models/server/server.model';
+import { Router, RouterLink } from '@angular/router';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-manage',
-  imports: [CommonModule, MatButtonModule, MatCardModule, MatIconModule, MatChipsModule, MatMenuModule, MatDividerModule, RouterLink],
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatButtonModule,
+    MatCardModule,
+    MatIconModule,
+    MatChipsModule,
+    MatMenuModule,
+    MatDividerModule,
+    RouterLink,
+    MatTooltipModule,
+    MatDialogModule
+  ],
   templateUrl: './manage.html',
   styleUrl: './manage.scss'
 })
 export class Manage implements OnInit {
   characters: ICharacter[] = [];
   selectedCharacterId: string | undefined = undefined;
-
-
-  // Temporary Server Management Mock
-  availableServers: IServer[] = [
-  ];
+  availableServers: IServer[] = [];
 
   constructor(
     private charService: CharacterService,
     private serverService: ServerService,
     private ddbService: dndbeyond,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private router: Router
   ) {}
 
   ngOnInit(): void {
@@ -48,8 +54,8 @@ export class Manage implements OnInit {
       if (char) this.selectedCharacterId = char._id;
     });
     this.serverService.getMyServersObservable().subscribe(servers => {
-      this.availableServers   = servers;
-    })
+      this.availableServers = servers;
+    });
     this.serverService.getMyServers();
   }
 
@@ -59,33 +65,47 @@ export class Manage implements OnInit {
     });
   }
 
+  getTotalLevel(char: ICharacter): number {
+    return char.classes?.reduce((acc, c) => acc + (c.level || 0), 0) || 0;
+  }
+
   openCreateDialog() {
     const dialogRef = this.dialog.open(CreateCharacterComponent, {
-      width: '600px',
-      maxHeight: '90vh'
+      width: '800px',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      panelClass: 'glass-dialog-container'
     });
 
     dialogRef.afterClosed().subscribe(() => this.loadCharacters());
   }
 
-  selectCharacter(char: ICharacter) {
-    this.charService.setActiveCharacter(char);
-    this.selectedCharacterId = char._id;
-  }
-
   editCharacter(char: ICharacter) {
     const dialogRef = this.dialog.open(Edit, {
-      width: '60vw',
+      width: '800px',
+      maxWidth: '95vw',
       maxHeight: '90vh',
-      data: char, // Pass the character object to the dialog
-      // panelClass: 'resizable-dialog'
+      data: char,
+      panelClass: 'glass-dialog-container'
     });
 
     dialogRef.afterClosed().subscribe(result => {
       if (result) {
-        this.loadCharacters(); // Refresh the list if an update occurred
+        this.loadCharacters();
       }
     });
+  }
+
+  deleteCharacter(char: ICharacter) {
+    if (confirm(`Are you sure you want to permanently delete ${char.name}?`)) {
+      if (!char._id) return;
+      this.charService.deleteCharacter(char._id).subscribe({
+        next: () => {
+          this.loadCharacters();
+        },
+        error: (err: any) => console.error("Failed to delete character", err)
+      });
+    }
   }
 
   isAssigned(char: ICharacter, serverId: string): boolean {
@@ -109,7 +129,6 @@ export class Manage implements OnInit {
 
     this.charService.updateCharacter(char._id, update).subscribe({
       next: () => {
-        console.log(`Server list updated for ${char.name}`);
         this.loadCharacters();
       },
       error: (err) => console.error("Failed to update servers", err)
@@ -127,7 +146,7 @@ export class Manage implements OnInit {
           race: data.race,
           ac: data.ac,
           ddbId: data.id,
-          ddbUsername:data.username,
+          ddbUsername: data.username,
           icon: data.icon,
           baseStats: data.baseStats,
           classes: data.classes.map((c: any) => ({
@@ -137,15 +156,16 @@ export class Manage implements OnInit {
           }))
         };
 
-        if(!updatedData._id) return
+        if (!updatedData._id) return;
         this.charService.updateCharacter(updatedData._id, updatedData).subscribe(() => {
-          this.loadCharacters(); // Refresh UI
+          this.loadCharacters();
           console.log(`${char.name} synchronized successfully.`);
         });
       }
     });
   }
 
-
-
+  closeManager() {
+    this.router.navigate(['']);
+  }
 }

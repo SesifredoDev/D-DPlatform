@@ -11,7 +11,7 @@ export class Message {
   private channelMessages = new Map<string, BehaviorSubject<any[]>>();
 
   constructor(private http: HttpClient) {
-    this.socket = io('http://localhost', {
+    this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
       transports: ['websocket'] // Force websocket to see clear errors if it fails

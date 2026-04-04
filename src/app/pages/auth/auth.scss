@@ -4,15 +4,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-family-main, 'Inter', sans-serif);
 }
 
 /* Card */
 .auth-card {
   width: 420px;
-  background: #1e1f22;
+  background: var(--surface);
   color: #dbdee1;
-  border-radius: 12px;
+  border-radius: var(--radius-l);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
@@ -24,7 +24,7 @@
 }
 
 .subtitle {
-  color: #b5bac1;
+  color: var(--on-surface-muted);
   font-size: 0.9rem;
 }
 
@@ -32,25 +32,25 @@
 mat-tab-group {
   margin-top: 12px;
 }
-mat-tab{
+mat-tab {
   overflow-y: hidden;
 }
 
 .mat-mdc-tab-label {
-  color: #b5bac1;
+  color: var(--on-surface-muted);
   font-weight: 500;
 }
 
 .mat-mdc-tab.mdc-tab--active {
-  color: #5865f2; /* Discord blurple */
+  color: var(--brand-blurple);
 }
 
 /* Forms */
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding-top: 16px;
+  gap: var(--space-m);
+  padding-top: var(--space-m);
 }
 
 /* Inputs */
@@ -59,7 +59,7 @@ mat-form-field {
 }
 
 .mat-mdc-text-field-wrapper {
-  border-radius: 8px;
+  border-radius: var(--radius-m);
 }
 
 /* Button */
@@ -67,12 +67,12 @@ mat-form-field {
   margin-top: 8px;
   height: 44px;
   font-weight: 600;
-  border-radius: 8px;
-  background-color: #5865f2 !important;
+  border-radius: var(--radius-m);
+  background-color: var(--brand-blurple) !important;
 }
 
 .auth-button:hover {
-  background-color: #4752c4 !important;
+  background-color: #4752c4 !important; // Could add --brand-blurple-hover to variables if needed
 }
 
 .auth-card ::ng-deep .mat-mdc-tab-body-content {

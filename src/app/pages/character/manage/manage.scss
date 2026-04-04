@@ -1,84 +1,280 @@
-  @use '@angular/material' as mat;
+/* ================================
+   CHARACTER MANAGEMENT (MODERN GLASS)
+================================ */
 
-.management-container {
-  padding: 24px;
-  max-width: 1200px;
-  margin: 0 auto;
+.glass-management-container {
+  padding: var(--space-l);
+  max-width: 1400px;
+  margin: var(--space-m) auto;
+  background: rgba(30, 31, 34, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-4);
+  color: var(--on-background);
+  display: flex;
+  flex-direction: column;
+  min-height: 80vh;
+}
 
-  .header {
+/* --- Header --- */
+.management-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: var(--space-l);
+  margin-bottom: var(--space-l);
+  border-bottom: 1px solid var(--outline);
+
+  .header-content {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 32px;
+    gap: var(--space-m);
+    .title-icon { font-size: 32px; width: 32px; height: 32px; color: var(--brand-blue); }
+    .management-title { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; color: white; }
+  }
 
-    h1 {
-      margin: 0;
-      font-weight: 500;
-      letter-spacing: -0.02em;
+  .header-actions {
+    display: flex;
+    gap: var(--space-s);
+    .btn-new-char {
+      background: var(--brand-blue); color: white; font-weight: 700;
+      padding: 0 var(--space-l); border-radius: var(--radius-l);
+      &:hover { background: var(--brand-blue-hover); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(114, 137, 218, 0.4); }
+    }
+    .btn-close-manager {
+      color: var(--on-surface-muted);
+      &:hover { background: rgba(255,255,255,0.05); color: white; }
     }
   }
 }
 
+/* --- Character Grid --- */
 .character-grid {
+  flex: 1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 24px;
+  gap: var(--space-l);
+  padding-bottom: var(--space-l);
 }
 
-.character-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  border: 2px solid transparent;
-
-  // Uses Material Elevation 2 by default
-  @include mat.elevation(2);
+.character-glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s ease;
+  overflow: hidden;
 
   &:hover {
-    @include mat.elevation(6);
     transform: translateY(-4px);
+    border-color: var(--brand-blue-alpha);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    background: rgba(255, 255, 255, 0.05);
   }
 
   &.active-card {
-    // Highlights the active character using the theme's primary color
-    border-color: var(--mat-sys-primary);
-    background-color: var(--mat-sys-primary-container);
+    border-color: var(--brand-blue);
+    box-shadow: 0 0 20px rgba(114, 137, 218, 0.5);
+    background: rgba(114, 137, 218, 0.05);
   }
 }
 
-.card-content {
+.card-body {
   display: flex;
-  padding: 16px;
-  gap: 16px;
+  padding: var(--space-m);
+  gap: var(--space-m);
+  align-items: flex-start;
+  flex: 1;
 
-  .char-icon {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    object-fit: cover;
-    background-color: var(--mat-sys-surface-variant);
-    border: 3px solid var(--mat-sys-outline-variant);
+  .char-portrait-container {
+    position: relative;
+    flex-shrink: 0;
+
+    .char-portrait {
+      width: 100px;
+      height: 100px;
+      border-radius: var(--radius-l);
+      object-fit: cover;
+      border: 2px solid var(--outline);
+      box-shadow: var(--shadow-2);
+    }
+
+    .level-badge {
+      position: absolute;
+      bottom: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--brand-blue);
+      color: white;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      border: 2px solid #1e1f22;
+      white-space: nowrap;
+    }
   }
 
   .char-info {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 
-    mat-card-title {
-      font-size: 1.25rem;
-      margin-bottom: 4px;
+    .char-name {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+      color: white;
+      line-height: 1.2;
+    }
+
+    .char-sub-stats {
+      font-size: 13px;
+      color: var(--on-surface-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      .separator {
+        opacity: 0.5;
+        font-size: 10px;
+      }
+
+      .ac-stat {
+        background: rgba(255,255,255,0.05);
+        padding: 1px 6px;
+        border-radius: 4px;
+        color: var(--brand-blue);
+        font-weight: 600;
+      }
     }
 
     .class-chips {
-      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
 
-      mat-chip {
-        --mdc-chip-label-text-size: 12px;
-        height: 24px;
+      .class-chip {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--on-surface);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: var(--radius-pill);
+        border: 1px solid rgba(255,255,255,0.1);
       }
     }
   }
 }
 
-mat-card-actions {
+.card-footer {
   display: flex;
   justify-content: space-between;
-  padding: 8px 16px !important;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-top: 1px solid var(--outline);
+
+  .footer-actions-left {
+    display: flex;
+    gap: 2px;
+  }
+
+  .action-btn {
+    width: 36px;
+    height: 36px;
+    line-height: 36px;
+    color: var(--on-surface-muted);
+
+    mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    &:hover {
+      background: rgba(255,255,255,0.05);
+      color: white;
+    }
+
+    &.btn-danger {
+      color: var(--danger);
+      &:hover {
+        background: rgba(237, 66, 69, 0.1);
+      }
+    }
+  }
+
+  .btn-assign-servers {
+    font-size: 12px;
+    height: 32px;
+    line-height: 32px;
+    padding: 0 12px;
+    background: rgba(255,255,255,0.05);
+    color: var(--on-surface);
+    border-radius: var(--radius-m);
+
+    mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      margin-right: 4px;
+    }
+
+    &:hover {
+      background: var(--brand-blue-alpha);
+      color: white;
+    }
+  }
+}
+
+/* --- Server Assign Menu --- */
+::ng-deep .server-assign-menu {
+  .mat-mdc-menu-panel {
+    background: rgba(30, 31, 34, 0.9) !important;
+    backdrop-filter: blur(20px) !important;
+    border: 1px solid var(--outline) !important;
+    border-radius: var(--radius-l) !important;
+    padding: 8px 0 !important;
+  }
+  .menu-title {
+    padding: 8px 16px; font-size: 11px; font-weight: 800; text-transform: uppercase;
+    color: var(--on-surface-muted); letter-spacing: 1px;
+  }
+  button.mat-mdc-menu-item {
+    color: var(--on-surface); font-size: 13px;
+    &:hover { background: rgba(255,255,255,0.05); }
+    mat-icon { margin-right: 12px; color: var(--brand-blue); }
+  }
+}
+
+/* --- Empty State --- */
+.empty-state-glass {
+  grid-column: 1 / -1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 2px dashed var(--outline);
+  border-radius: var(--radius-xl);
+  padding: var(--space-2xl);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-m);
+  color: var(--on-surface-muted);
+
+  mat-icon { font-size: 64px; width: 64px; height: 64px; color: var(--brand-blue-alpha); }
+  h3 { font-size: 24px; font-weight: 700; margin: 0; color: white; }
+  p { font-size: 16px; max-width: 400px; line-height: 1.5; }
+  .btn-new-char {
+    background: var(--brand-blue); color: white; font-weight: 700;
+    padding: 0 var(--space-l); border-radius: var(--radius-l);
+    &:hover { background: var(--brand-blue-hover); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(114, 137, 218, 0.4); }
+  }
 }

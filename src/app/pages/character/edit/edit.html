@@ -1,107 +1,157 @@
-<div class="edit-header">
-  <h2 mat-dialog-title>Edit Character: {{data.name}}</h2>
-  <button mat-icon-button (click)="close()" class="close-button">
-    <mat-icon>close</mat-icon>
-  </button>
+<div class="glass-dialog-container">
+
+  <header class="dialog-header">
+    <div class="header-content">
+      <mat-icon class="title-icon">auto_fix_normal</mat-icon>
+      <h2 class="dialog-title">Re-Forge: {{data.name}}</h2>
+    </div>
+    <button mat-icon-button (click)="close()" class="close-btn">
+      <mat-icon>close</mat-icon>
+    </button>
+  </header>
+
+  <mat-dialog-content class="modern-dialog-content">
+    <form [formGroup]="charForm">
+
+      <mat-tab-group class="modern-tabs" dynamicHeight mat-stretch-tabs="false">
+
+        <!-- 1. CORE IDENTITY -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>fingerprint</mat-icon>
+            <span>Identity</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <div class="identity-header">
+              <div class="avatar-preview-box glass">
+                <img [src]="charForm.get('iconUrl')?.value || 'https://www.gravatar.com/avatar/0?d=identicon'" class="preview-img">
+                <label class="icon-edit-overlay">
+                  <mat-icon>photo_camera</mat-icon>
+                  <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*" hidden>
+                </label>
+              </div>
+              <div class="identity-main">
+                <mat-form-field appearance="outline" class="glass-field full-width">
+                  <mat-label>Character Name</mat-label>
+                  <input matInput formControlName="name">
+                </mat-form-field>
+                <mat-form-field appearance="outline" class="glass-field full-width">
+                  <mat-label>Race</mat-label>
+                  <input matInput formControlName="race">
+                </mat-form-field>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- 2. ATTRIBUTES & COMBAT -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>military_tech</mat-icon>
+            <span>Attributes</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <div class="ac-center-box">
+              <div class="ac-input-wrapper">
+                <mat-icon class="ac-icon">shield</mat-icon>
+                <div class="ac-fields">
+                  <label>ARMOR CLASS</label>
+                  <input type="number" formControlName="ac">
+                </div>
+              </div>
+            </div>
+
+            <h3 class="pane-title">Ability Scores</h3>
+            <div class="stats-grid">
+              @for (stat of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']; track stat) {
+                <div class="stat-card">
+                  <label>{{ stat | slice:0:3 | uppercase }}</label>
+                  <input type="number" [formControlName]="stat">
+                  <div class="stat-mod">{{ modifier(charForm.get(stat)?.value || 10) }}</div>
+                </div>
+              }
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- 3. VOCATIONS -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>menu_book</mat-icon>
+            <span>Vocations</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <header class="section-action-header">
+              <p>Multiclassing & Levels</p>
+              <button mat-button class="add-class-btn" type="button" (click)="addClass()">
+                <mat-icon>add</mat-icon> ADD LEVEL
+              </button>
+            </header>
+
+            <div formArrayName="classes" class="class-cards-list">
+              @for (c of classArray.controls; track $index; let i = $index) {
+                <div [formGroupName]="i" class="class-glass-card">
+                  <div class="card-inputs">
+                    <mat-form-field appearance="fill" class="compact-field flex-2">
+                      <mat-label>Class</mat-label>
+                      <input matInput formControlName="className">
+                    </mat-form-field>
+
+                    <mat-form-field appearance="fill" class="compact-field flex-2">
+                      <mat-label>Subclass</mat-label>
+                      <input matInput formControlName="subclassName">
+                    </mat-form-field>
+
+                    <mat-form-field appearance="fill" class="compact-field flex-1">
+                      <mat-label>Lv</mat-label>
+                      <input matInput type="number" formControlName="level">
+                    </mat-form-field>
+                  </div>
+
+                  <button mat-icon-button color="warn" (click)="removeClass(i)" class="delete-card-btn">
+                    <mat-icon>delete_outline</mat-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+        </mat-tab>
+
+        <!-- 4. MEDIA -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon>folder_special</mat-icon>
+            <span>Media</span>
+          </ng-template>
+
+          <div class="tab-pane">
+            <div class="media-upload-grid">
+              <div class="upload-zone glass">
+                <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
+                <div class="upload-info">
+                  <label>Update PDF Sheet</label>
+                  <span>Replace current character PDF</span>
+                  <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
+                </div>
+              </div>
+            </div>
+          </div>
+        </mat-tab>
+
+      </mat-tab-group>
+    </form>
+  </mat-dialog-content>
+
+  <footer class="dialog-footer">
+    <button mat-button class="btn-cancel" (click)="close()">DISCARD</button>
+    <button mat-raised-button class="btn-summon" (click)="submitForm()"
+            [disabled]="charForm.invalid || (charForm.pristine && !selectedIcon && !selectedPdf)">
+      <mat-icon>check_circle</mat-icon>
+      <span>APPLY CHANGES</span>
+    </button>
+  </footer>
+
 </div>
-
-<mat-dialog-content>
-  <form [formGroup]="charForm">
-    <mat-tab-group mat-stretch-tabs="false" mat-align-tabs="start">
-
-      <mat-tab label="Basic Info">
-        <div class="tab-content">
-          <div class="profile-preview-section" *ngIf="charForm.get('iconUrl')?.value">
-            <img [src]="charForm.get('iconUrl')?.value" alt="Character Icon" class="current-icon">
-            <p class="mat-caption">Current Icon</p>
-          </div>
-
-          <div class="form-row">
-            <mat-form-field appearance="outline" class="flex-3">
-              <mat-label>Character Name</mat-label>
-              <input matInput formControlName="name">
-            </mat-form-field>
-
-            <mat-form-field appearance="outline" class="flex-1">
-              <mat-label>AC</mat-label>
-              <input matInput type="number" formControlName="ac">
-            </mat-form-field>
-          </div>
-
-          <mat-form-field appearance="outline" class="full-width">
-            <mat-label>Race</mat-label>
-            <input matInput formControlName="race">
-          </mat-form-field>
-        </div>
-      </mat-tab>
-
-      <mat-tab label="Combat & Stats">
-        <div class="tab-container">
-          <div class="ac-section">
-            <mat-form-field appearance="outline">
-              <mat-label>Armor Class (AC)</mat-label>
-              <input matInput type="number" formControlName="ac">
-              <mat-icon matPrefix>shield</mat-icon>
-            </mat-form-field>
-          </div>
-
-          <div class="stats-grid">
-            <mat-form-field *ngFor="let stat of ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']" appearance="fill">
-              <mat-label>{{ stat | titlecase }}</mat-label>
-              <input matInput type="number" [formControlName]="stat">
-            </mat-form-field>
-          </div>
-        </div>
-      </mat-tab>
-      <mat-tab label="classes">
-        <div class="classes-header">
-          <h3>Classes</h3>
-          <button mat-stroked-button color="primary" type="button" (click)="addClass()">
-            <mat-icon>add</mat-icon> Add Level
-          </button>
-        </div>
-        <div formArrayName="classes" class="class-scroll-area">
-          <div *ngFor="let c of classArray.controls; let i = index" [formGroupName]="i" class="edit-class-row">
-            <mat-form-field appearance="outline">
-              <input matInput formControlName="className" placeholder="Class">
-            </mat-form-field>
-            <mat-form-field appearance="outline">
-              <input matInput type="number" formControlName="level">
-            </mat-form-field>
-            <button mat-icon-button color="warn" (click)="removeClass(i)">
-              <mat-icon>delete_outline</mat-icon>
-            </button>
-          </div>
-        </div>
-      </mat-tab>
-
-      <mat-tab label="Media">
-        <div class="tab-content media-tab">
-          <div class="upload-card">
-            <mat-icon>image</mat-icon>
-            <div class="upload-info">
-              <span class="label">Update Profile Image</span>
-              <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*">
-            </div>
-          </div>
-
-          <div class="upload-card">
-            <mat-icon>picture_as_pdf</mat-icon>
-            <div class="upload-info">
-              <span class="label">Update Character PDF</span>
-              <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
-            </div>
-          </div>
-        </div>
-      </mat-tab>
-
-    </mat-tab-group>
-  </form>
-</mat-dialog-content>
-
-<mat-dialog-actions align="end">
-  <button mat-button (click)="close()">Discard Changes</button>
-  <button mat-raised-button color="primary" (click)="submitForm()" [disabled]="charForm.invalid || charForm.pristine && !selectedIcon && !selectedPdf">
-    <mat-icon>check</mat-icon> Save Changes
-  </button>
-</mat-dialog-actions>

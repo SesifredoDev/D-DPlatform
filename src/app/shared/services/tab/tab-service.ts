@@ -22,13 +22,13 @@ export class TabService {
 
   openTab(id: string, title: string, type: 'text' | 'call' | 'character' | 'vtt' | 'spotify', pane: "left" | "right" = 'left', character?: ICharacter) {
     const current = this.tabs.value;
-    if (current.find(t => t.id === id)) {
+    const existing = current.find(t => t.id === id);
+
+    if (existing) {
       this.selectTab(id);
     } else {
-      const newTab: Tab = { id, title, type, pane, active: true };
-      if(character){
-        newTab.character = character;
-      }
+      const newTab: Tab = { id, title, type, pane, active: true, character };
+      // Deactivate others in the same pane
       const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
       this.tabs.next([...updated, newTab]);
     }

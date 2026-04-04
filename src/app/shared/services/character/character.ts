@@ -82,6 +82,10 @@ export class CharacterService {
     return this.http.put(`${this.apiUrl}/${id}`, formData);
   }
 
+  deleteCharacter(id: string): Observable<any> {
+    return this.http.delete(`${this.apiUrl}/${id}`);
+  }
+
   setActiveCharacter(characterData: ICharacter) {
     this.activeCharacter.next(characterData);
     return characterData;

@@ -11,7 +11,8 @@ import {
   ViewChildren,
   QueryList,
   Output,
-  EventEmitter
+  EventEmitter,
+  ChangeDetectorRef
 } from '@angular/core';
 import { Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
@@ -23,13 +24,14 @@ import { SpotifyService } from '../../../shared/services/playlist/spotify.servic
 import { ActivatedRoute } from '@angular/router';
 import { SpotifyPlayer } from './spotify-player/spotify-player';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule]
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -40,6 +42,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   @Output() stopVtt = new EventEmitter<string>();
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
+  @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
 
   videoDevices: MediaDeviceInfo[] = [];
@@ -48,23 +51,36 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   selectedAudioId: string = '';
 
   localStream: MediaStream | null = null;
+  previewStream: MediaStream | null = null;
   remoteStreams: { id: string; stream: MediaStream; userData: ICharacter }[] = [];
 
   isAudioMuted = false;
   isVideoOff = false;
+  isPreviewMuted = false;
+  isPreviewVideoOff = false;
+  isJoining = false;
 
   // Spotify Control
   showSpotify: boolean = false;
 
+  // VTT Session state
+  vttSession: { active: boolean, roomId: string | null, hostId: string | null } = { active: false, roomId: null, hostId: null };
+  showVttNotification: boolean = false;
+  private vttNotificationTimeout: any;
+
   private streamSub!: Subscription;
   private spotifySyncSub!: Subscription;
   private spotifyActionSub!: Subscription;
+  private vttSub!: Subscription;
+
+  private isComponentDestroying = false;
 
   constructor(
     private videoService: Video,
     private tabService: TabService,
     public spotify: SpotifyService,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private cdr: ChangeDetectorRef
   ) {}
 
   async ngOnInit() {
@@ -75,6 +91,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
 
     await this.loadDevices();
+
+    // Check if there's already an active stream for this channel
+    const existingStream = this.videoService.getLocalStream();
+    if (existingStream && this.videoService.currentChannelId === this.channelId) {
+      this.localStream = existingStream;
+      // Sync UI states from tracks
+      this.isAudioMuted = !this.localStream.getAudioTracks().every(t => t.enabled);
+      this.isVideoOff = !this.localStream.getVideoTracks().every(t => t.enabled);
+
+      setTimeout(() => {
+        if (this.localVideo) {
+          this.localVideo.nativeElement.srcObject = this.localStream;
+        }
+      }, 100);
+    } else {
+      await this.startPreview();
+    }
 
     // Subscribe to remote streams
     this.streamSub = this.videoService.remoteStreams$.subscribe(streams => {
@@ -96,13 +129,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       });
     });
 
-    // Handle Incoming Spotify Sync from Remote Users
+    // Spotify sync logic
     this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
       if (!state.uri || !this.localStream) return;
-
       const currentState = await this.spotify.getPlaybackState();
-
-      // Determine if we need to sync
       const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
       const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
       const adjustedPosition = state.position + drift;
@@ -113,7 +143,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         if (!state.paused) {
           await this.spotify.play(state.uri, adjustedPosition, true);
         } else {
-          // If paused, we only care about track/position if it's different
           if (isDifferentTrack) {
              await this.spotify.play(state.uri, state.position, true);
              setTimeout(() => this.spotify.pause(true), 500);
@@ -124,95 +153,154 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
     });
 
-    // Handle Local Spotify Actions (send to others)
     this.spotifyActionSub = this.spotify.syncAction$.subscribe(action => {
       if (this.localStream) {
         this.videoService.sendSpotifyCommand(action.command, action.data);
       }
     });
-  }
 
-  async ngOnChanges(changes: SimpleChanges) {
-    const currentCharacter = changes['character']?.currentValue;
-    if (currentCharacter && this.channelId) {
-      this.videoService.updateUserData(this.channelId, currentCharacter);
-    }
+    this.vttSub = this.videoService.vttSession$.subscribe(session => {
+      const wasActive = this.vttSession.active;
+      this.vttSession = session;
+      if (session.active && !wasActive && session.hostId !== this.character?.name) {
+        this.triggerVttNotification();
+      } else if (!session.active) {
+        this.showVttNotification = false;
+        if (this.vttNotificationTimeout) clearTimeout(this.vttNotificationTimeout);
+      }
+    });
   }
 
   async loadDevices() {
     try {
-      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: {
-          width: { min: 1280 },   // Force 720p
-          height: { min: 720 },
-          frameRate: { ideal: 30 }
-        } });
-      tempStream.getTracks().forEach(t => t.stop());
+      // First try to get any permissions
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      stream.getTracks().forEach(t => t.stop());
 
       const devices = await navigator.mediaDevices.enumerateDevices();
       this.videoDevices = devices.filter(d => d.kind === 'videoinput');
       this.audioDevices = devices.filter(d => d.kind === 'audioinput');
 
-      if (this.videoDevices.length) this.selectedVideoId = this.videoDevices[0].deviceId;
-      if (this.audioDevices.length) this.selectedAudioId = this.audioDevices[0].deviceId;
+      // Set defaults if not set
+      if (this.videoDevices.length && !this.selectedVideoId) this.selectedVideoId = this.videoDevices[0].deviceId;
+      if (this.audioDevices.length && !this.selectedAudioId) this.selectedAudioId = this.audioDevices[0].deviceId;
     } catch (err) {
-      console.error('Could not access media devices', err);
+      console.warn('Media device access partially or fully denied', err);
     }
   }
 
-  async joinCall() {
-    if (!this.channelId || !this.character) return;
+  async startPreview() {
+    if (this.previewStream) {
+      this.previewStream.getTracks().forEach(t => t.stop());
+      this.previewStream = null;
+    }
 
     try {
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(t => t.stop());
-      }
-
-      const constraints: MediaStreamConstraints = {
-        video: {
-          deviceId: this.selectedVideoId ? { exact: this.selectedVideoId } : undefined,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        },
+      const constraints = {
+        video: this.selectedVideoId ? { deviceId: { exact: this.selectedVideoId } } : true,
         audio: this.selectedAudioId ? { deviceId: { exact: this.selectedAudioId } } : true
       };
 
-      this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.previewStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      if (this.localVideo?.nativeElement) {
-        this.localVideo.nativeElement.srcObject = this.localStream;
-        this.localVideo.nativeElement.muted = true;
-        await this.localVideo.nativeElement.play();
+      if (this.previewVideo) {
+        this.previewVideo.nativeElement.srcObject = this.previewStream;
+      }
+      this.cdr.detectChanges();
+    } catch (err) {
+      console.error('Preview failed, trying fallback', err);
+      try {
+        // Fallback: Just audio or just video if one fails
+        this.previewStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        this.cdr.detectChanges();
+      } catch (fallbackErr) {
+        console.error('All media access failed', fallbackErr);
+      }
+    }
+  }
+
+  async onDeviceChange() {
+    await this.startPreview();
+  }
+
+  async joinCall() {
+    if (!this.channelId || !this.character || this.isJoining) return;
+    this.isJoining = true;
+
+    try {
+      // 1. Get the stream (either from preview or fresh)
+      if (this.previewStream && this.previewStream.active) {
+        this.localStream = this.previewStream;
+        this.previewStream = null;
+      } else {
+        const constraints = {
+          video: this.selectedVideoId ? { deviceId: { exact: this.selectedVideoId } } : true,
+          audio: this.selectedAudioId ? { deviceId: { exact: this.selectedAudioId } } : true
+        };
+        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
       }
 
+      // 2. Double check the stream is valid
+      if (!this.localStream || !this.localStream.active) {
+        throw new Error('Acquired stream is not active');
+      }
+
+      // 3. Sync UI states
+      this.isAudioMuted = this.isPreviewMuted;
+      this.isVideoOff = this.isPreviewVideoOff;
+
+      this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
+      this.localStream.getVideoTracks().forEach(t => t.enabled = !this.isVideoOff);
+
+      // 4. Initialize the video service
       this.videoService.updateUserData(this.channelId, this.character);
       await this.videoService.initVideoCall(this.channelId, this.character);
+
+      // 5. Start broadcasting
       await this.videoService.startProducing(this.localStream);
 
+      // 6. Update local video element
+      setTimeout(() => {
+        if (this.localVideo) {
+          this.localVideo.nativeElement.srcObject = this.localStream;
+        }
+      }, 100);
+
     } catch (err) {
-      console.error('[ERROR] Join call failed:', err);
+      console.error('[CRITICAL] Join call failed:', err);
+      // Clean up on failure
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => t.stop());
+        this.localStream = null;
+      }
+      this.isJoining = false;
+      await this.startPreview(); // Restore preview so they can try again
+    } finally {
+      this.isJoining = false;
+      this.cdr.detectChanges();
     }
   }
 
   async leaveCall() {
     await this.videoService.leaveCall(this.channelId);
-
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(t => t.stop());
-      this.localStream = null;
-    }
-
+    this.localStream = null;
     this.remoteStreams = [];
-    this.isAudioMuted = false;
-    this.isVideoOff = false;
     this.showSpotify = false;
     this.stopVtt.emit(this.channelId);
+    if (!this.isComponentDestroying) {
+        await this.startPreview();
+    }
   }
 
   toggleAudio() {
     if (this.localStream) {
       this.isAudioMuted = !this.isAudioMuted;
       this.localStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
+    } else {
+      this.isPreviewMuted = !this.isPreviewMuted;
+      if (this.previewStream) {
+        this.previewStream.getAudioTracks().forEach(t => t.enabled = !this.isPreviewMuted);
+      }
     }
   }
 
@@ -220,6 +308,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.localStream) {
       this.isVideoOff = !this.isVideoOff;
       this.localStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));
+    } else {
+      this.isPreviewVideoOff = !this.isPreviewVideoOff;
+      if (this.previewStream) {
+        this.previewStream.getVideoTracks().forEach(t => t.enabled = !this.isPreviewVideoOff);
+      }
+    }
+  }
+
+  triggerVttNotification() {
+    this.showVttNotification = true;
+    if (this.vttNotificationTimeout) clearTimeout(this.vttNotificationTimeout);
+    this.vttNotificationTimeout = setTimeout(() => this.showVttNotification = false, 10000);
+  }
+
+  async ngOnChanges(changes: SimpleChanges) {
+    const currentCharacter = changes['character']?.currentValue;
+    if (currentCharacter && this.channelId && this.localStream) {
+      this.videoService.updateUserData(this.channelId, currentCharacter);
     }
   }
 
@@ -231,21 +337,45 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @HostListener('window:beforeunload')
   async handleBeforeUnload() {
+    this.isComponentDestroying = true;
+    // Ensure leaveCall is always called on full page unload
     await this.leaveCall();
   }
 
   ngOnDestroy() {
+    this.isComponentDestroying = true;
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
-    this.leaveCall();
+    if (this.vttSub) this.vttSub.unsubscribe();
+
+    // If the videoService is still connected to this channel, it means the tab is being moved,
+    // so we don't want to disconnect the call.
+    if (this.videoService.currentChannelId === this.channelId) {
+      // Just stop the preview stream if it's active, as the component is being destroyed.
+      if (this.previewStream) {
+        this.previewStream.getTracks().forEach(t => t.stop());
+      }
+    } else {
+      // If the videoService is NOT connected to this channel, it means the tab is truly closing
+      // or the videoService has already disconnected. In this case, ensure we leave the call.
+      // The leaveCall() method already handles stopping the localStream and disconnecting.
+      this.leaveCall();
+    }
   }
 
   startVttHosting() {
+    this.videoService.sendVttCommand('start', this.channelId);
     this.hostVtt.emit(this.channelId);
   }
 
   startVttJoining() {
-    this.joinVtt.emit(this.channelId);
+    this.joinVtt.emit(this.vttSession.roomId || this.channelId);
+    this.showVttNotification = false;
+  }
+
+  stopVttSession() {
+    this.videoService.sendVttCommand('stop', this.channelId);
+    this.stopVtt.emit(this.channelId);
   }
 }

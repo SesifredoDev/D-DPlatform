@@ -3,22 +3,22 @@ import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } fr
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { CommonModule } from '@angular/common';
 import { CharacterService } from '../../../shared/services/character/character';
-// Reuse your Material imports from create.ts
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { MatButtonModule } from '@angular/material/button';
+import { MatButtonModule, MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTabsModule } from '@angular/material/tabs';
-import {ICharacter} from '../../../shared/models/user/character.model';
-import {MatDividerModule} from '@angular/material/divider';
+import { ICharacter } from '../../../shared/models/user/character.model';
+import { MatDividerModule } from '@angular/material/divider';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-edit',
   standalone: true,
   imports: [
     CommonModule, ReactiveFormsModule, MatDialogModule,
-    MatFormFieldModule, MatInputModule, MatButtonModule,
-    MatIconModule, MatTabsModule, MatDividerModule
+    MatFormFieldModule, MatInputModule, MatButtonModule, MatIconButton,
+    MatIconModule, MatTabsModule, MatDividerModule, MatTooltipModule
   ],
   templateUrl: './edit.html',
   styleUrl: './edit.scss'
@@ -27,13 +27,12 @@ export class Edit implements OnInit {
   charForm: FormGroup;
   selectedIcon: File | null = null;
   selectedPdf: File | null = null;
-  isImporting = false;
 
   constructor(
     private fb: FormBuilder,
     private charService: CharacterService,
     private dialogRef: MatDialogRef<Edit>,
-    @Inject(MAT_DIALOG_DATA) public data: ICharacter // Inject character data
+    @Inject(MAT_DIALOG_DATA) public data: ICharacter
   ) {
     this.charForm = this.fb.group({
       _id: [data._id],
@@ -53,7 +52,6 @@ export class Edit implements OnInit {
   }
 
   ngOnInit(): void {
-    // Populate existing classes
     if (this.data.classes) {
       this.data.classes.forEach(c => this.addClass(c.className, c.subclassName, c.level));
     }
@@ -72,17 +70,29 @@ export class Edit implements OnInit {
 
   removeClass(index: number) { this.classArray.removeAt(index); }
 
+  modifier(stat: number): string {
+    const mod = Math.floor((stat - 10) / 2);
+    return mod >= 0 ? `+${mod}` : `${mod}`;
+  }
+
   onFileSelected(event: any, type: 'icon' | 'pdf') {
     const file = event.target.files[0];
-    if (type === 'icon') this.selectedIcon = file;
-    if (type === 'pdf') this.selectedPdf = file;
+    if (!file) return;
+
+    if (type === 'icon') {
+      this.selectedIcon = file;
+      const reader = new FileReader();
+      reader.onload = (e: any) => this.charForm.patchValue({ iconUrl: e.target.result });
+      reader.readAsDataURL(file);
+    }
+    if (type === 'pdf') {
+      this.selectedPdf = file;
+    }
   }
 
   submitForm() {
     if (this.charForm.valid) {
       const formVal = this.charForm.value;
-
-      // Map form values to ICharacter structure
       const characterUpdate: Partial<ICharacter> = {
         _id: formVal._id,
         name: formVal.name,
@@ -100,8 +110,9 @@ export class Edit implements OnInit {
         },
         classes: formVal.classes
       };
-      if(!characterUpdate._id)return;
-      this.charService.updateCharacter(characterUpdate._id,characterUpdate, this.selectedIcon!, this.selectedPdf!)
+
+      if (!characterUpdate._id) return;
+      this.charService.updateCharacter(characterUpdate._id, characterUpdate, this.selectedIcon!, this.selectedPdf!)
         .subscribe(res => {
           this.dialogRef.close(res);
         });

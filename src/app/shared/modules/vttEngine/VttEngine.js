@@ -43,11 +43,7 @@ export class VttEngine {
     this.initZoom();
     this.initInteraction();
 
-    window.addEventListener('resize', () => {
-      this.stage.width(this.containerId.getBoundingClientRect().width);
-      this.stage.height(this.containerId.getBoundingClientRect().height);
-      this.centerMap();
-    });
+    // REMOVED window resize listener to avoid resize loops with ResizeObserver in component
   }
 
   initInteraction() {

@@ -1,0 +1,107 @@
+// -----------------------------------------------------------------------------
+// Theme Variables - Modern Glass & RPG
+// -----------------------------------------------------------------------------
+
+/* ================= THEME TOKENS (Shared) ================= */
+:root {
+  // --- Spacing System ---
+  --space-xs: 0.25rem; // 4px
+  --space-s: 0.5rem;  // 8px
+  --space-m: 1rem;    // 16px
+  --space-l: 1.5rem;  // 24px
+  --space-xl: 2rem;   // 32px
+  --space-2xl: 3rem;  // 48px
+
+  // --- Border Radius ---
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --radius-xl: 16px;
+  --radius-round: 50%;
+  --radius-pill: 999px;
+
+  // --- Elevation & Shadows ---
+  --shadow-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+  --shadow-2: 0 4px 15px rgba(0,0,0,0.3);
+  --shadow-3: 0 8px 32px rgba(0,0,0,0.5);
+  --shadow-4: 0 12px 48px rgba(0, 0, 0, 0.8);
+
+  // --- Transitions ---
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-standard: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  --font-family-main: "Inter", system-ui, -apple-system, sans-serif;
+
+  // Glass Dialog Defaults
+  --glass-bg: rgba(30, 31, 34, 0.85);
+  --glass-blur: blur(20px);
+}
+
+/* ================= MODERN DARK THEME ================= */
+body.modern-dark {
+  // Brand Colors
+  --brand-blue: #7289da;
+  --brand-blue-hover: #677bc4;
+  --brand-blue-alpha: rgba(114, 137, 218, 0.35);
+
+  --primary: #673ab7;
+  --accent: #4a90e2;
+  --accent-glow: rgba(74, 144, 226, 0.4);
+
+  // Backgrounds
+  --background: #121212;
+  --background-alt: #09090b;
+  --background-gradient: linear-gradient(180deg, #1f2027 0%, #191a1f 100%);
+
+  // Surfaces & Glass
+  --surface: #1e1f22;
+  --surface-light: rgba(255, 255, 255, 0.05);
+  --surface-lighter: rgba(255, 255, 255, 0.08);
+  --surface-variant: rgba(255, 255, 255, 0.03);
+
+  // Content
+  --on-background: #eef0f6;
+  --on-surface: #e6e1e5;
+  --on-surface-muted: #b9bbbe;
+  --on-surface-variant: rgba(238, 240, 246, 0.6);
+
+  // Borders & Outlines
+  --outline: rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.08);
+
+  // Functional
+  --danger: #ed4245;
+  --danger-hover: #c03537;
+  --success: #3ba55c;
+  --active-green: #57f287;
+  --error: #b3261e;
+  --warning: #fee75c;
+
+  // VTT Specific
+  --vtt-panel-bg: rgba(25, 25, 25, 0.85);
+  --vtt-drawer-bg: rgba(15, 15, 15, 0.98);
+}
+
+/* ================= CLASSIC PARCHMENT THEME (Redesigned for compatibility) ================= */
+body.classic-parchment {
+  --brand-blue: #4682b4;
+  --brand-blue-alpha: rgba(70, 130, 180, 0.3);
+
+  --background: #fdfaf1;
+  --background-gradient: linear-gradient(180deg, #fdfaf1 0%, #f5e6c8 100%);
+
+  --surface: #f5e6c8;
+  --surface-light: rgba(0, 0, 0, 0.04);
+  --surface-lighter: rgba(0, 0, 0, 0.06);
+  --outline: rgba(0, 0, 0, 0.1);
+
+  --on-background: #2b1e14;
+  --on-surface: #3d2b1f;
+  --on-surface-muted: #5c3b21;
+  --on-surface-variant: rgba(43, 30, 20, 0.6);
+
+  --danger: #96281b;
+  --success: #27ae60;
+  --active-green: #2ecc71;
+}

@@ -3,6 +3,8 @@ import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject } from 'rxjs';
 import { startWith, switchMap, catchError } from 'rxjs/operators';
 
+import {environment} from '../../../../environments/environment';
+
 declare global {
   interface Window { onSpotifyWebPlaybackSDKReady: () => void; Spotify: any; }
 }
@@ -54,6 +56,8 @@ export class SpotifyService {
   public syncAction$ = new Subject<{ command: string, data: any }>();
 
   private readonly API_BASE = 'https://api.spotify.com/v1';
+  // Use the VPS IP for the backend API
+  private readonly BACKEND_API = `${environment.apiURL}`;
 
   constructor(private http: HttpClient) {
     this.accessToken = localStorage.getItem('spotify_access_token');
@@ -484,7 +488,7 @@ export class SpotifyService {
 
   login() {
     if (!this.accessToken) {
-      window.location.href = `http://127.0.0.1:5000/spotify/login`;
+      window.location.href = `${this.BACKEND_API}/spotify/login`;
     } else {
       this.initSDK();
     }

@@ -1,6 +1,6 @@
 <div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!syncService.isConnected || syncService.isHosting">
   <div class="drawer-toggle" (click)="showLibraryOverlay = !showLibraryOverlay">
-    <span class="material-icons">{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</span>
+    <mat-icon>{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</mat-icon>
     <span class="toggle-text">{{ showLibraryOverlay ? 'CLOSE LIBRARY' : 'OPEN MAP LIBRARY' }}</span>
   </div>
 
@@ -8,7 +8,7 @@
     <div class="library-grid">
       <div class="library-card new-map-card" (click)="createNewMap()">
         <div class="thumbnail-placeholder">
-          <span class="material-icons">add_location_alt</span>
+          <mat-icon>add_location_alt</mat-icon>
         </div>
         <span class="map-label">Create New</span>
       </div>
@@ -18,11 +18,11 @@
           <div class="thumbnail" [style.backgroundImage]="'url(' + map.data.mapUrl + ')'">
             <div class="card-actions">
               <button (click)="toggleArchive(map, $event)" title="Archive" [disabled]="map.id == currentMapId" *ngIf="map.id !== currentMapId">
-                <span class="material-icons">inventory_2</span>
+                <mat-icon>inventory_2</mat-icon>
               </button>
             </div>
             <div class="overlay-stats">
-              <span class="material-icons">history</span>
+              <mat-icon>history</mat-icon>
               {{ map.lastSaved | date:'shortDate' }}
             </div>
           </div>
@@ -34,17 +34,17 @@
     <hr class="divider" *ngIf="mapLibrary.length > 0">
 
     <div class="archive-section" *ngIf="mapLibrary.length > 0">
-      <h4><span class="material-icons">archive</span> Archived Maps</h4>
+      <h4><mat-icon>archive</mat-icon> Archived Maps</h4>
       <div class="library-grid">
         <ng-container *ngFor="let map of mapLibrary">
           <div class="library-card archived" *ngIf="map.isArchived">
             <div class="thumbnail" [style.backgroundImage]="'url(' + map.data.mapUrl + ')'">
               <div class="card-actions">
                 <button (click)="toggleArchive(map, $event)" title="Restore">
-                  <span class="material-icons">unarchive</span>
+                  <mat-icon>unarchive</mat-icon>
                 </button>
                 <button (click)="deleteMap(map, $event)" class="btn-danger" title="Delete" >
-                  <span class="material-icons">delete_forever</span>
+                  <mat-icon>delete_forever</mat-icon>
                 </button>
               </div>
             </div>
@@ -55,77 +55,82 @@
     </div>
   </div>
 </div>
+
 <div class="current-map-indicator" *ngIf="currentMapName">
-  <span class="material-icons">auto_stories</span> {{ currentMapName }}
+  <mat-icon>auto_stories</mat-icon>
+  <span>{{ currentMapName }}</span>
 </div>
 
 <div id="toolbar-wrapper">
-
-
-  <div id="toolbar">
+  <div id="toolbar" class="glass">
     <!-- Map Management Tools -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
-      <button mat-icon-button (click)="saveCurrentMap(false)" title="Save Changes">
+      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save Changes">
         <mat-icon>save</mat-icon>
       </button>
-      <button mat-icon-button (click)="saveCurrentMap(true)" title="Save As New">
+      <button mat-icon-button (click)="saveCurrentMap(true)" matTooltip="Save As New">
         <mat-icon>library_add</mat-icon>
       </button>
-      <label class="custom-file-upload icon-btn" title="Upload Background Map">
+      <button mat-icon-button (click)="fileInput.click()" matTooltip="Upload Map">
         <mat-icon>image</mat-icon>
-        <input type="file" (change)="onMapUpload($event)" accept="image/*" />
-      </label>
+      </button>
+      <input #fileInput type="file" (change)="onMapUpload($event)" accept="image/*" style="display: none" />
     </div>
 
     <!-- Core Interaction Tools -->
     <div class="tool-group">
-      <button mat-icon-button [class.active]="activeTool === 'select'" (click)="setTool('select')" title="Select/Move">
+      <button mat-icon-button [class.active]="activeTool === 'select'" (click)="setTool('select')" matTooltip="Select/Move">
         <mat-icon>near_me</mat-icon>
       </button>
-      <button mat-icon-button [class.active]="activeTool === 'line'" (click)="setMeasureTool('line')" title="Measure Line">
+      <button mat-icon-button [class.active]="activeTool === 'line'" (click)="setMeasureTool('line')" matTooltip="Measure Line">
         <mat-icon>straighten</mat-icon>
       </button>
-      <button mat-icon-button [class.active]="activeTool === 'radius'" (click)="setMeasureTool('radius')" title="Measure Radius">
+      <button mat-icon-button [class.active]="activeTool === 'radius'" (click)="setMeasureTool('radius')" matTooltip="Measure Radius">
         <mat-icon>blur_circular</mat-icon>
       </button>
     </div>
 
     <!-- Wall/Drawing Tools (DM Only) -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting" >
-      <button mat-icon-button [class.active]="activeTool === 'draw'" (click)="setTool('draw')" title="Draw Walls">
+      <button mat-icon-button [class.active]="activeTool === 'draw'" (click)="setTool('draw')" matTooltip="Draw Walls">
         <mat-icon>edit_road</mat-icon>
       </button>
-      <button mat-icon-button [class.active]="activeTool === 'delete'" (click)="setTool('delete')" title="Erase Walls">
+      <button mat-icon-button [class.active]="activeTool === 'delete'" (click)="setTool('delete')" matTooltip="Erase Walls">
         <mat-icon>auto_fix_off</mat-icon>
       </button>
     </div>
 
     <!-- Token Management & Lighting (DM Only) -->
     <div class="tool-group" *ngIf="syncService.isHosting">
-      <button mat-icon-button (click)="addPlayer()" title="Add Player Token">
+      <button mat-icon-button (click)="addPlayer()" matTooltip="Add Player Token">
         <mat-icon>person_add</mat-icon>
       </button>
-      <button mat-icon-button (click)="addToken()" title="Add Monster Token">
+      <button mat-icon-button (click)="addToken()" matTooltip="Add Monster Token">
         <mat-icon>person</mat-icon>
       </button>
-      <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" title="Toggle Lighting Engine">
+      <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" matTooltip="Toggle Lighting">
         <mat-icon>{{ lightingEnabled ? 'lightbulb' : 'lightbulb_outline' }}</mat-icon>
       </button>
     </div>
 
     <!-- Session Management -->
     <div class="tool-group">
-      <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" title="Host Session">
+      <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" matTooltip="Host Session">
         <mat-icon>podcasts</mat-icon>
       </button>
-      <button mat-icon-button *ngIf="syncService.isConnected" (click)="stopSession()" title="Stop Session" color="warn">
+      <button mat-icon-button *ngIf="syncService.isConnected" (click)="stopSession()" matTooltip="Stop Session" color="warn">
         <mat-icon>stop_circle</mat-icon>
+      </button>
+      <!-- Host Takeover Button -->
+      <button mat-flat-button color="accent" *ngIf="showHostTakeover" (click)="startHostingSession()" class="takeover-btn">
+        <mat-icon>stadium</mat-icon>
+        Assume Hosting
       </button>
     </div>
 
     <!-- Settings/Utilities -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
-      <div class="input-wrapper" title="Grid Size (px)">
+      <div class="input-wrapper" matTooltip="Grid Size (px)">
         <mat-icon class="tiny">grid_on</mat-icon>
         <input type="number" [value]="engine?.gridSize" (change)="engine.updateGridSize($any($event.target).value)">
       </div>
@@ -145,7 +150,7 @@
 <mat-menu #tokenMenu="matMenu" class="token-config-menu">
   <div class="menu-content" (click)="$event.stopPropagation()">
     <div class="menu-header">
-      <span class="material-icons">settings</span>
+      <mat-icon>settings</mat-icon>
       <h3>Token Config</h3>
     </div>
 
@@ -156,7 +161,7 @@
            [style.border-width]="tokenEditConfig.forceBorder ? '4px' : '2px'">
       </div>
       <label class="icon-upload-btn">
-        <span class="material-icons">photo_camera</span>
+        <mat-icon>photo_camera</mat-icon>
         <input type="file" (change)="onTokenIconUpload($event)" accept="image/*" hidden>
       </label>
     </div>
@@ -195,7 +200,7 @@
     </div>
 
     <div class="menu-footer">
-      <button mat-icon-button color="warn" (click)="deleteSelectedToken()" title="Delete Token">
+      <button mat-icon-button color="warn" (click)="deleteSelectedToken()" matTooltip="Delete Token">
         <mat-icon>delete</mat-icon>
       </button>
       <button mat-raised-button color="primary" (click)="applyTokenConfig()">

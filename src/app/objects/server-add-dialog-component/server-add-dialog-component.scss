@@ -1,6 +1,6 @@
 ::ng-deep .mat-mdc-dialog-container {
   padding: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-l);
   overflow: hidden;
 }
 
@@ -17,7 +17,7 @@
 }
 
 .subtitle {
-  color: #72767d;
+  color: var(--on-surface-muted);
   font-size: 14px;
   margin-bottom: 20px;
 }
@@ -38,16 +38,16 @@
 .icon-preview {
   width: 100px;
   height: 100px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background-size: cover;
   background-position: center;
   border: 2px dashed #4f545c;
   margin: auto;
   position: relative;
-  transition: border 0.2s;
+  transition: border var(--transition-standard);
 
   &:hover {
-    border-color: #7289da;
+    border-color: var(--brand-blue);
   }
 
   button {
@@ -59,7 +59,7 @@
 
 mat-dialog-actions {
   padding: 16px 24px;
-  background: #2f3136;
+  background: var(--surface);
 }
 
 mat-progress-bar {

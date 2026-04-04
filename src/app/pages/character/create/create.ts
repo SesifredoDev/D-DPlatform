@@ -12,9 +12,11 @@ import {MatDividerModule} from '@angular/material/divider';
 import {MatDialog, MatDialogModule, MatDialogRef} from '@angular/material/dialog';
 import {MatProgressSpinnerModule} from '@angular/material/progress-spinner';
 import {MatTabsModule} from '@angular/material/tabs';
+import {MatTooltipModule} from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-create',
+  standalone: true,
   imports: [
     CommonModule,
     ReactiveFormsModule,
@@ -27,6 +29,7 @@ import {MatTabsModule} from '@angular/material/tabs';
     MatDialogModule,
     MatProgressSpinnerModule,
     MatTabsModule,
+    MatTooltipModule,
   ],
   templateUrl: './create.html',
   styleUrl: './create.scss',
@@ -51,8 +54,7 @@ export class CreateCharacterComponent implements OnInit {
       ac: [10, [Validators.required, Validators.min(0)]],
       ddbId: [null],
       ddbUsername: [null],
-      iconUrl: [''], // Holds the DDB icon URL if no file is uploaded
-      // Stats
+      iconUrl: [''],
       strength: [10], dexterity: [10], constitution: [10],
       intelligence: [10], wisdom: [10], charisma: [10],
       classes: this.fb.array([])
@@ -61,7 +63,6 @@ export class CreateCharacterComponent implements OnInit {
 
   ngOnInit(): void {}
 
-  // Getter for easy access in HTML
   get classArray() {
     return this.charForm.get('classes') as FormArray;
   }
@@ -79,6 +80,11 @@ export class CreateCharacterComponent implements OnInit {
     this.classArray.removeAt(index);
   }
 
+  modifier(stat: number): string {
+    const mod = Math.floor((stat - 10) / 2);
+    return mod >= 0 ? `+${mod}` : `${mod}`;
+  }
+
   importFromDdb() {
     const url = this.charForm.get('ddbUrl')?.value;
     const id = this.ddbService.getCharacterIdFromLink(url);
@@ -87,10 +93,8 @@ export class CreateCharacterComponent implements OnInit {
       this.isImporting = true;
       this.ddbService.getSurfaceInformation(id).subscribe({
         next: (data) => {
-          // Clear existing classes
           while (this.classArray.length) { this.classArray.removeAt(0); }
 
-          // Patch basic info
           this.charForm.patchValue({
             name: data.name,
             race: data.race,
@@ -106,9 +110,6 @@ export class CreateCharacterComponent implements OnInit {
             charisma: data.baseStats.charisma,
           });
 
-          console.log(data.icon)
-
-          // Add classes from DDB
           data.classes.forEach((c: any) => {
             this.addClass(c.className, c.subclassName, c.level);
           });
@@ -122,14 +123,19 @@ export class CreateCharacterComponent implements OnInit {
 
   onFileSelected(event: any, type: 'icon' | 'pdf') {
     const file = event.target.files[0];
-    if (type === 'icon') this.selectedIcon = file;
+    if (type === 'icon') {
+      this.selectedIcon = file;
+      // Show local preview
+      const reader = new FileReader();
+      reader.onload = (e: any) => this.charForm.patchValue({ iconUrl: e.target.result });
+      reader.readAsDataURL(file);
+    }
     if (type === 'pdf') this.selectedPdf = file;
   }
 
   submitForm() {
     if (this.charForm.valid) {
       const formVal = this.charForm.value;
-
       const characterData = {
         name: formVal.name,
         race: formVal.race,
@@ -148,20 +154,17 @@ export class CreateCharacterComponent implements OnInit {
         classes: formVal.classes
       };
 
-      console.log(characterData);
       this.charService.saveCharacter(characterData, this.selectedIcon!, this.selectedPdf!)
         .subscribe(res =>{
-          console.log('Character Saved!', res)
           this.charForm.reset();
           this.selectedIcon = null;
           this.selectedPdf = null;
           this.dialogRef.close(res);
-        })
+        });
     }
   }
 
-  close=()=>{
-    this.charForm.reset();
-    this.matDialog.closeAll()
+  close = () => {
+    this.dialogRef.close();
   }
 }

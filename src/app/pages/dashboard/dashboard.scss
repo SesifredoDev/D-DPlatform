@@ -3,15 +3,23 @@
   height: 100vh;
   width: 100%;
   overflow: hidden;
-  background-color: #1e1e1e;
+  background: var(--background-gradient);
 }
 
 .editor-area {
   display: flex;
   flex: 1;
   height: 100%;
-  background: #1e1e1e;
   position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.1);
+    pointer-events: none;
+    z-index: 0;
+  }
 
   &.resizing-active {
     cursor: col-resize;
@@ -19,118 +27,247 @@
     * { pointer-events: none !important; }
   }
 
+  /* =================================
+     PANE SYSTEM
+  ================================= */
   .pane {
     display: flex;
     flex-direction: column;
     min-width: 0;
     flex-grow: 0;
     flex-shrink: 0;
-    background: #1e1e1e;
+    background: transparent;
+    z-index: 1;
+    position: relative;
+    transition: flex-basis 0.2s ease, flex-grow 0.2s ease;
 
     .pane-content {
       flex: 1;
       height: 100%;
       overflow: hidden;
       position: relative;
+      background: rgba(255, 255, 255, 0.01);
 
-      // NEW: Ensure the wrapper div for [hidden] fills the pane
       .full-height {
         height: 100%;
         width: 100%;
-        display: flex; // Allows children to fill space efficiently
+        display: flex;
         flex-direction: column;
 
         &[hidden] {
-          display: none !important; // Ensure hidden attribute works with flex
+          display: none !important;
         }
       }
 
-      // Target the actual component tags inside the wrapper
-      app-video-call,
-      app-text-channel,
-      app-character-viewer {
-        display: block;
-        height: 100%;
-        width: 100%;
-        flex: 1; // Ensure they expand to fill the .full-height container
+      app-video-call, app-text-channel, app-character-viewer, app-vtt-canvas, app-spotify-player {
+        display: block; height: 100%; width: 100%; flex: 1;
       }
     }
 
     &#left-pane {
-      &:only-child, &:has(+ .right-pane.hidden) {
+      &:only-child, &:has(+ .right-pane.empty) {
         flex: 1 1 auto !important;
       }
     }
 
     &.right-pane {
       flex: 1 1 0;
-      border-left: 1px solid #333;
+      border-left: 1px solid var(--outline);
 
-      &.hidden {
-        flex: 0 0 40px !important;
-        background: transparent;
-        .tab-bar, .pane-content { display: none; }
+      &.empty {
+        flex: 0 0 48px !important;
+        background: rgba(0, 0, 0, 0.15);
+        border-left: 1px dashed var(--outline);
+        transition: all var(--transition-standard);
+
+        &:hover {
+          flex: 0 0 120px !important;
+          background: rgba(255, 255, 255, 0.03);
+          border-left: 1px solid var(--brand-blue-alpha);
+        }
+
+        .drop-zone-placeholder {
+          opacity: 0.15;
+          .hint-content span { display: none; }
+          &:hover { opacity: 0.4; }
+        }
       }
     }
+  }
 
-    .tab-bar {
+  /* =================================
+     MODERN GLASS TABS (TOP)
+  ================================= */
+  .tab-bar {
+    display: flex;
+    height: 48px;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    align-items: center;
+    padding: 0 10px;
+    gap: 6px;
+    border-bottom: 1px solid var(--outline);
+
+    .tab {
       display: flex;
-      height: 55px;
-      background: #252526;
       align-items: center;
+      padding: 0 14px;
+      height: 34px;
+      min-width: 140px;
+      max-width: 220px;
+      border-radius: var(--radius-m);
+      background: transparent;
+      color: var(--on-surface-variant);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all var(--transition-standard);
+      position: relative;
+      border: 1px solid transparent;
 
-      .tab {
+      .tab-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        margin-right: 10px;
+        color: var(--brand-blue);
+        opacity: 0.7;
+      }
+
+      .tab-title {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--on-surface);
+        .tab-icon { opacity: 1; }
+      }
+
+      &.active {
+        background: rgba(255, 255, 255, 0.12);
+        color: white;
+        border-color: rgba(255, 255, 255, 0.1);
+        box-shadow: var(--shadow-1);
+
+        .tab-icon { opacity: 1; color: #fff; }
+
+        &::after {
+          content: '';
+          position: absolute;
+          bottom: -8px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 24px;
+          height: 3px;
+          background: var(--brand-blue);
+          border-radius: var(--radius-pill);
+          box-shadow: 0 0 8px var(--brand-blue);
+        }
+      }
+
+      .close-btn {
+        font-size: 14px;
+        width: 18px;
+        height: 18px;
+        margin-left: 8px;
         display: flex;
         align-items: center;
-        padding: 0 12px;
-        height: 100%;
-        min-width: 120px;
-        background: #2d2d2d;
-        color: #969696;
-        cursor: pointer;
-        border-right: 1px solid #1e1e1e;
-        font-size: 13px;
+        justify-content: center;
+        border-radius: var(--radius-s);
+        opacity: 0.4;
+        transition: all var(--transition-fast);
 
-        &.active {
-          background: #1e1e1e;
-          color: white;
-          border-top: 1px solid #007acc;
-        }
-
-        .close-btn {
-          font-size: 16px;
-          width: 16px;
-          height: 16px;
-          margin-left: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 4px;
-
-          &:hover {
-            background: rgba(255, 255, 255, 0.1);
-          }
+        &:hover {
+          background: rgba(255, 255, 255, 0.15);
+          opacity: 1;
+          color: var(--danger);
         }
       }
     }
   }
 
+  /* =================================
+     DROP ZONE PLACEHOLDER
+  ================================= */
+  .drop-zone-placeholder {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--on-surface-muted);
+    transition: all var(--transition-standard);
+
+    .hint-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      mat-icon { font-size: 32px; width: 32px; height: 32px; }
+      span { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; text-align: center; }
+    }
+  }
+
+  /* Active dragging visual feedback */
+  .cdk-drop-list-dragging .drop-zone-placeholder {
+    background: var(--brand-blue-alpha);
+    border: 2px dashed var(--brand-blue);
+    margin: 10px;
+    border-radius: var(--radius-xl);
+    opacity: 1 !important;
+    color: white;
+    .hint-content span { display: block !important; }
+  }
+
+  /* =================================
+     RESIZER
+  ================================= */
   .resizer-handle {
-    width: 4px;
-    background: #252526;
+    width: 2px;
+    background: var(--outline);
     cursor: col-resize;
     z-index: 10;
-    transition: background 0.2s;
+    transition: all var(--transition-standard);
+    position: relative;
+
+    &::after {
+      content: '';
+      position: absolute;
+      left: -4px;
+      width: 10px;
+      height: 100%;
+    }
+
     &:hover, &:active {
-      background: #007acc;
+      background: var(--brand-blue);
+      box-shadow: 0 0 12px var(--brand-blue);
     }
   }
 }
 
+/* =================================
+   DRAG AND DROP PREVIEWS
+================================= */
 .cdk-drag-preview {
-  background: #3c3c3c;
+  background: rgba(30, 31, 34, 0.9) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
   padding: 10px 20px;
-  border-radius: 4px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-4);
   color: white;
+  border: 1px solid var(--outline);
+  display: flex;
+  align-items: center;
+  font-family: var(--font-family-main);
+  font-size: 14px;
+  z-index: 1000;
+  .close-btn { display: none; }
 }
+
+.cdk-drag-placeholder { opacity: 0.1; }
