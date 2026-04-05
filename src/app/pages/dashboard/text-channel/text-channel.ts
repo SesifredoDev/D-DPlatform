@@ -25,7 +25,8 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../environments/environment';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
-import {IChannel} from '../../../shared/models/server/channel.model';
+import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
+import { IUser } from '../../../shared/models/user/user.model';
 
 @Component({
   selector: 'app-text-channel',
@@ -108,12 +109,12 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
   updateWhisperState(server: IServer) {
     const channel = server.channels.find(c => c._id === this.channelId);
-    if (channel && channel.type === 'whisper') {
+    if (channel && channel.type === ChannelType.Whisper) {
       this.isWhisperMode = true;
-      // In whisper channel, the recipient is the non-owner.
-      // If I am the recipient, whisper is to owner.
-      // If I am the owner, whisper is to recipient.
-      const isOwner = (typeof server.owner === 'string' ? server.owner : server.owner?._id) === this.currentUserId;
+
+      const ownerId = typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
+      const isOwner = ownerId === this.currentUserId;
+
       if (isOwner) {
          // Owner is whispering to the stored recipient
          this.whisperRecipient = server.members.find(m => m.user._id === channel.recipient)?.user || { username: channel.name };

@@ -17,7 +17,7 @@ import {MatMenuModule} from '@angular/material/menu';
 import {UserService} from '../../../shared/services/user/user';
 import {ServerService} from '../../../shared/services/server/server';
 import {IServer} from '../../../shared/models/server/server.model';
-import {IChannel} from '../../../shared/models/server/channel.model';
+import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
 import {ChannelService} from '../../../shared/services/channel/channel';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {MatDialog} from '@angular/material/dialog';
@@ -237,13 +237,13 @@ export class SidePanel implements AfterViewInit {
 
   openCharacter(character: ICharacter) {
     if (character?._id) {
-      this.tabService.openTab(character._id, character.name, 'character', 'right', character);
+      this.tabService.openTab(character._id, character.name, ChannelType.Character, 'right', character);
     }
   }
 
   openVTT() {
     if (!this.selectedServer?._id) return;
-    this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
+    this.tabService.openTab(this.selectedServer?._id, "vtt", ChannelType.Map, "left");
   }
 
   onRightClickCharacter(event: MouseEvent, character: ICharacter) {
@@ -271,8 +271,10 @@ export class SidePanel implements AfterViewInit {
   whisperUser(member: any) {
     if (!this.selectedServer) return;
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
-        this.channelService.setChannelObservable(channel);
-        this.tabService.openTab(channel._id, channel.name, 'text');
+        if (channel._id) {
+          this.channelService.setChannelObservable(channel);
+          this.tabService.openTab(channel._id, channel.name, ChannelType.Whisper);
+        }
     });
   }
 

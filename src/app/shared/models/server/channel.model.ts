@@ -5,6 +5,7 @@ export enum ChannelType {
   Call = 'call',
   Map = 'map',
   Character = 'character',
+  Whisper = 'whisper',
 }
 
 export interface PermissionOverwrite {
@@ -19,6 +20,7 @@ export interface IChannel {
   name: string;
   icon: string;
   type: ChannelType;
+  recipient?: string;
   permissionOverwrites: PermissionOverwrite[];
   position?: number;
   createdAt: Date;

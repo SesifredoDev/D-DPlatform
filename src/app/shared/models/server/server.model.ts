@@ -9,7 +9,7 @@ export interface IServer {
   joinCode?: string;
   roles: IRole[]; // Can be IDs or populated objects
   channels: IChannel[];
-  owner: string; // User ID
+  owner: string | IUser; // User ID
   members: ServerMember[];
   createdAt: Date;
 }
