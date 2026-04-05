@@ -38,7 +38,7 @@ import { IUser } from '../../../shared/models/user/user.model';
   standalone: true,
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule]
 })
-export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
+export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
   @Input() character!: ICharacter;
 
@@ -48,7 +48,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
-  @ViewChild('gridContainer') gridContainer!: ElementRef<HTMLDivElement>;
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
 
   videoDevices: MediaDeviceInfo[] = [];
@@ -69,11 +68,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
   // UI States
   showSpotify: boolean = false;
   showThemePicker: boolean = false;
-
-  // Grid State
-  gridColumns: number = 1;
-  gridRows: number = 1;
-  private resizeObserver: ResizeObserver | null = null;
 
   // Theme state
   activeThemeSession: Theme | null = null;
@@ -144,7 +138,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
           this.localVideo.nativeElement.srcObject = this.localStream;
         }
       }, 100);
-      this.calculateGrid();
     } else {
       await this.startPreview();
     }
@@ -155,8 +148,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
         stream: r.stream,
         userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter
       }));
-
-      this.calculateGrid();
 
       setTimeout(() => {
         this.remoteVideos.forEach((videoRef, i) => {
@@ -270,19 +261,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
     }
   }
 
-  ngAfterViewInit() {
-    this.setupResizeObserver();
-  }
-
-  private setupResizeObserver() {
-    if (this.gridContainer) {
-      this.resizeObserver = new ResizeObserver(() => {
-        this.calculateGrid();
-      });
-      this.resizeObserver.observe(this.gridContainer.nativeElement);
-    }
-  }
-
   private extractOwnerId(server: IServer): string {
     if (!server.owner) return '';
     return typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
@@ -337,60 +315,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
     await this.startPreview();
   }
 
-  private calculateGrid() {
-    const count = this.remoteStreams.length + (this.localStream ? 1 : 0);
-    if (count === 0) return;
-
-    const el = this.gridContainer?.nativeElement;
-    if (!el) {
-        this.gridColumns = Math.ceil(Math.sqrt(count));
-        this.gridRows = Math.ceil(count / this.gridColumns);
-        this.cdr.detectChanges();
-        return;
-    }
-
-    const width = el.clientWidth;
-    const height = el.clientHeight;
-    const ratio = 16 / 9;
-    const gap = 16; // Space between grid items
-
-    let bestCols = 1;
-    let bestRows = count;
-    let maxArea = 0;
-
-    // We search through all possible column counts to find the one that
-    // allows the largest video area while maintaining 16:9 ratio.
-    for (let cols = 1; cols <= count; cols++) {
-      const rows = Math.ceil(count / cols);
-
-      // Calculate cell dimensions including gaps
-      const cellWidth = (width - (cols - 1) * gap) / cols;
-      const cellHeight = (height - (rows - 1) * gap) / rows;
-
-      if (cellWidth <= 0 || cellHeight <= 0) continue;
-
-      let videoWidth, videoHeight;
-      if (cellWidth / cellHeight > ratio) {
-          videoHeight = cellHeight;
-          videoWidth = videoHeight * ratio;
-      } else {
-          videoWidth = cellWidth;
-          videoHeight = videoWidth / ratio;
-      }
-
-      const area = videoWidth * videoHeight;
-      if (area > maxArea) {
-        maxArea = area;
-        bestCols = cols;
-        bestRows = rows;
-      }
-    }
-
-    this.gridColumns = bestCols;
-    this.gridRows = bestRows;
-    this.cdr.detectChanges();
-  }
-
   async joinCall() {
     if (!this.channelId || !this.character || this.isJoining) return;
     this.isJoining = true;
@@ -422,7 +346,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
       await this.videoService.initVideoCall(this.channelId, characterToBroadcast);
 
       await this.videoService.startProducing(this.localStream);
-      this.calculateGrid();
 
       setTimeout(() => {
         if (this.localVideo) {
@@ -452,7 +375,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
     this.activeThemeSession = null;
     this.localStream = null;
     this.remoteStreams = [];
-    this.calculateGrid();
     this.showSpotify = false;
     this.stopVtt.emit(this.channelId);
     this.isDmMode = false;
@@ -557,9 +479,6 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
 
   ngOnDestroy() {
     this.isComponentDestroying = true;
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-    }
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
