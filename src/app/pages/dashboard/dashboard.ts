@@ -146,6 +146,7 @@ export class Dashboard implements OnInit {
   getAppIcon(type: string): string {
     switch (type) {
       case 'text': return 'chat';
+      case 'whisper': return 'visibility_off';
       case 'call': return 'videocam';
       case 'character': return 'person';
       case 'vtt': return 'map';
@@ -197,13 +198,5 @@ export class Dashboard implements OnInit {
       width: '500px',
       maxWidth: '90vw'
     });
-  }
-
-  onWhisperInitiated(member: any) {
-    // Find active text channel
-    const activeTextTab = [...this.leftTabs, ...this.rightTabs].find(t => t.active && t.type === 'text');
-    if (activeTextTab) {
-      this.tabService.updateTab(activeTextTab.id, { whisperRecipient: member });
-    }
   }
 }

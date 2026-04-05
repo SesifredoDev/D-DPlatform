@@ -237,13 +237,13 @@ export class SidePanel implements AfterViewInit {
 
   openCharacter(character: ICharacter) {
     if (character?._id) {
-      this.tabService.openTab(character._id, character.name, ChannelType.Character, 'right', character);
+      this.tabService.openTab(character._id, character.name, 'character', 'right', character);
     }
   }
 
   openVTT() {
     if (!this.selectedServer?._id) return;
-    this.tabService.openTab(this.selectedServer?._id, "vtt", ChannelType.Map, "left");
+    this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
   }
 
   onRightClickCharacter(event: MouseEvent, character: ICharacter) {
@@ -273,7 +273,7 @@ export class SidePanel implements AfterViewInit {
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
         if (channel._id) {
           this.channelService.setChannelObservable(channel);
-          this.tabService.openTab(channel._id, channel.name, ChannelType.Whisper);
+          this.tabService.openTab(channel._id, channel.name, 'whisper');
         }
     });
   }

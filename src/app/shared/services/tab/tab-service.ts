@@ -3,10 +3,12 @@ import { BehaviorSubject } from 'rxjs';
 import { ICharacter } from '../../models/user/character.model';
 import { Video } from '../video/video';
 
+export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper';
+
 export interface Tab {
   id: string;
   title: string;
-  type: 'text' | 'call' | 'character' | 'vtt' | 'spotify';
+  type: TabType;
   pane: 'left' | 'right';
   active: boolean;
   character?: ICharacter;
@@ -21,7 +23,7 @@ export class TabService {
 
   constructor(private videoService: Video) {}
 
-  openTab(id: string, title: string, type: 'text' | 'call' | 'character' | 'vtt' | 'spotify', pane: "left" | "right" = 'left', character?: ICharacter) {
+  openTab(id: string, title: string, type: TabType, pane: "left" | "right" = 'left', character?: ICharacter) {
     const current = this.tabs.value;
     const existing = current.find(t => t.id === id);
 
