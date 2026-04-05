@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject } from 'rxjs';
-import { startWith, switchMap, catchError } from 'rxjs/operators';
+import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject, Observable } from 'rxjs';
+import { startWith, switchMap, catchError, map, tap } from 'rxjs/operators';
 
 import {environment} from '../../../../environments/environment';
 
@@ -84,6 +84,21 @@ export class SpotifyService {
       this.startPolling();
       this.loadUserData();
     }
+  }
+
+  getAccessToken(): string | null {
+    return this.accessToken;
+  }
+
+  refreshSpotifyToken(): Observable<string> {
+    const refreshToken = localStorage.getItem('spotify_refresh_token');
+    return this.http.post<{ accessToken: string }>(`${this.BACKEND_API}spotify/refresh`, { refresh_token: refreshToken }).pipe(
+      map(res => res.accessToken),
+      tap(token => {
+        this.accessToken = token;
+        localStorage.setItem('spotify_access_token', token);
+      })
+    );
   }
 
   setTokens(access: string, refresh: string) {
@@ -231,10 +246,8 @@ export class SpotifyService {
   }
 
   async loadSavedPlaylists() {
-    if (!this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/playlists?limit=50`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/playlists?limit=50`));
       this.savedPlaylists$.next(res.items || []);
     } catch (err) {
       console.error('[Spotify] Failed to load playlists:', err);
@@ -242,10 +255,8 @@ export class SpotifyService {
   }
 
   async loadRecentPlays() {
-    if (!this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/recently-played?limit=12`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/recently-played?limit=12`));
       this.recentPlays$.next(res.items || []);
     } catch (err) {
       console.error('[Spotify] Failed to load recent plays:', err);
@@ -253,10 +264,8 @@ export class SpotifyService {
   }
 
   async loadQueue() {
-    if (!this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/queue`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/queue`));
       this.queue$.next(res.queue || []);
     } catch (err) {
       console.error('[Spotify] Failed to load queue:', err);
@@ -366,10 +375,8 @@ export class SpotifyService {
   }
 
   async getDevices(): Promise<SpotifyDevice[]> {
-    if (!this.accessToken) return [];
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/devices`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player/devices`));
       return res.devices || [];
     } catch (err) {
       return [];
@@ -377,24 +384,20 @@ export class SpotifyService {
   }
 
   async transferPlayback(deviceId: string, play: boolean = false) {
-    if (!this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      await firstValueFrom(this.http.put(`${this.API_BASE}/me/player`, { device_ids: [deviceId], play }, { headers }));
+      await firstValueFrom(this.http.put(`${this.API_BASE}/me/player`, { device_ids: [deviceId], play }));
       this.activeDeviceId$.next(deviceId);
     } catch (err) {}
   }
 
   async search(query: string): Promise<SpotifySearchResult[]> {
-    if (!this.accessToken) return [];
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     const params = new HttpParams()
       .set('q', query)
       .set('type', 'track,playlist,album,artist,show,episode')
       .set('limit', '20');
 
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/search`, { headers, params }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/search`, { params }));
       let results: SpotifySearchResult[] = [];
 
       if (res.tracks) {
@@ -424,10 +427,8 @@ export class SpotifyService {
   }
 
   async getUserPlaylists(userId: string): Promise<SpotifySearchResult[]> {
-    if (!this.accessToken) return [];
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/users/${userId}/playlists?limit=20`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/users/${userId}/playlists?limit=20`));
       return (res.items || []).map((i: any) => ({
         id: i.id, name: i.name, uri: i.uri, type: 'playlist', image: i.images?.[0]?.url || '', owner: i.owner?.display_name, ownerId: i.owner?.id
       }));
@@ -435,10 +436,8 @@ export class SpotifyService {
   }
 
   async getArtistAlbums(artistId: string): Promise<SpotifySearchResult[]> {
-    if (!this.accessToken) return [];
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/artists/${artistId}/albums?limit=20&include_groups=album,single`, { headers }));
+      const res: any = await firstValueFrom(this.http.get(`${this.API_BASE}/artists/${artistId}/albums?limit=20&include_groups=album,single`));
       return (res.items || []).map((i: any) => ({
         id: i.id, name: i.name, uri: i.uri, type: 'album', image: i.images?.[0]?.url || '', artist: i.artists?.[0]?.name, artistId: i.artists?.[0]?.id
       }));
@@ -446,25 +445,20 @@ export class SpotifyService {
   }
 
   async getUser(userId: string): Promise<any> {
-    if (!this.accessToken) return null;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      return await firstValueFrom(this.http.get(`${this.API_BASE}/users/${userId}`, { headers }));
+      return await firstValueFrom(this.http.get(`${this.API_BASE}/users/${userId}`));
     } catch (err) { return null; }
   }
 
   async getArtist(artistId: string): Promise<any> {
-    if (!this.accessToken) return null;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      return await firstValueFrom(this.http.get(`${this.API_BASE}/artists/${artistId}`, { headers }));
+      return await firstValueFrom(this.http.get(`${this.API_BASE}/artists/${artistId}`));
     } catch (err) { return null; }
   }
 
   async play(uri?: string, positionMs: number = 0, skipSync: boolean = false, contextUri?: string): Promise<any> {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return null;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return null;
     let body: any = { position_ms: positionMs };
 
     if (contextUri) {
@@ -478,7 +472,7 @@ export class SpotifyService {
     }
 
     try {
-      const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/play?device_id=${targetId}`, body, { headers }));
+      const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/play?device_id=${targetId}`, body));
       setTimeout(() => this.loadQueue(), 1000);
 
       const effectiveUri = uri || this.currentTrack$.value?.uri;
@@ -503,10 +497,9 @@ export class SpotifyService {
 
   async pause(skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return;
     try {
-        const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/pause?device_id=${targetId}`, {}, { headers }));
+        const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/pause?device_id=${targetId}`, {}));
 
         const state = await this.getPlaybackState();
         const currentUri = state?.track_window?.current_track?.uri || this.lastSyncedUri;
@@ -530,10 +523,9 @@ export class SpotifyService {
 
   async seek(positionMs: number, skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return;
     try {
-      await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/seek?position_ms=${positionMs}&device_id=${targetId}`, {}, { headers }));
+      await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/seek?position_ms=${positionMs}&device_id=${targetId}`, {}));
 
       this.lastSyncedPosition = positionMs;
       this.lastCheckTime = Date.now();
@@ -556,10 +548,9 @@ export class SpotifyService {
 
   async nextTrack(skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return;
     try {
-        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/next?device_id=${targetId}`, {}, { headers }));
+        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/next?device_id=${targetId}`, {}));
         setTimeout(() => this.loadQueue(), 1000);
 
         setTimeout(async () => {
@@ -582,10 +573,9 @@ export class SpotifyService {
 
   async previousTrack(skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return;
     try {
-        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/previous?device_id=${targetId}`, {}, { headers }));
+        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/previous?device_id=${targetId}`, {}));
         setTimeout(() => this.loadQueue(), 1000);
 
         setTimeout(async () => {
@@ -608,10 +598,9 @@ export class SpotifyService {
 
   async toggleShuffle(state: boolean, skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
+    if (!targetId) return;
     try {
-        await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/shuffle?state=${state}&device_id=${targetId}`, {}, { headers }));
+        await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/shuffle?state=${state}&device_id=${targetId}`, {}));
 
         this.prevShuffle = this.lastSyncedShuffle;
         this.lastSyncedShuffle = state;
@@ -636,10 +625,9 @@ export class SpotifyService {
 
   async setVolume(v: number) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
-    if (!targetId || !this.accessToken) return;
+    if (!targetId) return;
     const volumePercent = Math.round(v * 100);
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
-    return firstValueFrom(this.http.put(`${this.API_BASE}/me/player/volume?device_id=${targetId}&volume_percent=${volumePercent}`, {}, { headers }));
+    return firstValueFrom(this.http.put(`${this.API_BASE}/me/player/volume?device_id=${targetId}&volume_percent=${volumePercent}`, {}));
   }
 
   async togglePlay(skipSync: boolean = false) {
@@ -664,10 +652,8 @@ export class SpotifyService {
         };
       }
     }
-    if (!this.accessToken) return null;
-    const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
     try {
-      const state: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player`, { headers }));
+      const state: any = await firstValueFrom(this.http.get(`${this.API_BASE}/me/player`));
       if (!state) return null;
       return {
         paused: !state.is_playing,
