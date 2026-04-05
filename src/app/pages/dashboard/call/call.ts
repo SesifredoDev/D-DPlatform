@@ -11,7 +11,8 @@ import {
   QueryList,
   Output,
   EventEmitter,
-  ChangeDetectorRef
+  ChangeDetectorRef,
+  AfterViewInit
 } from '@angular/core';
 import { Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
@@ -37,7 +38,7 @@ import { IUser } from '../../../shared/models/user/user.model';
   standalone: true,
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule]
 })
-export class Call implements OnInit, OnDestroy, OnChanges {
+export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
   @Input() channelId!: string;
   @Input() character!: ICharacter;
 
@@ -47,6 +48,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
+  @ViewChild('gridContainer') gridContainer!: ElementRef<HTMLDivElement>;
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
 
   videoDevices: MediaDeviceInfo[] = [];
@@ -71,6 +73,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Grid State
   gridColumns: number = 1;
   gridRows: number = 1;
+  private resizeObserver: ResizeObserver | null = null;
 
   // Theme state
   activeThemeSession: Theme | null = null;
@@ -267,6 +270,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  ngAfterViewInit() {
+    this.setupResizeObserver();
+  }
+
+  private setupResizeObserver() {
+    if (this.gridContainer) {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.calculateGrid();
+      });
+      this.resizeObserver.observe(this.gridContainer.nativeElement);
+    }
+  }
+
   private extractOwnerId(server: IServer): string {
     if (!server.owner) return '';
     return typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
@@ -323,31 +339,52 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private calculateGrid() {
     const count = this.remoteStreams.length + (this.localStream ? 1 : 0);
-    if (count <= 1) {
-      this.gridColumns = 1;
-      this.gridRows = 1;
-    } else if (count <= 2) {
-      this.gridColumns = 2;
-      this.gridRows = 1;
-    } else if (count <= 4) {
-      this.gridColumns = 2;
-      this.gridRows = 2;
-    } else if (count <= 6) {
-      this.gridColumns = 3;
-      this.gridRows = 2;
-    } else if (count <= 9) {
-      this.gridColumns = 3;
-      this.gridRows = 3;
-    } else if (count <= 12) {
-      this.gridColumns = 4;
-      this.gridRows = 3;
-    } else if (count <= 16) {
-      this.gridColumns = 4;
-      this.gridRows = 4;
-    } else {
-      this.gridColumns = Math.ceil(Math.sqrt(count));
-      this.gridRows = Math.ceil(count / this.gridColumns);
+    if (count === 0) return;
+
+    const el = this.gridContainer?.nativeElement;
+    if (!el) {
+        // Fallback logic if element not yet available
+        this.gridColumns = Math.ceil(Math.sqrt(count));
+        this.gridRows = Math.ceil(count / this.gridColumns);
+        this.cdr.detectChanges();
+        return;
     }
+
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const isPortrait = height > width;
+
+    // We want to find the best (cols, rows) such that cols * rows >= count
+    // and the aspect ratio of each cell is as close to 16/9 as possible
+    let bestCols = 1;
+    let bestRows = count;
+    let maxArea = 0;
+
+    for (let cols = 1; cols <= count; cols++) {
+      const rows = Math.ceil(count / cols);
+      const cellWidth = width / cols;
+      const cellHeight = height / rows;
+
+      // Calculate how large a 16:9 video can be in this cell
+      let videoWidth, videoHeight;
+      if (cellWidth / cellHeight > 16/9) {
+          videoHeight = cellHeight;
+          videoWidth = videoHeight * (16/9);
+      } else {
+          videoWidth = cellWidth;
+          videoHeight = videoWidth / (16/9);
+      }
+
+      const area = videoWidth * videoHeight;
+      if (area > maxArea) {
+        maxArea = area;
+        bestCols = cols;
+        bestRows = rows;
+      }
+    }
+
+    this.gridColumns = bestCols;
+    this.gridRows = bestRows;
     this.cdr.detectChanges();
   }
 
@@ -517,6 +554,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   ngOnDestroy() {
     this.isComponentDestroying = true;
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    }
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
