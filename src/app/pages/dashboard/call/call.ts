@@ -67,6 +67,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // UI States
   showSpotify: boolean = false;
   showThemePicker: boolean = false;
+  showGridResizer: boolean = false;
+  gridSize: number = 400;
 
   // Theme state
   activeThemeSession: Theme | null = null;

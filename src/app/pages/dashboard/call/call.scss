@@ -99,6 +99,67 @@
   p { font-size: 14px; color: var(--on-surface-muted); margin-bottom: 24px; }
 }
 
+/* Spotify Auth Prompt */
+.spotify-auth-prompt {
+  background: rgba(30, 215, 96, 0.05);
+  border: 1px solid rgba(30, 215, 96, 0.2);
+  border-radius: var(--radius-l);
+  padding: 16px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  transition: all 0.3s ease;
+
+  &.connected {
+    background: rgba(30, 215, 96, 0.1);
+    border-color: rgba(30, 215, 96, 0.4);
+  }
+
+  .spotify-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-align: left;
+
+    .spotify-icon-bg {
+      width: 40px; height: 40px;
+      background: #1DB954;
+      border-radius: var(--radius-round);
+      display: flex; align-items: center; justify-content: center;
+      color: white;
+      mat-icon { font-size: 20px; width: 20px; height: 20px; }
+    }
+
+    .status-text {
+      display: flex; flex-direction: column;
+      strong { font-size: 14px; color: white; }
+      span { font-size: 12px; color: var(--on-surface-muted); }
+    }
+  }
+
+  .btn-spotify-login {
+    background: #1DB954;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    transition: all 0.2s ease;
+    &:hover { background: #1ed760; transform: translateY(-1px); }
+  }
+
+  .connected-badge {
+    display: flex; align-items: center; gap: 6px;
+    color: #1DB954; font-weight: 700; font-size: 13px;
+    mat-icon { font-size: 18px; width: 18px; height: 18px; }
+  }
+}
+
 .settings-grid {
   display: flex;
   flex-direction: column;
@@ -155,10 +216,12 @@
 .grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  // Dynamic grid using CSS variable for size
+  grid-template-columns: repeat(auto-fit, minmax(var(--grid-size, 320px), 1fr));
   gap: var(--space-m);
   padding: var(--space-m);
   overflow-y: auto;
+  align-content: start;
 }
 
 .video-box {
@@ -169,7 +232,7 @@
   overflow: hidden;
   border: 1px solid var(--outline);
   box-shadow: var(--shadow-2);
-  transition: transform 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 
   video { width: 100%; height: 100%; object-fit: cover; }
   &.local video { transform: rotateY(180deg); }
@@ -417,6 +480,35 @@
       color: white;
       box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
     }
+  }
+}
+
+/* --- GRID RESIZER OVERLAY --- */
+.grid-resizer-overlay {
+  position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+  min-width: 320px; z-index: 100;
+  background: rgba(30, 31, 34, 0.95); backdrop-filter: blur(32px);
+  border: 1px solid var(--outline); border-radius: var(--radius-xl); box-shadow: var(--shadow-4);
+  padding: 16px;
+
+  .overlay-header {
+    margin-bottom: 16px;
+    display: flex; justify-content: space-between; align-items: center;
+    h3 { font-size: 12px; font-weight: 800; color: white; margin: 0; text-transform: uppercase; letter-spacing: 1.5px; opacity: 0.8; }
+    .btn-close {
+      background: transparent; border: none; color: var(--on-surface-muted); cursor: pointer;
+      mat-icon { font-size: 16px; width: 16px; height: 16px; }
+    }
+  }
+
+  .resizer-content {
+    display: flex; align-items: center; gap: 12px; color: white;
+    input[type="range"] {
+      flex: 1;
+      accent-color: var(--brand-blue);
+      cursor: pointer;
+    }
+    .size-label { font-size: 12px; font-weight: 700; min-width: 40px; color: var(--brand-blue); }
   }
 }
 

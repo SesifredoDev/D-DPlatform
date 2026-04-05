@@ -1,5 +1,5 @@
 import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter, OnInit } from '@angular/core';
-import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe } from '@angular/common';
+import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
 import {VttSync, TurnOrderState, TurnOrderEntry} from '../../../shared/services/vttsync/vttsync';
@@ -24,6 +24,7 @@ import {Subscription, Observable} from 'rxjs';
     NgForOf,
     NgIf,
     NgStyle,
+    NgClass,
     AsyncPipe,
     MatIconButton,
     MatButton,
@@ -87,6 +88,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   public turnOrderState$: Observable<TurnOrderState>;
   public newEntryName: string = '';
   public newEntryInitiative: number = 0;
+  public turnOrderMinimized = false;
 
   // Expose sync state to UI
   get isSyncing() { return this.syncService.isConnected; }
@@ -407,7 +409,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.syncService.updateTurnOrder({
       isActive: true,
       isConfirmed: false,
-      entries: []
+      entries: [],
+      activeIndex: 0
     });
   }
 
@@ -417,7 +420,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.syncService.updateTurnOrder({
       ...currentState,
       isConfirmed: true,
-      entries: sortedEntries
+      entries: sortedEntries,
+      activeIndex: 0
     });
   }
 
@@ -425,7 +429,28 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.syncService.updateTurnOrder({
       isActive: false,
       isConfirmed: false,
-      entries: []
+      entries: [],
+      activeIndex: 0
+    });
+  }
+
+  nextTurn() {
+    const currentState = this.syncService.turnOrder$.value;
+    if (!currentState.entries.length) return;
+    const nextIndex = (currentState.activeIndex + 1) % currentState.entries.length;
+    this.syncService.updateTurnOrder({
+      ...currentState,
+      activeIndex: nextIndex
+    });
+  }
+
+  prevTurn() {
+    const currentState = this.syncService.turnOrder$.value;
+    if (!currentState.entries.length) return;
+    const prevIndex = (currentState.activeIndex - 1 + currentState.entries.length) % currentState.entries.length;
+    this.syncService.updateTurnOrder({
+      ...currentState,
+      activeIndex: prevIndex
     });
   }
 
@@ -460,5 +485,9 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       ...currentState,
       entries: currentState.entries.filter(e => e.id !== entryId)
     });
+  }
+
+  toggleTurnOrderMinimize() {
+    this.turnOrderMinimized = !this.turnOrderMinimized;
   }
 }

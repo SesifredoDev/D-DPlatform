@@ -18,6 +18,7 @@ export interface TurnOrderState {
   isActive: boolean;
   isConfirmed: boolean;
   entries: TurnOrderEntry[];
+  activeIndex: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -32,7 +33,8 @@ export class VttSync {
   public turnOrder$ = new BehaviorSubject<TurnOrderState>({
     isActive: false,
     isConfirmed: false,
-    entries: []
+    entries: [],
+    activeIndex: 0
   });
 
   constructor(private tokenService: TokenService, private callService: Video) {
@@ -160,7 +162,7 @@ export class VttSync {
     this.isConnected = false;
     this.hostDisconnected$.next(false);
     this.engine = null;
-    this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [] });
+    this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [], activeIndex: 0 });
   }
 
   broadcastAction(action: string, data: any) {

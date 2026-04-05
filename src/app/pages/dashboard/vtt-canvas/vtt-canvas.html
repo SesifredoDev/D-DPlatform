@@ -148,10 +148,11 @@
 <div #vttContainer id="vtt-container"></div>
 
 <!-- Turn Order Display -->
-<div class="turn-order-overlay glass" *ngIf="(turnOrderState$ | async) as turnOrder" [hidden]="!turnOrder.isActive">
-  <div class="turn-order-header">
+<div class="turn-order-overlay glass" *ngIf="(turnOrderState$ | async) as turnOrder" [hidden]="!turnOrder.isActive" [class.minimized]="turnOrderMinimized">
+  <div class="turn-order-header" (click)="toggleTurnOrderMinimize()">
+    <mat-icon class="minimize-icon">{{ turnOrderMinimized ? 'expand_more' : 'expand_less' }}</mat-icon>
     <h3>Turn Order</h3>
-    <div class="dm-controls" *ngIf="syncService.isHosting">
+    <div class="dm-controls" *ngIf="syncService.isHosting && !turnOrderMinimized" (click)="$event.stopPropagation()">
       <button mat-icon-button (click)="confirmTurnOrder()" *ngIf="!turnOrder.isConfirmed" title="Confirm and Sort">
         <mat-icon color="primary">check_circle</mat-icon>
       </button>
@@ -161,22 +162,32 @@
     </div>
   </div>
 
-  <div class="turn-order-entries">
-    <div class="turn-entry" *ngFor="let entry of turnOrder.entries">
-      <span class="initiative">{{ entry.initiative }}</span>
-      <span class="name">{{ entry.name }}</span>
-      <button mat-icon-button *ngIf="syncService.isHosting" (click)="removeTurnOrderEntry(entry.id)" class="small-icon">
-        <mat-icon>close</mat-icon>
-      </button>
-    </div>
-  </div>
+  <div class="turn-order-content" *ngIf="!turnOrderMinimized">
+      <div class="active-turn-indicator" *ngIf="turnOrder.isConfirmed && turnOrder.entries.length > 0">
+          <div class="active-name">Current: <b>{{ turnOrder.entries[turnOrder.activeIndex]?.name }}</b></div>
+          <div class="turn-controls" *ngIf="syncService.isHosting">
+              <button mat-icon-button (click)="prevTurn()"><mat-icon>navigate_before</mat-icon></button>
+              <button mat-icon-button (click)="nextTurn()"><mat-icon>navigate_next</mat-icon></button>
+          </div>
+      </div>
 
-  <div class="turn-order-input" *ngIf="!turnOrder.isConfirmed || syncService.isHosting">
-    <input type="text" [(ngModel)]="newEntryName" placeholder="Name" class="name-input">
-    <input type="number" [(ngModel)]="newEntryInitiative" placeholder="Init" class="init-input">
-    <button mat-icon-button (click)="addTurnOrderEntry()" [disabled]="!newEntryName">
-      <mat-icon>add_circle</mat-icon>
-    </button>
+      <div class="turn-order-entries">
+        <div class="turn-entry" *ngFor="let entry of turnOrder.entries; let i = index" [class.active-entry]="turnOrder.isConfirmed && i === turnOrder.activeIndex">
+          <span class="initiative">{{ entry.initiative }}</span>
+          <span class="name">{{ entry.name }}</span>
+          <button mat-icon-button *ngIf="syncService.isHosting" (click)="removeTurnOrderEntry(entry.id)" class="small-icon">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="turn-order-input" *ngIf="!turnOrder.isConfirmed || syncService.isHosting">
+        <input type="text" [(ngModel)]="newEntryName" placeholder="Name" class="name-input">
+        <input type="number" [(ngModel)]="newEntryInitiative" placeholder="Init" class="init-input">
+        <button mat-icon-button (click)="addTurnOrderEntry()" [disabled]="!newEntryName">
+          <mat-icon>add_circle</mat-icon>
+        </button>
+      </div>
   </div>
 </div>
 
