@@ -216,18 +216,18 @@
 .grid {
   flex: 1;
   display: grid;
+  // Automatic grid with min width 20vw
+  grid-template-columns: repeat(auto-fit, minmax(20vw, 1fr));
   gap: var(--space-m);
   padding: var(--space-m);
-  overflow: hidden;
+  overflow-y: auto; // Allow scrolling if many participants
+  overflow-x: hidden;
   height: 100%;
   width: 100%;
 
   // Center grid items both ways
   justify-content: center;
-  align-content: center;
-
-  // These will be overridden by [style.grid-template-columns] in HTML
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  align-content: start; // Start from top, fill rows
 }
 
 .video-box {
@@ -241,11 +241,10 @@
 
   // Maintain aspect ratio while filling available width
   width: 100%;
-  max-width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
 
-  // Ensure it doesn't overflow vertically
+  // Ensure it doesn't overflow vertically if the cell is too small
   max-height: 100%;
 
   // Center within the grid cell
