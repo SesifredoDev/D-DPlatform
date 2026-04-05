@@ -28,6 +28,7 @@ import { Theme, ThemeOption, ThemeService } from '../../../shared/services/theme
 import { MatMenuModule } from '@angular/material/menu';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
+import { IUser } from '../../../shared/models/user/user.model';
 
 @Component({
   selector: 'app-video-call',
@@ -247,8 +248,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.serverDetailsSub = this.serverService.getServerDetailsObservable().subscribe(server => {
       if (server && this.character && this.character.ownerId) {
-        const serverOwnerId = typeof server.owner === 'string' ? server.owner : server.owner._id;
-        this.isServerOwner = serverOwnerId === this.character.ownerId;
+        this.isServerOwner = this.extractOwnerId(server) === this.character.ownerId;
       } else {
         this.isServerOwner = false;
       }
@@ -258,6 +258,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.channelId) {
       await this.serverService.getServerDetails(this.channelId);
     }
+  }
+
+  private extractOwnerId(server: IServer): string {
+    if (!server.owner) return '';
+    return typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
   }
 
   async loadDevices() {
@@ -418,8 +423,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.dmCharacter.ownerId = newCharacter.ownerId;
         const currentServer = this.serverService.getCurrentServer();
         if (currentServer) {
-          const serverOwnerId = typeof currentServer.owner === 'string' ? currentServer.owner : currentServer.owner._id;
-          this.isServerOwner = serverOwnerId === newCharacter.ownerId;
+          this.isServerOwner = this.extractOwnerId(currentServer) === newCharacter.ownerId;
         }
       }
 
