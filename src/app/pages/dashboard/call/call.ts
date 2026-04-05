@@ -343,36 +343,39 @@ export class Call implements OnInit, OnDestroy, OnChanges, AfterViewInit {
 
     const el = this.gridContainer?.nativeElement;
     if (!el) {
-        // Fallback logic if element not yet available
         this.gridColumns = Math.ceil(Math.sqrt(count));
         this.gridRows = Math.ceil(count / this.gridColumns);
         this.cdr.detectChanges();
         return;
     }
 
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
-    const isPortrait = height > width;
+    const width = el.clientWidth;
+    const height = el.clientHeight;
+    const ratio = 16 / 9;
+    const gap = 16; // Space between grid items
 
-    // We want to find the best (cols, rows) such that cols * rows >= count
-    // and the aspect ratio of each cell is as close to 16/9 as possible
     let bestCols = 1;
     let bestRows = count;
     let maxArea = 0;
 
+    // We search through all possible column counts to find the one that
+    // allows the largest video area while maintaining 16:9 ratio.
     for (let cols = 1; cols <= count; cols++) {
       const rows = Math.ceil(count / cols);
-      const cellWidth = width / cols;
-      const cellHeight = height / rows;
 
-      // Calculate how large a 16:9 video can be in this cell
+      // Calculate cell dimensions including gaps
+      const cellWidth = (width - (cols - 1) * gap) / cols;
+      const cellHeight = (height - (rows - 1) * gap) / rows;
+
+      if (cellWidth <= 0 || cellHeight <= 0) continue;
+
       let videoWidth, videoHeight;
-      if (cellWidth / cellHeight > 16/9) {
+      if (cellWidth / cellHeight > ratio) {
           videoHeight = cellHeight;
-          videoWidth = videoHeight * (16/9);
+          videoWidth = videoHeight * ratio;
       } else {
           videoWidth = cellWidth;
-          videoHeight = videoWidth / (16/9);
+          videoHeight = videoWidth / ratio;
       }
 
       const area = videoWidth * videoHeight;

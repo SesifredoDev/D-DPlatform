@@ -221,9 +221,13 @@
   overflow: hidden;
   height: 100%;
   width: 100%;
-  place-items: center; // Center boxes if they don't fill
-  align-content: center; // Center grid rows
-  justify-content: center; // Center grid columns
+
+  // Center grid items both ways
+  justify-content: center;
+  align-content: center;
+
+  // These will be overridden by [style.grid-template-columns] in HTML
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
 }
 
 .video-box {
@@ -235,12 +239,17 @@
   box-shadow: var(--shadow-2);
   transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
+  // Maintain aspect ratio while filling available width
   width: 100%;
+  max-width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
-  max-height: 100%; // Ensure it doesn't overflow container vertically
-  min-width: 0;
-  min-height: 0;
+
+  // Ensure it doesn't overflow vertically
+  max-height: 100%;
+
+  // Center within the grid cell
+  place-self: center;
 
   video {
     width: 100%;
