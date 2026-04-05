@@ -1,4 +1,4 @@
-<div class="chat-container">
+<div class="chat-container" [class.whisper-channel]="isWhisperMode">
   @if(showNewMessageIndicator){
     <div class="new-message-indicator" (click)="scrollToBottom(true)">
       <mat-icon>arrow_downward</mat-icon>
@@ -31,7 +31,7 @@
             <div class="content-column">
               <div class="message-meta">
                 <span class="author-name">{{ msg.character?.name || msg.author?.username }}</span>
-                @if(msg.isWhisper) {
+                @if(msg.isWhisper && !isWhisperMode) {
                   <span class="whisper-label">
                     <mat-icon>visibility_off</mat-icon>
                     Whisper to {{ msg.recipient?.username || 'the DM' }}
@@ -95,10 +95,10 @@
       } @empty {
         <div class="empty-state">
           <div class="empty-icon-wrapper">
-            <mat-icon>forum</mat-icon>
+            <mat-icon>{{ isWhisperMode ? 'visibility_off' : 'forum' }}</mat-icon>
           </div>
-          <h3>Welcome to the Chronicle</h3>
-          <p>This is the start of your adventure. Scribe your first message below.</p>
+          <h3>{{ isWhisperMode ? 'Private Whisper Channel' : 'Welcome to the Chronicle' }}</h3>
+          <p>{{ isWhisperMode ? 'This channel is only visible to you and ' + (whisperRecipient?.username || 'the DM') : 'This is the start of your adventure. Scribe your first message below.' }}</p>
         </div>
       }
     </div>
@@ -128,7 +128,6 @@
       <div class="whisper-preview">
         <mat-icon>visibility_off</mat-icon>
         <span>Whispering to <strong>{{ whisperRecipient?.username || 'the DM' }}</strong></span>
-        <button mat-icon-button (click)="toggleWhisperMode()"><mat-icon>close</mat-icon></button>
       </div>
     }
 
@@ -149,10 +148,6 @@
           <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
         </button>
         <input type="file" #fileInput style="display: none" (change)="onFileSelected($event)">
-
-        <button mat-icon-button class="action-btn" (click)="toggleWhisperMode()" [color]="isWhisperMode ? 'warn' : null" matTooltip="Toggle Whisper to DM">
-          <mat-icon>{{ isWhisperMode ? 'visibility_off' : 'visibility' }}</mat-icon>
-        </button>
 
         <button
           mat-icon-button

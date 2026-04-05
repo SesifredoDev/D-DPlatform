@@ -25,6 +25,7 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../environments/environment';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
+import {IChannel} from '../../../shared/models/server/channel.model';
 
 @Component({
   selector: 'app-text-channel',
@@ -53,7 +54,6 @@ import { IServer } from '../../../shared/models/server/server.model';
 export class TextChannel implements OnChanges, OnDestroy, OnInit {
   @Input() channelId!: string;
   @Input() currentCharacterId?: string;
-  @Input() whisperRecipientInput?: any;
 
   private isAtBottom = true;
   private justOpened = true;
@@ -91,6 +91,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     this.serverSub = this.serverService.getServerDetailsObservable().subscribe(server => {
       if (server) {
         this.serverOwner = server.owner;
+        this.updateWhisperState(server);
       }
     });
   }
@@ -98,9 +99,31 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['channelId'] && this.channelId) {
       this.loadChannel();
+      const server = this.serverService.getCurrentServer();
+      if (server) {
+        this.updateWhisperState(server);
+      }
     }
-    if (changes['whisperRecipientInput'] && this.whisperRecipientInput) {
-      this.setWhisperRecipient(this.whisperRecipientInput);
+  }
+
+  updateWhisperState(server: IServer) {
+    const channel = server.channels.find(c => c._id === this.channelId);
+    if (channel && channel.type === 'whisper') {
+      this.isWhisperMode = true;
+      // In whisper channel, the recipient is the non-owner.
+      // If I am the recipient, whisper is to owner.
+      // If I am the owner, whisper is to recipient.
+      const isOwner = (typeof server.owner === 'string' ? server.owner : server.owner?._id) === this.currentUserId;
+      if (isOwner) {
+         // Owner is whispering to the stored recipient
+         this.whisperRecipient = server.members.find(m => m.user._id === channel.recipient)?.user || { username: channel.name };
+      } else {
+         // Recipient is whispering to the owner
+         this.whisperRecipient = typeof server.owner === 'object' ? server.owner : { username: 'the DM', _id: server.owner };
+      }
+    } else {
+      this.isWhisperMode = false;
+      this.whisperRecipient = null;
     }
   }
 
@@ -124,8 +147,9 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   sendMessage() {
     if (!this.newMessageContent.trim() && this.attachments.length === 0) return;
 
-    // Default recipient is the owner if whisper mode is on and no recipient is selected
-    const recipientId = this.isWhisperMode ? (this.whisperRecipient?._id || (typeof this.serverOwner === 'string' ? this.serverOwner : this.serverOwner?._id)) : null;
+    // In a whisper channel, every message is a whisper
+    const isWhisper = this.isWhisperMode;
+    const recipientId = isWhisper ? (this.whisperRecipient?._id) : null;
 
     this.messageService
       .sendMessage(
@@ -134,7 +158,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
         this.currentCharacterId,
         this.attachments,
         this.replyingTo?._id,
-        this.isWhisperMode,
+        isWhisper,
         recipientId
       )
       .subscribe({
@@ -233,18 +257,6 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
   removeAttachment(index: number) {
     this.attachments.splice(index, 1);
-  }
-
-  toggleWhisperMode() {
-    this.isWhisperMode = !this.isWhisperMode;
-    if (!this.isWhisperMode) {
-      this.whisperRecipient = null;
-    }
-  }
-
-  setWhisperRecipient(member: any) {
-    this.whisperRecipient = member.user;
-    this.isWhisperMode = true;
   }
 
   ngOnDestroy() {

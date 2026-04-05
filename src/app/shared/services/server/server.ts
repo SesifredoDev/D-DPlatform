@@ -5,6 +5,7 @@ import { BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { handleApiError } from '../../utils/api-error.util';
 import { environment } from '../../../../environments/environment';
 import { IServer } from '../../models/server/server.model';
+import {IChannel} from '../../models/server/channel.model';
 
 @Injectable({
   providedIn: 'root',
@@ -129,6 +130,11 @@ export class ServerService {
         .pipe(catchError(handleApiError))
     );
     await this.getMyServers();
+  }
+
+  getOrCreateWhisperChannel(serverId: string, recipientId?: string): Observable<IChannel> {
+    return this.http.post<IChannel>(`${this.baseUrl}/whisper/create`, { serverId, recipientId }, { withCredentials: true })
+      .pipe(catchError(handleApiError));
   }
 
 }

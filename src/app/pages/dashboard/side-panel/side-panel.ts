@@ -60,6 +60,8 @@ export class SidePanel implements AfterViewInit {
 
   groupedMembers: any[] = [];
 
+  currentUserId: string | null = null;
+
 
   constructor(
     private cdr: ChangeDetectorRef,
@@ -78,7 +80,7 @@ export class SidePanel implements AfterViewInit {
 
 
     this.userService.getMe().subscribe((user) => {
-      console.log(user);
+      this.currentUserId = user._id;
       this.charService.getMyCharacters().subscribe((chars) => {
         this.characters = chars;
         let userChar = ({
@@ -97,7 +99,6 @@ export class SidePanel implements AfterViewInit {
           servers: ['0'],
           name: user.username, icon: user.profileIcon || null
         })
-        console.log(user)
         this.characters = [
           userChar,
           ...this.characters
@@ -113,7 +114,6 @@ export class SidePanel implements AfterViewInit {
 
     this.serverService.getMyServersObservable().subscribe((servers) => {
 
-      console.log(servers);
       if (servers.length > 0) {
         this.servers = servers;
         this.selectServer(servers[0]);
@@ -126,7 +126,6 @@ export class SidePanel implements AfterViewInit {
     this.serverService.getServerDetailsObservable().subscribe((server) => {
       if (server) {
 
-        console.log('Switched to index:', server);
         this.channels = server.channels;
 
         if (this.channels[0]) this.selectChannel(this.channels[0]);
@@ -162,7 +161,6 @@ export class SidePanel implements AfterViewInit {
 
 
   selectServer(server: any) {
-    console.log("Server", server);
     this.selectedServer = server;
     this.serverService.getServerDetails(server._id);
 
@@ -271,7 +269,11 @@ export class SidePanel implements AfterViewInit {
   }
 
   whisperUser(member: any) {
-    this.whisperInitiated.emit(member);
+    if (!this.selectedServer) return;
+    this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
+        this.channelService.setChannelObservable(channel);
+        this.tabService.openTab(channel._id, channel.name, 'text');
+    });
   }
 
 
