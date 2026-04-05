@@ -2,7 +2,7 @@ import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnCh
 import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
-import {VttSync, TurnOrderState, TurnOrderEntry} from '../../../shared/services/vttsync/vttsync';
+import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry} from '../../../shared/services/vttsync/vttsync';
 import {ICharacter} from '../../../shared/models/user/character.model';
 import {MatIconButton, MatButton} from '@angular/material/button';
 import {MatIcon} from '@angular/material/icon';
@@ -59,10 +59,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   public lightingEnabled = false;
   public activeTool: 'select' | 'draw' | 'delete' | 'line' | 'radius' | 'none' = 'select';
 
-  public mapLibrary: any[] = [];
+  public mapLibrary: MapLibraryEntry[] = [];
   public currentMapName: string = '';
   public currentMapId: string | null = null;
-  public showLibraryOverlay = true;
+  public showLibraryOverlay = false;
 
   // Context Menu State
   public menuTopLeftPosition = { x: '0px', y: '0px' };
@@ -342,7 +342,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.currentMapId = mapId;
     const mapData = this.engine.getRawConfig();
 
-    const mapEntry = {
+    const mapEntry: MapLibraryEntry = {
       id: this.currentMapId,
       name: this.currentMapName,
       lastSaved: new Date().toISOString(),
@@ -357,7 +357,31 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       this.mapLibrary.push(mapEntry);
     }
 
-    await (window as any).electronAPI.saveMapLibrary(this.mapLibrary);
+    await this.saveLibraryToDisk();
+  }
+
+  exportMapJson() {
+    this.engine.exportConfig();
+  }
+
+  onMapJsonUpload(event: any) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e: any) => {
+      try {
+        const config = JSON.parse(e.target.result);
+        this.engine.loadConfigFromObject(config);
+        if (this.isSyncing) {
+          this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
+        }
+      } catch (err) {
+        console.error("Failed to parse map JSON", err);
+        alert("Invalid map file format.");
+      }
+    };
+    reader.readAsText(file);
   }
 
   loadFromLibrary(map: any) {
@@ -386,12 +410,31 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   private async saveLibraryToDisk() {
-    await (window as any).electronAPI.saveMapLibrary(this.mapLibrary);
+    // Save to local storage for "local" saving as well
+    const storageKey = `vtt_library_${this.serverId}`;
+    localStorage.setItem(storageKey, JSON.stringify(this.mapLibrary));
+
+    // Also try to sync with server if available
+    try {
+      await this.syncService.saveMapLibrary(this.mapLibrary);
+    } catch (e) {
+      console.warn("Could not sync library to server, saved locally only.");
+    }
   }
 
   async loadLibrary() {
-    const library = await (window as any).electronAPI.loadMapLibrary();
-    this.mapLibrary = library.filter((e: any) => e.server == this.serverId);
+    const storageKey = `vtt_library_${this.serverId}`;
+    const localData = localStorage.getItem(storageKey);
+    if (localData) {
+      this.mapLibrary = JSON.parse(localData);
+    } else {
+      try {
+        const library = await this.syncService.loadMapLibrary();
+        this.mapLibrary = library.filter((e: MapLibraryEntry) => e.server == this.serverId);
+      } catch (e) {
+        this.mapLibrary = [];
+      }
+    }
   }
 
   createNewMap() {

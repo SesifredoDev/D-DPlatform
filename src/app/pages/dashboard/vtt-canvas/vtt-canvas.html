@@ -65,13 +65,18 @@
   <div id="toolbar" class="glass">
     <!-- Map Management Tools -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
-      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save Changes">
+      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save to Library">
         <mat-icon>save</mat-icon>
       </button>
-      <button mat-icon-button (click)="saveCurrentMap(true)" matTooltip="Save As New">
-        <mat-icon>library_add</mat-icon>
+      <button mat-icon-button (click)="exportMapJson()" matTooltip="Download/Export Map JSON">
+        <mat-icon>file_download</mat-icon>
       </button>
-      <button mat-icon-button (click)="fileInput.click()" matTooltip="Upload Map">
+      <button mat-icon-button (click)="mapJsonInput.click()" matTooltip="Upload/Import Map JSON">
+        <mat-icon>file_upload</mat-icon>
+      </button>
+      <input #mapJsonInput type="file" (change)="onMapJsonUpload($event)" accept=".json" style="display: none" />
+
+      <button mat-icon-button (click)="fileInput.click()" matTooltip="Set Background Image">
         <mat-icon>image</mat-icon>
       </button>
       <input #fileInput type="file" (change)="onMapUpload($event)" accept="image/*" style="display: none" />

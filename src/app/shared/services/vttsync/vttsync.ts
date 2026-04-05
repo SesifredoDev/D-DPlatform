@@ -5,7 +5,8 @@ import {ICharacter} from '../../models/user/character.model';
 import {VttEngine} from '../../modules/vttEngine/VttEngine';
 import {Video} from '../video/video';
 import {environment} from '../../../../environments/environment';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
 
 export interface TurnOrderEntry {
   id: string;
@@ -19,6 +20,15 @@ export interface TurnOrderState {
   isConfirmed: boolean;
   entries: TurnOrderEntry[];
   activeIndex: number;
+}
+
+export interface MapLibraryEntry {
+  id: string;
+  name: string;
+  lastSaved: string;
+  server: string;
+  data: any;
+  isArchived?: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -37,8 +47,15 @@ export class VttSync {
     activeIndex: 0
   });
 
-  constructor(private tokenService: TokenService, private callService: Video) {
+  private readonly mapApiUrl = `${environment.apiURL}map`;
+
+  constructor(
+    private tokenService: TokenService,
+    private callService: Video,
+    private http: HttpClient
+  ) {
   }
+
   private getSocket(): Socket {
     if (!this.socket) {
       this.socket = io(`${environment.mapUrl}`, {
@@ -71,6 +88,7 @@ export class VttSync {
     }
     return this.socket;
   }
+
   startHosting(engine: VttEngine, roomId: string) {
     const isReattaching = this.currentRoomId === roomId && this.isHosting && this.isConnected;
 
@@ -317,8 +335,34 @@ export class VttSync {
     this.broadcastAction('turn-order-sync', state);
   }
 
-
   getEngine() {
     return this.engine;
+  }
+
+  // --- Map Library Methods (Website implementation) ---
+
+  async saveMapLibrary(library: MapLibraryEntry[]): Promise<void> {
+    // We send the whole library for this server
+    // Assuming the backend has an endpoint to store this.
+    // If it doesn't exist, we might need to save individual maps.
+    // For now, let's assume a bulk save/update for the server's maps.
+    await firstValueFrom(this.http.post(`${this.mapApiUrl}/library`, { library }, { withCredentials: true }));
+  }
+
+  async loadMapLibrary(): Promise<MapLibraryEntry[]> {
+    try {
+      return await firstValueFrom(this.http.get<MapLibraryEntry[]>(`${this.mapApiUrl}/library`, { withCredentials: true }));
+    } catch (e) {
+      console.error('Failed to load map library', e);
+      return [];
+    }
+  }
+
+  async saveMap(map: MapLibraryEntry): Promise<void> {
+    await firstValueFrom(this.http.post(`${this.mapApiUrl}/save`, map, { withCredentials: true }));
+  }
+
+  async deleteMap(mapId: string): Promise<void> {
+    await firstValueFrom(this.http.delete(`${this.mapApiUrl}/${mapId}`, { withCredentials: true }));
   }
 }
