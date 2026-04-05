@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, map } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 import { ICharacter } from '../../models/user/character.model';
 import { Video } from '../video/video';
 
@@ -20,8 +20,6 @@ export class TabService {
 
   private tabs = new BehaviorSubject<Tab[]>([]);
   tabs$ = this.tabs.asObservable();
-
-  activeTabId$ = this.tabs$.pipe(map(tabs => tabs.find(t => t.active)?.id));
 
   constructor(private videoService: Video) {}
 

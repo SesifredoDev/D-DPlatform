@@ -50,15 +50,6 @@
 
   </div>
 
-  @if(selectedServer && !isServerOwner()) {
-    <div class="dm-whisper-section">
-       <button mat-button class="dm-whisper-btn" (click)="openDMWhisper()">
-          <mat-icon [matBadge]="whisperNotifications > 0 ? whisperNotifications : null" matBadgeColor="warn">visibility_off</mat-icon>
-          <span>DM WHISPER</span>
-       </button>
-    </div>
-  }
-
 
   <!-- CHANNEL SECTION -->
   <div class="middle-section">
@@ -71,40 +62,21 @@
     <mat-nav-list class="channel-list">
 
       @for (channel of channels; track channel) {
-        @if (channel.type !== 'whisper') {
-          <a
-            mat-list-item
-            class="channel-item"
-            routerLinkActive="active-channel"
-            (click)="selectChannel(channel)">
+        <a
+          mat-list-item
+          class="channel-item"
+          routerLinkActive="active-channel"
+          (click)="selectChannel(channel)">
 
-            <mat-icon matListItemIcon class="channel-icon">
-              {{ channel.icon }}
-            </mat-icon>
+          <mat-icon matListItemIcon class="channel-icon">
+            {{ channel.icon }}
+          </mat-icon>
 
-            <span matListItemTitle class="channel-label">
-              {{ channel.name }}
-            </span>
+          <span matListItemTitle class="channel-label">
+            {{ channel.name }}
+          </span>
 
-          </a>
-        } @else if (isServerOwner()) {
-          <!-- Owner sees all whisper channels in the list -->
-          <a
-            mat-list-item
-            class="channel-item whisper-channel"
-            routerLinkActive="active-channel"
-            (click)="selectChannel(channel)">
-
-            <mat-icon matListItemIcon class="channel-icon">
-              visibility_off
-            </mat-icon>
-
-            <span matListItemTitle class="channel-label">
-              {{ channel.name }}
-            </span>
-
-          </a>
-        }
+        </a>
       }
 
     </mat-nav-list>

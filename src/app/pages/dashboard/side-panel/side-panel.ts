@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, NgZone, OnDestroy, OnInit, Output} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, NgZone, OnInit, Output} from '@angular/core';
 
 import {MatCardModule} from '@angular/material/card';
 
@@ -26,9 +26,6 @@ import {
 } from '../../../objects/server-settings-dialog-component/server-settings-dialog-component';
 import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-component/server-add-dialog-component';
 import {VttSync} from '../../../shared/services/vttsync/vttsync';
-import {MatBadgeModule} from '@angular/material/badge';
-import {Message} from '../../../shared/services/message/message';
-import { Subscription } from 'rxjs';
 
 
 @Component({
@@ -43,7 +40,6 @@ import { Subscription } from 'rxjs';
     MatButtonModule,
     MatDividerModule,
     MatMenuModule,
-    MatBadgeModule
   ],
 
   templateUrl: './side-panel.html',
@@ -51,7 +47,7 @@ import { Subscription } from 'rxjs';
 
 })
 
-export class SidePanel implements AfterViewInit, OnDestroy {
+export class SidePanel implements AfterViewInit {
 
   @Output() whisperInitiated = new EventEmitter<any>();
 
@@ -66,12 +62,6 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   currentUserId: string | null = null;
 
-  // Whisper badge logic
-  whisperNotifications: number = 0;
-  private currentActiveTabId: string | null = null;
-
-  private subs = new Subscription();
-
 
   constructor(
     private cdr: ChangeDetectorRef,
@@ -80,7 +70,6 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     private userService: UserService,
     private serverService: ServerService,
     private channelService: ChannelService,
-    private messageService: Message,
     private router: Router,
     private dialog: MatDialog,
     private vttSync: VttSync) {
@@ -149,25 +138,6 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
 
     })
-
-    // Listen for new messages to handle notifications
-    this.subs.add(this.messageService.newWhisperReceived$.subscribe(msg => {
-        if (msg.author._id !== this.currentUserId && msg.channel !== this.currentActiveTabId) {
-            this.whisperNotifications++;
-            this.cdr.markForCheck();
-        }
-    }));
-
-    // Track active tab to clear notifications
-    this.subs.add(this.tabService.activeTabId$.subscribe(tabId => {
-        this.currentActiveTabId = tabId || null;
-        const activeChannel = this.channels.find(c => c._id === tabId);
-        if (activeChannel?.type === 'whisper') {
-            this.whisperNotifications = 0;
-            this.cdr.markForCheck();
-        }
-    }));
-
     this.serverService.getMyServers();
 
   }
@@ -187,9 +157,6 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   selectChannel(channel: IChannel) {
     this.channelService.setChannelObservable(channel);
-    if (channel.type === 'whisper') {
-        this.whisperNotifications = 0;
-    }
   }
 
 
@@ -307,31 +274,8 @@ export class SidePanel implements AfterViewInit, OnDestroy {
         if (channel._id) {
           this.channelService.setChannelObservable(channel);
           this.tabService.openTab(channel._id, channel.name, 'whisper');
-          this.whisperNotifications = 0;
         }
     });
-  }
-
-  openDMWhisper() {
-    if (!this.selectedServer) return;
-    // For non-owners, this will get their specific whisper channel with the owner
-    this.serverService.getOrCreateWhisperChannel(this.selectedServer._id).subscribe(channel => {
-        if (channel._id) {
-          this.channelService.setChannelObservable(channel);
-          this.tabService.openTab(channel._id, channel.name, 'whisper');
-          this.whisperNotifications = 0;
-        }
-    });
-  }
-
-  isServerOwner(): boolean {
-      if (!this.selectedServer || !this.currentUserId) return false;
-      const ownerId = typeof this.selectedServer.owner === 'string' ? this.selectedServer.owner : this.selectedServer.owner._id;
-      return ownerId === this.currentUserId;
-  }
-
-  ngOnDestroy(): void {
-      this.subs.unsubscribe();
   }
 
 

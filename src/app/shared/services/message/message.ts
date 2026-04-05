@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { io, Socket } from 'socket.io-client';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
 
@@ -36,10 +36,6 @@ export class Message {
   private socket: Socket;
   private channelMessages = new Map<string, BehaviorSubject<MessageData[]>>();
 
-  // Notification subject for whispers
-  private newWhisperSubject = new Subject<MessageData>();
-  newWhisperReceived$ = this.newWhisperSubject.asObservable();
-
   constructor(private http: HttpClient) {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
@@ -51,12 +47,10 @@ export class Message {
       const channelId = message.channel;
       const subject = this.channelMessages.get(channelId);
       if (subject) {
+        // Logic to only show whispers if intended for current user or they are the author
+        // Actually the backend should probably handle the emit logic better, but for now
+        // let's assume we might receive it and the UI will filter or it's already filtered by backend
         subject.next([...subject.value, message]);
-      }
-
-      // If it's a whisper, emit notification
-      if (message.isWhisper) {
-          this.newWhisperSubject.next(message);
       }
     });
 
