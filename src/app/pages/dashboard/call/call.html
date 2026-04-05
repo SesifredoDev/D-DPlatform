@@ -75,7 +75,7 @@
 
   <!-- ACTIVE CALL VIEW -->
   @if (localStream) {
-    <div class="grid" [style.--grid-size]="gridSize + 'px'">
+    <div class="grid" [style.grid-template-columns]="'repeat(' + gridColumns + ', 1fr)'" [style.grid-template-rows]="'repeat(' + gridRows + ', 1fr)'">
       <!-- Local Video -->
       <div class="video-box local" [class.video-hidden]="isVideoOff">
         <video #localVideo autoplay playsinline [muted]="true"></video>
@@ -223,12 +223,6 @@
     <div class="bottom-toolbar">
       <div class="controls-wrapper">
         <div class="media-actions">
-
-          <!-- Resizer Slider Toggle -->
-          <button (click)="showGridResizer = !showGridResizer" class="btn-action" [class.active]="showGridResizer" matTooltip="Grid Settings">
-            <mat-icon>grid_view</mat-icon>
-          </button>
-
           <button (click)="showSpotify = !showSpotify" class="btn-action btn-spotify" [class.active]="showSpotify" matTooltip="Spotify">
             <mat-icon>music_note</mat-icon>
           </button>
@@ -257,22 +251,6 @@
             <mat-icon>call_end</mat-icon>
           </button>
         </div>
-      </div>
-    </div>
-
-    <!-- Grid Resizer Overlay -->
-    <div class="grid-resizer-overlay glass" *ngIf="showGridResizer">
-      <div class="overlay-header">
-        <h3>Grid Size</h3>
-        <button class="btn-close" (click)="showGridResizer = false">
-          <mat-icon>close</mat-icon>
-        </button>
-      </div>
-      <div class="resizer-content">
-        <mat-icon>zoom_out</mat-icon>
-        <input type="range" min="200" max="800" step="10" [(ngModel)]="gridSize">
-        <mat-icon>zoom_in</mat-icon>
-        <span class="size-label">{{ gridSize }}px</span>
       </div>
     </div>
 

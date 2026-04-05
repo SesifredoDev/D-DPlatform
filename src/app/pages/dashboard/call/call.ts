@@ -67,8 +67,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // UI States
   showSpotify: boolean = false;
   showThemePicker: boolean = false;
-  showGridResizer: boolean = false;
-  gridSize: number = 400;
+
+  // Grid State
+  gridColumns: number = 1;
+  gridRows: number = 1;
 
   // Theme state
   activeThemeSession: Theme | null = null;
@@ -139,6 +141,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.localVideo.nativeElement.srcObject = this.localStream;
         }
       }, 100);
+      this.calculateGrid();
     } else {
       await this.startPreview();
     }
@@ -149,6 +152,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         stream: r.stream,
         userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter
       }));
+
+      this.calculateGrid();
 
       setTimeout(() => {
         this.remoteVideos.forEach((videoRef, i) => {
@@ -316,6 +321,36 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.startPreview();
   }
 
+  private calculateGrid() {
+    const count = this.remoteStreams.length + (this.localStream ? 1 : 0);
+    if (count <= 1) {
+      this.gridColumns = 1;
+      this.gridRows = 1;
+    } else if (count <= 2) {
+      this.gridColumns = 2;
+      this.gridRows = 1;
+    } else if (count <= 4) {
+      this.gridColumns = 2;
+      this.gridRows = 2;
+    } else if (count <= 6) {
+      this.gridColumns = 3;
+      this.gridRows = 2;
+    } else if (count <= 9) {
+      this.gridColumns = 3;
+      this.gridRows = 3;
+    } else if (count <= 12) {
+      this.gridColumns = 4;
+      this.gridRows = 3;
+    } else if (count <= 16) {
+      this.gridColumns = 4;
+      this.gridRows = 4;
+    } else {
+      this.gridColumns = Math.ceil(Math.sqrt(count));
+      this.gridRows = Math.ceil(count / this.gridColumns);
+    }
+    this.cdr.detectChanges();
+  }
+
   async joinCall() {
     if (!this.channelId || !this.character || this.isJoining) return;
     this.isJoining = true;
@@ -347,6 +382,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       await this.videoService.initVideoCall(this.channelId, characterToBroadcast);
 
       await this.videoService.startProducing(this.localStream);
+      this.calculateGrid();
 
       setTimeout(() => {
         if (this.localVideo) {
@@ -376,6 +412,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.activeThemeSession = null;
     this.localStream = null;
     this.remoteStreams = [];
+    this.calculateGrid();
     this.showSpotify = false;
     this.stopVtt.emit(this.channelId);
     this.isDmMode = false;
