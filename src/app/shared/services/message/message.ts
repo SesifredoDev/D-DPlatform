@@ -5,31 +5,67 @@ import { BehaviorSubject, Observable } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
 
+export interface Attachment {
+  url: string;
+  name: string;
+  contentType: string;
+}
+
+export interface Reaction {
+  emoji: string;
+  users: string[];
+}
+
+export interface MessageData {
+  _id: string;
+  channel: string;
+  server: string;
+  author: any;
+  character?: any;
+  content: string;
+  attachments: Attachment[];
+  reactions: Reaction[];
+  replyTo?: any;
+  createdAt: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class Message {
   private socket: Socket;
-  private channelMessages = new Map<string, BehaviorSubject<any[]>>();
+  private channelMessages = new Map<string, BehaviorSubject<MessageData[]>>();
 
   constructor(private http: HttpClient) {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
-      transports: ['websocket'] // Force websocket to see clear errors if it fails
+      transports: ['websocket']
     });
-    this.socket.on('new_message', (message: any) => {
-      const channelId = message.channelId ?? message.channel;
-      const subject = this.channelMessages.get(channelId);
 
+    this.socket.on('new_message', (message: MessageData) => {
+      const channelId = message.channel;
+      const subject = this.channelMessages.get(channelId);
       if (subject) {
         subject.next([...subject.value, message]);
       }
     });
+
+    this.socket.on('reaction_update', (data: { messageId: string, reactions: Reaction[], channelId: string }) => {
+      const subject = this.channelMessages.get(data.channelId);
+      if (subject) {
+        const messages = subject.value.map(m => {
+          if (m._id === data.messageId) {
+            return { ...m, reactions: data.reactions };
+          }
+          return m;
+        });
+        subject.next(messages);
+      }
+    });
   }
 
-  joinChannel(channelId: string): Observable<any[]> {
-
+  joinChannel(channelId: string): Observable<MessageData[]> {
     if (!this.channelMessages.has(channelId)) {
-      this.channelMessages.set(channelId, new BehaviorSubject<any[]>([]));
+      this.channelMessages.set(channelId, new BehaviorSubject<MessageData[]>([]));
     }
 
     if (this.socket.connected) {
@@ -53,13 +89,23 @@ export class Message {
   }
 
   getHistory(channelId: string) {
-    return this.http.get<any[]>(`${environment.apiURL}message/${channelId}`);
+    return this.http.get<MessageData[]>(`${environment.apiURL}message/${channelId}`);
   }
 
-  sendMessage(channelId: string, content: string, characterId?: string) {
-    return this.http.post(`${environment.apiURL}message/${channelId}`, {
+  sendMessage(channelId: string, content: string, characterId?: string, attachments?: Attachment[], replyTo?: string) {
+    return this.http.post<MessageData>(`${environment.apiURL}message/${channelId}`, {
       content,
-      characterId
+      characterId,
+      attachments,
+      replyTo
     });
+  }
+
+  addReaction(messageId: string, emoji: string) {
+    return this.http.post(`${environment.apiURL}message/reaction/${messageId}`, { emoji });
+  }
+
+  removeReaction(messageId: string, emoji: string) {
+    return this.http.delete(`${environment.apiURL}message/reaction/${messageId}`, { body: { emoji } });
   }
 }

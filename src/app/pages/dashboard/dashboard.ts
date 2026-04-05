@@ -14,6 +14,8 @@ import {VttCanvas} from './vtt-canvas/vtt-canvas';
 import {SpotifyPlayer} from './call/spotify-player/spotify-player';
 import {Video} from '../../shared/services/video/video';
 import {CommonModule} from '@angular/common';
+import {MatDialog, MatDialogModule} from '@angular/material/dialog';
+import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
 
 @Component({
   selector: 'app-dashboard',
@@ -31,7 +33,8 @@ import {CommonModule} from '@angular/common';
     CdkDropListGroup,
     CharacterViewer,
     VttCanvas,
-    SpotifyPlayer
+    SpotifyPlayer,
+    MatDialogModule
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
@@ -56,7 +59,8 @@ export class Dashboard implements OnInit {
     private userService: UserService,
     private channelService: ChannelService,
     private videoService: Video,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private dialog: MatDialog
   ) {}
 
   ngOnInit() {
@@ -165,5 +169,33 @@ export class Dashboard implements OnInit {
   onStopVtt(channelId: string) {
     if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
     if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
+  }
+
+  @HostListener('dragover', ['$event'])
+  onDragOver(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  @HostListener('drop', ['$event'])
+  onFileDrop(event: DragEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const files = event.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('image/')) {
+        this.openBroadcastDialog(file);
+      }
+    }
+  }
+
+  openBroadcastDialog(file: File) {
+    this.dialog.open(BroadcastDialog, {
+      data: { file },
+      width: '500px',
+      maxWidth: '90vw'
+    });
   }
 }

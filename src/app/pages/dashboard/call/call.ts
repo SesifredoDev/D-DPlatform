@@ -74,12 +74,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   showVttNotification: boolean = false;
   private vttNotificationTimeout: any;
 
+  // Broadcast state
+  activeOverlayImage: string | null = null;
+
   private streamSub!: Subscription;
   private spotifySyncSub!: Subscription;
   private spotifyActionSub!: Subscription;
   private spotifyStateRequestSub!: Subscription;
   private themeSyncSub!: Subscription;
   private vttSub!: Subscription;
+  private overlaySub!: Subscription;
 
   private isComponentDestroying = false;
 
@@ -150,6 +154,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const adjustedPosition = state.position + (state.paused ? 0 : drift);
       const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
       const isDifferentStatus = currentState?.paused !== state.paused;
+      const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
+
+      // Handle shuffle change
+      if (isDifferentShuffle) {
+          await this.spotify.toggleShuffle(state.shuffle, true);
+      }
 
       if (state.command === 'seek') {
         if (currentState?.track_window?.current_track?.uri === state.uri) {
@@ -195,7 +205,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
             uri: state.track_window.current_track.uri,
             position: state.position,
             paused: state.paused,
-            contextUri: state.context?.uri
+            contextUri: state.context?.uri,
+            shuffle: state.shuffle_state
           });
         }
 
@@ -220,6 +231,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.showVttNotification = false;
         if (this.vttNotificationTimeout) clearTimeout(this.vttNotificationTimeout);
       }
+    });
+
+    this.overlaySub = this.videoService.overlayImage$.subscribe(url => {
+      this.activeOverlayImage = url;
+      this.cdr.detectChanges();
     });
   }
 
@@ -299,10 +315,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       // 3. Sync UI states
       this.isAudioMuted = this.isPreviewMuted;
-      this.isVideoOff = this.isPreviewVideoOff;
+      this.isVideoOff = !this.isPreviewVideoOff;
 
       this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
-      this.localStream.getVideoTracks().forEach(t => t.enabled = !this.isVideoOff);
+      this.localStream.getVideoTracks().forEach(t => t.enabled = this.isVideoOff);
 
       // 4. Initialize the video service
       this.videoService.updateUserData(this.channelId, this.character);
@@ -425,6 +441,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.spotifyStateRequestSub) this.spotifyStateRequestSub.unsubscribe();
     if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
+    if (this.overlaySub) this.overlaySub.unsubscribe();
 
     // If the videoService is still connected to this channel, it means the tab is being moved,
     // so we don't want to disconnect the call.
@@ -454,5 +471,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   stopVttSession() {
     this.videoService.sendVttCommand('stop', this.channelId);
     this.stopVtt.emit(this.channelId);
+  }
+
+  dismissOverlay() {
+    this.activeOverlayImage = null;
+    // We only dismiss it locally for now, as per requirement "dismiss button"
   }
 }

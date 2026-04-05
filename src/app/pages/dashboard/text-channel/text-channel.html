@@ -1,5 +1,4 @@
 <div class="chat-container">
-  <!-- New Message Toast -->
   @if(showNewMessageIndicator){
     <div class="new-message-indicator" (click)="scrollToBottom(true)">
       <mat-icon>arrow_downward</mat-icon>
@@ -7,12 +6,18 @@
     </div>
   }
 
-  <!-- Messages List -->
   <div class="messages-viewport">
     <div #messageContainer class="messages-scroller" (scroll)="onScroll()">
-
       @for (msg of messages; track msg._id; let i = $index) {
-        <div class="message-group">
+        <div class="message-group" [id]="msg._id">
+
+          @if(msg.replyTo) {
+            <div class="reply-context">
+              <mat-icon class="reply-line-icon">reply</mat-icon>
+              <span class="reply-author">@{{ msg.replyTo.character?.name || msg.replyTo.author?.username }}</span>
+              <span class="reply-snippet">{{ msg.replyTo.content }}</span>
+            </div>
+          }
 
           <div class="message-item">
             <div class="avatar-column">
@@ -32,19 +37,54 @@
               <div class="message-text">
                 <markdown [data]="msg.content"></markdown>
               </div>
+
+              @if(msg.attachments && msg.attachments.length > 0) {
+                <div class="message-attachments">
+                  @for(att of msg.attachments; track att.url) {
+                    <div class="attachment-item">
+                      @if(att.contentType?.startsWith('image/')) {
+                        <img [src]="att.url" [alt]="att.name" class="attachment-image">
+                      } @else {
+                        <a [href]="att.url" target="_blank" class="attachment-file">
+                          <mat-icon>insert_drive_file</mat-icon>
+                          <span>{{ att.name }}</span>
+                        </a>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+
+              @if(msg.reactions && msg.reactions.length > 0) {
+                <div class="message-reactions">
+                  @for(reaction of msg.reactions; track reaction.emoji) {
+                    <div class="reaction-chip" [class.active]="reaction.users.includes(currentUserId!)" (click)="toggleReaction(msg, reaction.emoji)">
+                      <span class="emoji">{{ reaction.emoji }}</span>
+                      <span class="count">{{ reaction.users.length }}</span>
+                    </div>
+                  }
+                </div>
+              }
             </div>
 
-            <!-- Hover Actions (Visual only for now) -->
             <div class="message-actions">
-              <button mat-icon-button class="action-btn" matTooltip="Add Reaction">
+              <button mat-icon-button class="action-btn" [matMenuTriggerFor]="emojiMenu" matTooltip="Add Reaction">
                 <mat-icon>add_reaction</mat-icon>
               </button>
-              <button mat-icon-button class="action-btn" matTooltip="Reply">
+              <mat-menu #emojiMenu="matMenu">
+                <div class="emoji-picker-mini">
+                  <button mat-menu-item (click)="addReaction(msg._id, '👍')">👍</button>
+                  <button mat-menu-item (click)="addReaction(msg._id, '❤️')">❤️</button>
+                  <button mat-menu-item (click)="addReaction(msg._id, '😂')">😂</button>
+                  <button mat-menu-item (click)="addReaction(msg._id, '😮')">😮</button>
+                  <button mat-menu-item (click)="addReaction(msg._id, '😢')">😢</button>
+                </div>
+              </mat-menu>
+              <button mat-icon-button class="action-btn" (click)="setReply(msg)" matTooltip="Reply">
                 <mat-icon>reply</mat-icon>
               </button>
             </div>
           </div>
-
         </div>
       } @empty {
         <div class="empty-state">
@@ -55,13 +95,29 @@
           <p>This is the start of your adventure. Scribe your first message below.</p>
         </div>
       }
-
     </div>
   </div>
 
-  <!-- Input Area -->
   <div class="input-container">
-    <div class="input-box">
+    @if(attachments.length > 0) {
+      <div class="attachment-preview-strip">
+        @for(att of attachments; track att.url; let i = $index) {
+          <div class="attachment-preview">
+             <mat-icon>insert_drive_file</mat-icon>
+             <span>{{ att.name }}</span>
+             <button mat-icon-button (click)="removeAttachment(i)"><mat-icon>close</mat-icon></button>
+          </div>
+        }
+      </div>
+    }
+
+    @if(replyingTo) {
+      <div class="reply-preview">
+        <span>Replying to <strong>{{ replyingTo.character?.name || replyingTo.author?.username }}</strong></span>
+        <button mat-icon-button (click)="cancelReply()"><mat-icon>close</mat-icon></button>
+      </div>
+    }
+    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
       <textarea
         #messageInput
         placeholder="Scribe a message to the chronicle..."
@@ -74,12 +130,17 @@
       </textarea>
 
       <div class="input-actions">
+        <button mat-icon-button class="action-btn" (click)="fileInput.click()" [disabled]="isUploading">
+          <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
+        </button>
+        <input type="file" #fileInput style="display: none" (change)="onFileSelected($event)">
+
         <button
           mat-icon-button
           class="send-btn"
           (click)="sendMessage()"
-          [disabled]="!newMessageContent.trim()"
-          [class.can-send]="newMessageContent.trim()">
+          [disabled]="(!newMessageContent.trim() && attachments.length === 0) || isUploading"
+          [class.can-send]="newMessageContent.trim() || attachments.length > 0">
           <mat-icon>send</mat-icon>
         </button>
       </div>

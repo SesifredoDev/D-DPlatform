@@ -59,8 +59,17 @@ export class SpotifyService {
   private lastSyncedUri: string | null = null;
   private lastSyncedPaused: boolean | null = null;
   private lastSyncedPosition: number = 0;
+  private lastSyncedShuffle: boolean = false;
+  private lastSyncedContextUri: string | null = null;
   private lastCheckTime: number = 0;
+  private lastActionTime: number = 0;
   private isFirstPoll: boolean = true;
+
+  // Stale state tracking to avoid sync loops from slow API updates
+  private prevUri: string | null = null;
+  private prevPaused: boolean | null = null;
+  private prevShuffle: boolean | null = null;
+  private prevContextUri: string | null = null;
 
   private readonly API_BASE = 'https://api.spotify.com/v1';
   // Use the VPS IP for the backend API
@@ -142,13 +151,39 @@ export class SpotifyService {
     }
   }
 
+  private updateSyncCache(uri: string | null, paused: boolean, position: number, shuffle: boolean, contextUri: string | null) {
+      this.prevUri = this.lastSyncedUri;
+      this.prevPaused = this.lastSyncedPaused;
+      this.prevShuffle = this.lastSyncedShuffle;
+      this.prevContextUri = this.lastSyncedContextUri;
+
+      this.lastSyncedUri = uri;
+      this.lastSyncedPaused = paused;
+      this.lastSyncedPosition = position;
+      this.lastSyncedShuffle = shuffle;
+      this.lastSyncedContextUri = contextUri;
+      this.lastActionTime = Date.now();
+      this.lastCheckTime = Date.now();
+  }
+
   private checkAndEmitSync(state: any) {
     if (!state) return;
     const now = Date.now();
     const newUri = state.track_window?.current_track?.uri;
-    const newPaused = state.paused;
+    const newPaused = !!state.paused;
     const newPosition = state.position;
     const newContextUri = state.context?.uri;
+    const newShuffle = !!state.shuffle_state;
+
+    // Cooldown check: if we just took an action, ignore states that match our PREVIOUS state
+    // This prevents sync loops where a slow-to-update API returns the old state after we changed it.
+    if (now - this.lastActionTime < 5000) {
+        const matchesPrev = (newUri === this.prevUri || (!newUri && !this.prevUri)) &&
+                           (newPaused === this.prevPaused) &&
+                           (newShuffle === this.prevShuffle) &&
+                           (newContextUri === this.prevContextUri);
+        if (matchesPrev) return;
+    }
 
     let isSeeked = false;
     // Only detect seeks if we are playing and were playing before
@@ -159,19 +194,33 @@ export class SpotifyService {
         }
     }
 
-    const hasChanged = newUri && (newUri !== this.lastSyncedUri || newPaused !== this.lastSyncedPaused || isSeeked);
+    const hasChanged = newUri && (
+        newUri !== this.lastSyncedUri ||
+        newPaused !== this.lastSyncedPaused ||
+        newShuffle !== this.lastSyncedShuffle ||
+        newContextUri !== this.lastSyncedContextUri ||
+        isSeeked
+    );
 
     if (hasChanged) {
       // Don't emit on the very first poll to avoid blasting current state upon app load
       if (!this.isFirstPoll) {
         this.syncAction$.next({
           command: isSeeked ? 'seek' : 'sync',
-          data: { uri: newUri, position: newPosition, paused: newPaused, contextUri: newContextUri }
+          data: {
+              uri: newUri,
+              position: newPosition,
+              paused: newPaused,
+              contextUri: newContextUri,
+              shuffle: newShuffle
+          }
         });
       }
       this.lastSyncedUri = newUri;
       this.lastSyncedPaused = newPaused;
       this.lastSyncedPosition = newPosition;
+      this.lastSyncedShuffle = newShuffle;
+      this.lastSyncedContextUri = newContextUri;
       this.lastCheckTime = now;
     } else if (newUri) {
         // Keep tracking position even if no change emitted
@@ -302,7 +351,8 @@ export class SpotifyService {
           paused: state.paused,
           position: state.position,
           track_window: state.track_window,
-          context: state.context
+          context: state.context,
+          shuffle_state: state.shuffle
       };
       this.checkAndEmitSync(normalizedState);
 
@@ -432,15 +482,18 @@ export class SpotifyService {
       setTimeout(() => this.loadQueue(), 1000);
 
       const effectiveUri = uri || this.currentTrack$.value?.uri;
-      this.lastSyncedUri = effectiveUri;
-      this.lastSyncedPaused = false;
-      this.lastSyncedPosition = positionMs;
-      this.lastCheckTime = Date.now();
+      this.updateSyncCache(effectiveUri, false, positionMs, this.shuffleState$.value, contextUri || this.lastSyncedContextUri);
 
       if (!skipSync) {
         this.syncAction$.next({
           command: 'play',
-          data: { uri: effectiveUri, position: positionMs, paused: false, contextUri: contextUri || (effectiveUri?.includes(':track:') ? undefined : effectiveUri) }
+          data: {
+              uri: effectiveUri,
+              position: positionMs,
+              paused: false,
+              contextUri: contextUri || (effectiveUri?.includes(':track:') ? undefined : effectiveUri),
+              shuffle: this.shuffleState$.value
+          }
         });
       }
 
@@ -452,22 +505,27 @@ export class SpotifyService {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId || !this.accessToken) return;
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
-    const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/pause?device_id=${targetId}`, {}, { headers }));
+    try {
+        const res = await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/pause?device_id=${targetId}`, {}, { headers }));
 
-    this.lastSyncedPaused = true;
-    const state = await this.getPlaybackState();
-    this.lastSyncedPosition = state?.position || 0;
-    this.lastCheckTime = Date.now();
+        const state = await this.getPlaybackState();
+        const currentUri = state?.track_window?.current_track?.uri || this.lastSyncedUri;
+        this.updateSyncCache(currentUri, true, state?.position || 0, state?.shuffle_state ?? this.lastSyncedShuffle, state?.context?.uri || this.lastSyncedContextUri);
 
-    if (!skipSync) {
-        this.lastSyncedUri = state?.track_window?.current_track?.uri;
-        this.syncAction$.next({
-            command: 'pause',
-            data: { uri: this.lastSyncedUri, position: this.lastSyncedPosition, paused: true, contextUri: state?.context?.uri }
-        });
-    }
-
-    return res;
+        if (!skipSync) {
+            this.syncAction$.next({
+                command: 'pause',
+                data: {
+                    uri: this.lastSyncedUri,
+                    position: this.lastSyncedPosition,
+                    paused: true,
+                    contextUri: this.lastSyncedContextUri,
+                    shuffle: this.lastSyncedShuffle
+                }
+            });
+        }
+        return res;
+    } catch (err) { return null; }
   }
 
   async seek(positionMs: number, skipSync: boolean = false) {
@@ -484,7 +542,13 @@ export class SpotifyService {
         const state = await this.getPlaybackState();
         this.syncAction$.next({
           command: 'seek',
-          data: { uri: state?.track_window?.current_track?.uri, position: positionMs, paused: state?.paused, contextUri: state?.context?.uri }
+          data: {
+              uri: state?.track_window?.current_track?.uri,
+              position: positionMs,
+              paused: state?.paused,
+              contextUri: state?.context?.uri,
+              shuffle: state?.shuffle_state ?? this.lastSyncedShuffle
+          }
         });
       }
     } catch (err) {}
@@ -494,56 +558,80 @@ export class SpotifyService {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId || !this.accessToken) return;
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
-    const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/next?device_id=${targetId}`, {}, { headers }));
-    setTimeout(() => this.loadQueue(), 1000);
+    try {
+        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/next?device_id=${targetId}`, {}, { headers }));
+        setTimeout(() => this.loadQueue(), 1000);
 
-    setTimeout(async () => {
-        const state = await this.getPlaybackState();
-        this.lastSyncedUri = state?.track_window?.current_track?.uri;
-        this.lastSyncedPaused = state?.paused;
-        this.lastSyncedPosition = state?.position || 0;
-        this.lastCheckTime = Date.now();
-        if (!skipSync) {
-            this.syncAction$.next({
-                command: 'next',
-                data: { uri: this.lastSyncedUri, position: 0, paused: false, contextUri: state?.context?.uri }
-            });
-        }
-    }, 500);
+        setTimeout(async () => {
+            const state = await this.getPlaybackState();
+            if (state) {
+                const trackUri = state.track_window?.current_track?.uri;
+                this.updateSyncCache(trackUri, state.paused, state.position, state.shuffle_state, state.context?.uri);
+                if (!skipSync) {
+                    this.syncAction$.next({
+                        command: 'next',
+                        data: { uri: trackUri, position: 0, paused: false, contextUri: state.context?.uri, shuffle: state.shuffle_state }
+                    });
+                }
+            }
+        }, 1500);
 
-    return res;
+        return res;
+    } catch (err) { return null; }
   }
 
   async previousTrack(skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId || !this.accessToken) return;
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
-    const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/previous?device_id=${targetId}`, {}, { headers }));
-    setTimeout(() => this.loadQueue(), 1000);
+    try {
+        const res = await firstValueFrom(this.http.post(`${this.API_BASE}/me/player/previous?device_id=${targetId}`, {}, { headers }));
+        setTimeout(() => this.loadQueue(), 1000);
 
-    setTimeout(async () => {
-        const state = await this.getPlaybackState();
-        this.lastSyncedUri = state?.track_window?.current_track?.uri;
-        this.lastSyncedPaused = state?.paused;
-        this.lastSyncedPosition = state?.position || 0;
-        this.lastCheckTime = Date.now();
-        if (!skipSync) {
-            this.syncAction$.next({
-                command: 'previous',
-                data: { uri: this.lastSyncedUri, position: 0, paused: false, contextUri: state?.context?.uri }
-            });
-        }
-    }, 500);
+        setTimeout(async () => {
+            const state = await this.getPlaybackState();
+            if (state) {
+                const trackUri = state.track_window?.current_track?.uri;
+                this.updateSyncCache(trackUri, state.paused, state.position, state.shuffle_state, state.context?.uri);
+                if (!skipSync) {
+                    this.syncAction$.next({
+                        command: 'previous',
+                        data: { uri: trackUri, position: 0, paused: false, contextUri: state.context?.uri, shuffle: state.shuffle_state }
+                    });
+                }
+            }
+        }, 1500);
 
-    return res;
+        return res;
+    } catch (err) { return null; }
   }
 
-  async toggleShuffle(state: boolean) {
+  async toggleShuffle(state: boolean, skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId || !this.accessToken) return;
     const headers = new HttpHeaders().set('Authorization', `Bearer ${this.accessToken}`);
-    await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/shuffle?state=${state}&device_id=${targetId}`, {}, { headers }));
-    this.shuffleState$.next(state);
+    try {
+        await firstValueFrom(this.http.put(`${this.API_BASE}/me/player/shuffle?state=${state}&device_id=${targetId}`, {}, { headers }));
+
+        this.prevShuffle = this.lastSyncedShuffle;
+        this.lastSyncedShuffle = state;
+        this.lastActionTime = Date.now();
+        this.shuffleState$.next(state);
+
+        if (!skipSync) {
+            const playback = await this.getPlaybackState();
+            this.syncAction$.next({
+              command: 'sync',
+              data: {
+                  uri: playback?.track_window?.current_track?.uri,
+                  position: playback?.position || 0,
+                  paused: playback?.paused ?? true,
+                  contextUri: playback?.context?.uri,
+                  shuffle: state
+              }
+            });
+        }
+    } catch (err) {}
   }
 
   async setVolume(v: number) {

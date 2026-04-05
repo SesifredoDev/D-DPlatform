@@ -260,4 +260,15 @@
     </div>
   </div>
 
+  <!-- BROADCAST OVERLAY -->
+  <div class="broadcast-overlay" *ngIf="activeOverlayImage">
+    <div class="broadcast-image-container glass">
+      <img [src]="activeOverlayImage" alt="Broadcast Image">
+      <button class="btn-dismiss" (click)="dismissOverlay()">
+        <mat-icon>close</mat-icon>
+        <span>Dismiss</span>
+      </button>
+    </div>
+  </div>
+
 </div>

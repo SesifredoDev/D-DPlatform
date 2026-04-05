@@ -19,6 +19,7 @@ export class Video {
   public themeSync$ = new Subject<Theme>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
   public spotifyStateRequest$ = new Subject<{ from: string }>();
+  public overlayImage$ = new Subject<string | null>();
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
@@ -72,6 +73,8 @@ export class Video {
               roomId: data.roomId,
               hostId: data.command === 'start' ? participant?.identity || null : null
             });
+          } else if (data.type === 'overlay-image') {
+            this.overlayImage$.next(data.url);
           }
         } catch (e) {
           console.error('Failed to parse data message', e);
@@ -175,6 +178,16 @@ export class Video {
     } else {
         this.vttSession$.next({ active: false, roomId: null, hostId: null });
     }
+  }
+
+  broadcastOverlayImage(url: string | null) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'overlay-image',
+      url
+    }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+    this.overlayImage$.next(url);
   }
 
   private emitParticipants() {
