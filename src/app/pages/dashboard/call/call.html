@@ -56,7 +56,7 @@
       <div class="video-box local" [class.video-hidden]="isVideoOff">
         <video #localVideo autoplay playsinline [muted]="true"></video>
         <div class="video-placeholder" *ngIf="isVideoOff">
-          <div class="user-avatar">{{ character.name?.charAt(0) || 'Y' }}</div>
+          <div class="user-avatar">{{ (isDmMode ? dmCharacter : character).name?.charAt(0) || 'Y' }}</div>
         </div>
 
         <!-- RPG Unit Frame Overlay -->
@@ -65,25 +65,25 @@
           <!-- Stats Hover Card (Glass) -->
           <div class="character-hover-card glass">
             <div class="hover-header">
-              <strong>{{ character.name }}</strong>
-              <span>{{ character.race }}</span>
+              <strong>{{ (isDmMode ? dmCharacter : character).name }}</strong>
+              <span>{{ (isDmMode ? dmCharacter : character).race }}</span>
             </div>
             <div class="hover-section">
-              @for (c of character.classes; track c) {
+              @for (c of (isDmMode ? dmCharacter : character).classes; track c) {
                 <div class="class-line">Lvl {{ c.level }} {{ c.className }}</div>
               }
             </div>
             <div class="hover-stats">
-              <div class="stat-pill"><span>STR</span><strong>{{ character.baseStats.strength }}</strong></div>
-              <div class="stat-pill"><span>DEX</span><strong>{{ character.baseStats.dexterity }}</strong></div>
-              <div class="stat-pill"><span>CON</span><strong>{{ character.baseStats.constitution }}</strong></div>
-              <div class="stat-pill"><span>INT</span><strong>{{ character.baseStats.intelligence }}</strong></div>
-              <div class="stat-pill"><span>WIS</span><strong>{{ character.baseStats.wisdom }}</strong></div>
-              <div class="stat-pill"><span>CHA</span><strong>{{ character.baseStats.charisma }}</strong></div>
+              <div class="stat-pill"><span>STR</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.strength }}</strong></div>
+              <div class="stat-pill"><span>DEX</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.dexterity }}</strong></div>
+              <div class="stat-pill"><span>CON</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.constitution }}</strong></div>
+              <div class="stat-pill"><span>INT</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.intelligence }}</strong></div>
+              <div class="stat-pill"><span>WIS</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.wisdom }}</strong></div>
+              <div class="stat-pill"><span>CHA</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.charisma }}</strong></div>
             </div>
-            <div class="hover-footer" *ngIf="character.ac">
+            <div class="hover-footer" *ngIf="(isDmMode ? dmCharacter : character).ac">
               <mat-icon>shield</mat-icon>
-              <span>Armor Class: {{ character.ac }}</span>
+              <span>Armor Class: {{ (isDmMode ? dmCharacter : character).ac }}</span>
             </div>
           </div>
 
@@ -91,22 +91,29 @@
           <div class="unit-frame">
             <div class="portrait-container">
               <div class="portrait-inner">
-                <img [src]="character.icon || 'https://www.gravatar.com/avatar/'+character._id+'?d=identicon'" class="char-portrait">
+                <ng-container *ngIf="isDmMode">
+                  <div class="dm-portrait">
+                    <mat-icon>dvr</mat-icon>
+                  </div>
+                </ng-container>
+                <ng-container *ngIf="!isDmMode">
+                  <img [src]="character.icon || 'https://www.gravatar.com/avatar/'+character._id+'?d=identicon'" class="char-portrait">
+                </ng-container>
               </div>
-              <div class="level-badge" *ngIf="character.classes?.length">
-                {{ character.classes[0].level }}
+              <div class="level-badge" *ngIf="(isDmMode ? dmCharacter : character).classes?.length">
+                {{ (isDmMode ? dmCharacter : character).classes[0].level }}
               </div>
             </div>
 
             <div class="unit-info">
               <div class="name-row">
-                <span class="char-name">{{ character.name || 'You' }}</span>
+                <span class="char-name">{{ (isDmMode ? dmCharacter : character).name || 'You' }}</span>
                 @if (isAudioMuted) {
                   <mat-icon class="mute-icon">mic_off</mat-icon>
                 }
               </div>
               <div class="sub-row">
-                <span class="char-race">{{ character.race }}</span>
+                <span class="char-race">{{ (isDmMode ? dmCharacter : character).race }}</span>
               </div>
               <!-- Decorative bars for RPG feel -->
               <div class="status-bars">
@@ -155,7 +162,14 @@
             <div class="unit-frame">
               <div class="portrait-container">
                 <div class="portrait-inner">
-                  <img [src]="remote.userData.icon || 'https://www.gravatar.com/avatar/'+remote.userData._id+'?d=identicon'" class="char-portrait">
+                  <ng-container *ngIf="remote.userData.name === 'DM'">
+                      <div class="dm-portrait">
+                        <mat-icon>dvr</mat-icon>
+                      </div>
+                  </ng-container>
+                  <ng-container *ngIf="remote.userData.name !== 'DM'">
+                    <img [src]="remote.userData.icon || 'https://www.gravatar.com/avatar/'+remote.userData._id+'?d=identicon'" class="char-portrait">
+                  </ng-container>
                 </div>
                 <div class="level-badge" *ngIf="remote.userData.classes?.length">
                   {{ remote.userData.classes[0].level }}
@@ -194,7 +208,13 @@
           <button (click)="toggleVideo()" [class.active]="isVideoOff" class="btn-action" [matTooltip]="isVideoOff ? 'Start Video' : 'Stop Video'">
             <mat-icon>{{ isVideoOff ? 'videocam_off' : 'videocam' }}</mat-icon>
           </button>
-          <button *ngIf="vttSession.active && vttSession.hostId !== character.name" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
+
+          <!-- DM Mode Toggle -->
+          <button *ngIf="isServerOwner" (click)="toggleDmMode()" class="btn-action btn-dm" [class.active]="isDmMode" matTooltip="DM Mode">
+            <mat-icon>dvr</mat-icon>
+          </button>
+
+          <button *ngIf="vttSession.active && vttSession.hostId !== (isDmMode ? dmCharacter : character).name" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
             <mat-icon>group_add</mat-icon>
           </button>
 

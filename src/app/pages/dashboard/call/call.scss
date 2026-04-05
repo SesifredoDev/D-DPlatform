@@ -1,9 +1,6 @@
 /* ================================
    VIDEO CALL (MODERN GLASS UI)
 ================================ */
-/* ================================
-   VIDEO CALL (MODERN GLASS UI)
-================================ */
 
 .video-container {
   height: 100%;
@@ -239,6 +236,17 @@
     background: #2a2a2a;
 
     .char-portrait { width: 100%; height: 100%; object-fit: cover; }
+
+    .dm-portrait {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1a1a 0%, #333 100%);
+      color: var(--brand-blue);
+      mat-icon { font-size: 28px; width: 28px; height: 28px; }
+    }
   }
 
   .level-badge {
@@ -403,6 +411,13 @@
   &:hover { background: rgba(255,255,255,0.1); color: white; transform: translateY(-2px); }
   &.active { background: var(--brand-blue); color: white; }
   &.btn-danger { background: var(--danger); color: white; &:hover { background: #c03537; } }
+  &.btn-dm {
+    &.active {
+      background: #8b5cf6; // Purple for DM mode
+      color: white;
+      box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+    }
+  }
 }
 
 /* --- THEME PICKER OVERLAY (REFINED) --- */

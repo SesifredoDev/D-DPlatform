@@ -26,6 +26,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Theme, ThemeOption, ThemeService } from '../../../shared/services/theme/theme.service';
 import { MatMenuModule } from '@angular/material/menu';
+import { ServerService } from '../../../shared/services/server/server'; // Import ServerService
+import { IServer } from '../../../shared/models/server/server.model'; // Import IServer
 
 @Component({
   selector: 'app-video-call',
@@ -36,7 +38,7 @@ import { MatMenuModule } from '@angular/material/menu';
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
-  @Input() character!: ICharacter;
+  @Input() character!: ICharacter; // The currently selected character from the parent
 
   @Output() hostVtt = new EventEmitter<string>();
   @Output() joinVtt = new EventEmitter<string>();
@@ -77,6 +79,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Broadcast state
   activeOverlayImage: string | null = null;
 
+  // DM Mode State
+  isServerOwner: boolean = false;
+  isDmMode: boolean = false;
+  dmCharacter: ICharacter = {
+    _id: 'dm-character-id',
+    ownerId: '', // Will be set from the input character's ownerId
+    servers: [],
+    name: 'DM',
+    race: 'Dungeon Master',
+    icon: null, // Using a Material Icon directly in HTML
+    baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
+    classes: [{ className: 'Dungeon Master', level: 20 }]
+  };
+
   private streamSub!: Subscription;
   private spotifySyncSub!: Subscription;
   private spotifyActionSub!: Subscription;
@@ -84,6 +100,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private themeSyncSub!: Subscription;
   private vttSub!: Subscription;
   private overlaySub!: Subscription;
+  private serverDetailsSub!: Subscription; // Subscription for server details
 
   private isComponentDestroying = false;
 
@@ -93,7 +110,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     public spotify: SpotifyService,
     private route: ActivatedRoute,
     private cdr: ChangeDetectorRef,
-    public themeService: ThemeService
+    public themeService: ThemeService,
+    private serverService: ServerService // Inject ServerService
   ) {
     this.availableThemes = this.themeService.availableThemes;
   }
@@ -237,6 +255,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.activeOverlayImage = url;
       this.cdr.detectChanges();
     });
+
+    // Subscribe to server details to determine ownership
+    this.serverDetailsSub = this.serverService.getServerDetailsObservable().subscribe(server => {
+      if (server && this.character && this.character.ownerId) {
+        this.isServerOwner = server.ownerId === this.character.ownerId;
+      } else {
+        this.isServerOwner = false;
+      }
+      this.cdr.detectChanges(); // Update UI if ownership changes
+    });
+
+    // Ensure server details are loaded for the current channel
+    if (this.channelId) {
+      await this.serverService.getServerDetails(this.channelId);
+    }
   }
 
   async loadDevices() {
@@ -320,9 +353,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
       this.localStream.getVideoTracks().forEach(t => t.enabled = this.isVideoOff);
 
-      // 4. Initialize the video service
-      this.videoService.updateUserData(this.channelId, this.character);
-      await this.videoService.initVideoCall(this.channelId, this.character);
+      // 4. Initialize the video service with the currently active character (DM or regular)
+      const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
+      this.videoService.updateUserData(this.channelId, characterToBroadcast);
+      await this.videoService.initVideoCall(this.channelId, characterToBroadcast);
 
       // 5. Start broadcasting
       await this.videoService.startProducing(this.localStream);
@@ -360,6 +394,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.remoteStreams = [];
     this.showSpotify = false;
     this.stopVtt.emit(this.channelId);
+    this.isDmMode = false; // Reset DM mode on leaving call
     if (!this.isComponentDestroying) {
         await this.startPreview();
     }
@@ -396,9 +431,32 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async ngOnChanges(changes: SimpleChanges) {
-    const currentCharacter = changes['character']?.currentValue;
-    if (currentCharacter && this.channelId && this.localStream) {
-      this.videoService.updateUserData(this.channelId, currentCharacter);
+    const characterChange = changes['character'];
+    const channelIdChange = changes['channelId'];
+
+    // If character input changes
+    if (characterChange && characterChange.currentValue) {
+      const newCharacter: ICharacter = characterChange.currentValue;
+
+      // Update dmCharacter's ownerId whenever the main character's ownerId is available/changes
+      if (newCharacter.ownerId && this.dmCharacter.ownerId !== newCharacter.ownerId) {
+        this.dmCharacter.ownerId = newCharacter.ownerId;
+        // Re-evaluate server ownership if character's ownerId changes
+        const currentServer = this.serverService.getCurrentServer();
+        if (currentServer) {
+          this.isServerOwner = currentServer.ownerId === newCharacter.ownerId;
+        }
+      }
+
+      // If not in DM mode, update video service with the new character
+      if (!this.isDmMode && this.channelId) {
+        this.videoService.updateUserData(this.channelId, newCharacter);
+      }
+    }
+
+    // If channelId changes, fetch new server details
+    if (channelIdChange && channelIdChange.currentValue) {
+      await this.serverService.getServerDetails(channelIdChange.currentValue);
     }
   }
 
@@ -426,6 +484,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  toggleDmMode() {
+    if (!this.isServerOwner) return; // Only server owner can toggle DM mode
+
+    this.isDmMode = !this.isDmMode;
+    const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
+    this.videoService.updateUserData(this.channelId, characterToBroadcast);
+    this.cdr.detectChanges(); // Force UI update
+  }
+
   @HostListener('window:beforeunload')
   async handleBeforeUnload() {
     this.isComponentDestroying = true;
@@ -442,6 +509,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
     if (this.overlaySub) this.overlaySub.unsubscribe();
+    if (this.serverDetailsSub) this.serverDetailsSub.unsubscribe(); // Unsubscribe from server details
 
     // If the videoService is still connected to this channel, it means the tab is being moved,
     // so we don't want to disconnect the call.
