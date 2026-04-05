@@ -26,6 +26,8 @@ export interface MessageData {
   attachments: Attachment[];
   reactions: Reaction[];
   replyTo?: any;
+  isWhisper?: boolean;
+  recipient?: any;
   createdAt: string;
 }
 
@@ -45,6 +47,9 @@ export class Message {
       const channelId = message.channel;
       const subject = this.channelMessages.get(channelId);
       if (subject) {
+        // Logic to only show whispers if intended for current user or they are the author
+        // Actually the backend should probably handle the emit logic better, but for now
+        // let's assume we might receive it and the UI will filter or it's already filtered by backend
         subject.next([...subject.value, message]);
       }
     });
@@ -92,12 +97,14 @@ export class Message {
     return this.http.get<MessageData[]>(`${environment.apiURL}message/${channelId}`);
   }
 
-  sendMessage(channelId: string, content: string, characterId?: string, attachments?: Attachment[], replyTo?: string) {
+  sendMessage(channelId: string, content: string, characterId?: string, attachments?: Attachment[], replyTo?: string, isWhisper?: boolean, recipientId?: string) {
     return this.http.post<MessageData>(`${environment.apiURL}message/${channelId}`, {
       content,
       characterId,
       attachments,
-      replyTo
+      replyTo,
+      isWhisper,
+      recipientId
     });
   }
 

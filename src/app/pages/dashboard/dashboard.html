@@ -1,4 +1,4 @@
-<app-side-panel class="sidebar"></app-side-panel>
+<app-side-panel class="sidebar" (whisperInitiated)="onWhisperInitiated($event)"></app-side-panel>
 
 <main class="editor-area" [class.resizing-active]="isResizing" cdkDropListGroup>
 
@@ -31,7 +31,7 @@
             <app-video-call [channelId]="tab.id" [character]="activeCharacter"
                             (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
           } @else if (tab.type === 'text') {
-            <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
+            <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID" [whisperRecipientInput]="tab.whisperRecipient"></app-text-channel>
           } @else if(tab.type ==='character'){
             <app-character-viewer [character]="tab.character"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
@@ -80,7 +80,7 @@
               <app-video-call [channelId]="tab.id" [character]="activeCharacter"
                               (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
             } @else if (tab.type === 'text') {
-              <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
+              <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID" [whisperRecipientInput]="tab.whisperRecipient"></app-text-channel>
             } @else if(tab.type ==='character'){
               <app-character-viewer [character]="tab.character"></app-character-viewer>
             } @else if (tab.type === 'vtt'){

@@ -198,4 +198,12 @@ export class Dashboard implements OnInit {
       maxWidth: '90vw'
     });
   }
+
+  onWhisperInitiated(member: any) {
+    // Find active text channel
+    const activeTextTab = [...this.leftTabs, ...this.rightTabs].find(t => t.active && t.type === 'text');
+    if (activeTextTab) {
+      this.tabService.updateTab(activeTextTab.id, { whisperRecipient: member });
+    }
+  }
 }

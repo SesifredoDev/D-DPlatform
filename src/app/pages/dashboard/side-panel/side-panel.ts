@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, NgZone, OnInit} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, NgZone, OnInit, Output} from '@angular/core';
 
 import {MatCardModule} from '@angular/material/card';
 
@@ -48,6 +48,8 @@ import {VttSync} from '../../../shared/services/vttsync/vttsync';
 })
 
 export class SidePanel implements AfterViewInit {
+
+  @Output() whisperInitiated = new EventEmitter<any>();
 
   characters: ICharacter[] = [];
   selectedCharacter: ICharacter | null = null;
@@ -266,6 +268,10 @@ export class SidePanel implements AfterViewInit {
     } else {
       console.error('VTT Engine not found. Is the map tab open?');
     }
+  }
+
+  whisperUser(member: any) {
+    this.whisperInitiated.emit(member);
   }
 
 

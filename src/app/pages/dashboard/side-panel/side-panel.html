@@ -98,7 +98,7 @@
 
         @for (member of group.members; track member) {
 
-          <div class="member-row">
+          <div class="member-row" [matMenuTriggerFor]="memberMenu">
 
             <img
               class="member-avatar"
@@ -118,8 +118,8 @@
 
                   @for (char of member.characters; track char) {
 
-                    <div class="character-chip" (click)="openCharacter(char)"
-                         (contextmenu)="onRightClickCharacter($event, char)">>
+                    <div class="character-chip" (click)="openCharacter(char); $event.stopPropagation()"
+                         (contextmenu)="onRightClickCharacter($event, char)">
 
                       <img
                         class="char-icon"
@@ -138,6 +138,13 @@
               }
 
             </div>
+
+            <mat-menu #memberMenu="matMenu">
+               <button mat-menu-item (click)="whisperUser(member)">
+                 <mat-icon>visibility_off</mat-icon>
+                 <span>Whisper</span>
+               </button>
+            </mat-menu>
 
           </div>
 

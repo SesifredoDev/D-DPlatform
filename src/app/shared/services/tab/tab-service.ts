@@ -10,6 +10,7 @@ export interface Tab {
   pane: 'left' | 'right';
   active: boolean;
   character?: ICharacter;
+  whisperRecipient?: any;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -30,7 +31,9 @@ export class TabService {
       const newTab: Tab = { id, title, type, pane, active: true, character };
       // Deactivate others in the same pane
       const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
-      this.tabs.next([...updated, newTab]);
+      const res = [...updated.map(t=> (t.id === id ? {...t, active: true} : t))];
+      if(!existing) res.push(newTab);
+      this.tabs.next(res);
     }
   }
 
@@ -62,5 +65,11 @@ export class TabService {
 
   closeAllTabs() {
     this.tabs.next([]);
+  }
+
+  updateTab(id: string, data: Partial<Tab>) {
+    const current = this.tabs.value;
+    const updated = current.map(t => t.id === id ? { ...t, ...data } : t);
+    this.tabs.next(updated);
   }
 }

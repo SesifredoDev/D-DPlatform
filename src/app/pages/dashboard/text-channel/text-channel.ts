@@ -5,7 +5,7 @@ import {
   SimpleChanges,
   OnDestroy,
   ViewChild,
-  ElementRef
+  ElementRef, OnInit
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { Message, MessageData, Reaction, Attachment } from '../../../shared/services/message/message';
@@ -23,6 +23,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../environments/environment';
+import { ServerService } from '../../../shared/services/server/server';
+import { IServer } from '../../../shared/models/server/server.model';
 
 @Component({
   selector: 'app-text-channel',
@@ -48,9 +50,10 @@ import { environment } from '../../../../environments/environment';
   ],
   providers: [provideMarkdown()]
 })
-export class TextChannel implements OnChanges, OnDestroy {
+export class TextChannel implements OnChanges, OnDestroy, OnInit {
   @Input() channelId!: string;
   @Input() currentCharacterId?: string;
+  @Input() whisperRecipientInput?: any;
 
   private isAtBottom = true;
   private justOpened = true;
@@ -65,21 +68,39 @@ export class TextChannel implements OnChanges, OnDestroy {
   attachments: Attachment[] = [];
   isUploading = false;
 
+  // Whisper state
+  isWhisperMode = false;
+  whisperRecipient: any = null;
+  serverOwner: any = null;
+
   private msgSub?: Subscription;
+  private serverSub?: Subscription;
 
   @ViewChild('messageContainer') container!: ElementRef;
 
   constructor(
     private messageService: Message,
     private userService: UserService,
+    private serverService: ServerService,
     private http: HttpClient
   ) {
     this.userService.getMe().subscribe(user => this.currentUserId = user._id);
   }
 
+  ngOnInit() {
+    this.serverSub = this.serverService.getServerDetailsObservable().subscribe(server => {
+      if (server) {
+        this.serverOwner = server.owner;
+      }
+    });
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['channelId'] && this.channelId) {
       this.loadChannel();
+    }
+    if (changes['whisperRecipientInput'] && this.whisperRecipientInput) {
+      this.setWhisperRecipient(this.whisperRecipientInput);
     }
   }
 
@@ -103,13 +124,18 @@ export class TextChannel implements OnChanges, OnDestroy {
   sendMessage() {
     if (!this.newMessageContent.trim() && this.attachments.length === 0) return;
 
+    // Default recipient is the owner if whisper mode is on and no recipient is selected
+    const recipientId = this.isWhisperMode ? (this.whisperRecipient?._id || (typeof this.serverOwner === 'string' ? this.serverOwner : this.serverOwner?._id)) : null;
+
     this.messageService
       .sendMessage(
         this.channelId,
         this.newMessageContent,
         this.currentCharacterId,
         this.attachments,
-        this.replyingTo?._id
+        this.replyingTo?._id,
+        this.isWhisperMode,
+        recipientId
       )
       .subscribe({
         next: () => {
@@ -209,8 +235,21 @@ export class TextChannel implements OnChanges, OnDestroy {
     this.attachments.splice(index, 1);
   }
 
+  toggleWhisperMode() {
+    this.isWhisperMode = !this.isWhisperMode;
+    if (!this.isWhisperMode) {
+      this.whisperRecipient = null;
+    }
+  }
+
+  setWhisperRecipient(member: any) {
+    this.whisperRecipient = member.user;
+    this.isWhisperMode = true;
+  }
+
   ngOnDestroy() {
     this.msgSub?.unsubscribe();
+    this.serverSub?.unsubscribe();
     this.messageService.leaveChannel(this.channelId);
   }
 }

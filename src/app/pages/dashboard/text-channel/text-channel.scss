@@ -67,6 +67,14 @@
 .message-group {
   margin-bottom: 16px;
   position: relative;
+
+  &.whisper {
+    .message-item {
+      background: rgba(255, 171, 0, 0.05);
+      border-left: 3px solid #ffab00;
+      border-radius: 0 var(--radius-m) var(--radius-m) 0;
+    }
+  }
 }
 
 .reply-context {
@@ -154,6 +162,25 @@
     letter-spacing: -0.2px;
 
     &:hover { color: var(--brand-blue); text-decoration: underline; }
+  }
+
+  .whisper-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffab00;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255, 171, 0, 0.1);
+    padding: 1px 6px;
+    border-radius: 4px;
+
+    mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+    }
   }
 
   .timestamp {
@@ -290,7 +317,7 @@
   z-index: 5;
 }
 
-.reply-preview {
+.reply-preview, .whisper-preview {
   background: rgba(43, 45, 49, 0.8);
   border-top-left-radius: 12px;
   border-top-right-radius: 12px;
@@ -306,6 +333,19 @@
   button { width: 24px; height: 24px; line-height: 24px; mat-icon { font-size: 16px; width: 16px; height: 16px; } }
 }
 
+.whisper-preview {
+  background: rgba(255, 171, 0, 0.15);
+  color: #ffab00;
+  border-color: rgba(255, 171, 0, 0.3);
+
+  mat-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    margin-right: 8px;
+  }
+}
+
 .input-box {
   background: rgba(43, 45, 49, 0.5);
   backdrop-filter: blur(12px);
@@ -317,12 +357,19 @@
   transition: all 0.2s ease;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 
-  &.has-reply { border-top-left-radius: 0; border-top-right-radius: 0; }
+  &.has-reply, &.whisper-mode { border-top-left-radius: 0; border-top-right-radius: 0; }
+  &.whisper-mode {
+    border-color: rgba(255, 171, 0, 0.3);
+  }
 
   &:focus-within {
     background: rgba(43, 45, 49, 0.7);
     border-color: var(--brand-blue-alpha);
     box-shadow: 0 4px 20px rgba(114, 137, 218, 0.15);
+
+    &.whisper-mode {
+      border-color: #ffab00;
+    }
   }
 
   textarea {

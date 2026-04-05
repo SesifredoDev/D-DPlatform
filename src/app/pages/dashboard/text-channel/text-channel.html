@@ -9,7 +9,7 @@
   <div class="messages-viewport">
     <div #messageContainer class="messages-scroller" (scroll)="onScroll()">
       @for (msg of messages; track msg._id; let i = $index) {
-        <div class="message-group" [id]="msg._id">
+        <div class="message-group" [id]="msg._id" [class.whisper]="msg.isWhisper">
 
           @if(msg.replyTo) {
             <div class="reply-context">
@@ -31,6 +31,12 @@
             <div class="content-column">
               <div class="message-meta">
                 <span class="author-name">{{ msg.character?.name || msg.author?.username }}</span>
+                @if(msg.isWhisper) {
+                  <span class="whisper-label">
+                    <mat-icon>visibility_off</mat-icon>
+                    Whisper to {{ msg.recipient?.username || 'the DM' }}
+                  </span>
+                }
                 <span class="timestamp">{{ msg.createdAt | date:'HH:mm' }}</span>
               </div>
 
@@ -117,10 +123,19 @@
         <button mat-icon-button (click)="cancelReply()"><mat-icon>close</mat-icon></button>
       </div>
     }
-    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
+
+    @if(isWhisperMode) {
+      <div class="whisper-preview">
+        <mat-icon>visibility_off</mat-icon>
+        <span>Whispering to <strong>{{ whisperRecipient?.username || 'the DM' }}</strong></span>
+        <button mat-icon-button (click)="toggleWhisperMode()"><mat-icon>close</mat-icon></button>
+      </div>
+    }
+
+    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0" [class.whisper-mode]="isWhisperMode">
       <textarea
         #messageInput
-        placeholder="Scribe a message to the chronicle..."
+        [placeholder]="isWhisperMode ? 'Scribe a whisper...' : 'Scribe a message to the chronicle...'"
         [(ngModel)]="newMessageContent"
         (keydown)="handleKeyDown($event)"
         cdkTextareaAutosize
@@ -134,6 +149,10 @@
           <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
         </button>
         <input type="file" #fileInput style="display: none" (change)="onFileSelected($event)">
+
+        <button mat-icon-button class="action-btn" (click)="toggleWhisperMode()" [color]="isWhisperMode ? 'warn' : null" matTooltip="Toggle Whisper to DM">
+          <mat-icon>{{ isWhisperMode ? 'visibility_off' : 'visibility' }}</mat-icon>
+        </button>
 
         <button
           mat-icon-button
