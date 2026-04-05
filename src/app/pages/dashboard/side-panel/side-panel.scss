@@ -143,6 +143,59 @@
 }
 
 /* =================================
+   DM WHISPER BUTTON
+================================= */
+.dm-whisper-section {
+  padding: var(--space-s) var(--space-m);
+  border-bottom: 1px solid var(--surface-variant);
+  background: rgba(255, 171, 0, 0.05); // Subtle yellow background
+}
+
+.dm-whisper-btn {
+  width: 100%;
+  height: 44px !important;
+  border-radius: var(--radius-l) !important;
+  background: var(--surface-light) !important;
+  border: 1px solid var(--outline) !important;
+  color: #ffab00 !important; // Yellow text for whisper
+  transition: all var(--transition-standard) !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+
+  &:hover {
+    background: rgba(255, 171, 0, 0.15) !important;
+    border-color: #ffab00 !important;
+    transform: translateY(-1px);
+  }
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+
+  // Badge styling
+  ::ng-deep .mat-badge-content {
+    background-color: var(--mat-badge-background-color, #ffab00); // Use whisper yellow for badge
+    color: var(--mat-badge-text-color, white);
+    font-size: 10px;
+    line-height: 16px;
+    height: 16px;
+    width: 16px;
+    min-width: 16px;
+    padding: 0;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+  }
+}
+
+
+/* =================================
    CHANNELS (CLEAN)
 ================================= */
 
@@ -209,6 +262,19 @@
   font-size: 18px !important;
   width: 18px !important;
   height: 18px !important;
+}
+
+.whisper-channel {
+  color: #ffab00 !important;
+  .channel-icon {
+    color: #ffab00 !important;
+  }
+  &.active-channel {
+    background: rgba(255, 171, 0, 0.15) !important;
+    &::before {
+      background: #ffab00;
+    }
+  }
 }
 
 /* =================================
