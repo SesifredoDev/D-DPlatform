@@ -113,6 +113,13 @@
       </button>
     </div>
 
+    <!-- Turn Order (DM Only Initial Control) -->
+    <div class="tool-group" *ngIf="syncService.isHosting">
+      <button mat-icon-button (click)="activateTurnOrder()" *ngIf="!(turnOrderState$ | async)?.isActive" matTooltip="Activate Turn Order">
+        <mat-icon>format_list_numbered</mat-icon>
+      </button>
+    </div>
+
     <!-- Session Management -->
     <div class="tool-group">
       <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" matTooltip="Host Session">
@@ -122,7 +129,7 @@
         <mat-icon>stop_circle</mat-icon>
       </button>
       <!-- Host Takeover Button -->
-      <button mat-flat-button color="accent" *ngIf="showHostTakeover" (click)="startHostingSession()" class="takeover-btn">
+      <button mat-button color="accent" *ngIf="showHostTakeover" (click)="startHostingSession()" class="takeover-btn">
         <mat-icon>stadium</mat-icon>
         Assume Hosting
       </button>
@@ -139,6 +146,40 @@
 </div>
 
 <div #vttContainer id="vtt-container"></div>
+
+<!-- Turn Order Display -->
+<div class="turn-order-overlay glass" *ngIf="(turnOrderState$ | async) as turnOrder" [hidden]="!turnOrder.isActive">
+  <div class="turn-order-header">
+    <h3>Turn Order</h3>
+    <div class="dm-controls" *ngIf="syncService.isHosting">
+      <button mat-icon-button (click)="confirmTurnOrder()" *ngIf="!turnOrder.isConfirmed" title="Confirm and Sort">
+        <mat-icon color="primary">check_circle</mat-icon>
+      </button>
+      <button mat-icon-button (click)="endTurnOrder()" title="End Turn Order">
+        <mat-icon color="warn">cancel</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <div class="turn-order-entries">
+    <div class="turn-entry" *ngFor="let entry of turnOrder.entries">
+      <span class="initiative">{{ entry.initiative }}</span>
+      <span class="name">{{ entry.name }}</span>
+      <button mat-icon-button *ngIf="syncService.isHosting" (click)="removeTurnOrderEntry(entry.id)" class="small-icon">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <div class="turn-order-input" *ngIf="!turnOrder.isConfirmed || syncService.isHosting">
+    <input type="text" [(ngModel)]="newEntryName" placeholder="Name" class="name-input">
+    <input type="number" [(ngModel)]="newEntryInitiative" placeholder="Init" class="init-input">
+    <button mat-icon-button (click)="addTurnOrderEntry()" [disabled]="!newEntryName">
+      <mat-icon>add_circle</mat-icon>
+    </button>
+  </div>
+</div>
+
 
 <!-- Hidden Trigger for Token Menu -->
 <div style="visibility: hidden; position: fixed"

@@ -220,3 +220,109 @@ button[mat-icon-button] {
   background-image: radial-gradient(circle at 1px 1px, var(--outline) 1px, transparent 0);
   background-size: 50px 50px;
 }
+
+/* --- Turn Order Overlay --- */
+.turn-order-overlay {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 280px;
+  z-index: 1001;
+  border-radius: var(--radius-l);
+  border: 2px solid var(--outline);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+
+  .turn-order-header {
+    background: var(--primary);
+    color: #fff;
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    h3 { margin: 0; font-size: 14px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+
+    .dm-controls {
+      display: flex;
+      gap: 4px;
+      button { width: 32px; height: 32px; line-height: 32px; background: rgba(255,255,255,0.2) !important; color: #fff !important; }
+    }
+  }
+
+  .turn-order-entries {
+    max-height: 400px;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.6);
+
+    .turn-entry {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      gap: 12px;
+      animation: slideIn 0.3s ease-out;
+
+      .initiative {
+        width: 32px;
+        height: 32px;
+        background: var(--primary);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 12px;
+        color: #fff;
+        box-shadow: 0 0 10px var(--primary-glow);
+      }
+
+      .name {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .small-icon {
+        width: 28px; height: 28px; line-height: 28px; color: var(--warn) !important;
+        mat-icon { font-size: 18px; width: 18px; height: 18px; }
+      }
+    }
+  }
+
+  .turn-order-input {
+    padding: 12px;
+    background: var(--surface);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    border-top: 1px solid var(--outline);
+
+    input {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid var(--outline);
+      border-radius: var(--radius-s);
+      color: #fff;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+      &:focus { border-color: var(--primary); }
+    }
+
+    .name-input { flex: 1; }
+    .init-input { width: 45px; }
+
+    button { color: var(--primary) !important; }
+  }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}

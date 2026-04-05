@@ -1,10 +1,10 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter } from '@angular/core';
-import { DatePipe, NgForOf, NgIf, NgStyle } from '@angular/common';
+import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter, OnInit } from '@angular/core';
+import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
-import {VttSync} from '../../../shared/services/vttsync/vttsync';
+import {VttSync, TurnOrderState, TurnOrderEntry} from '../../../shared/services/vttsync/vttsync';
 import {ICharacter} from '../../../shared/models/user/character.model';
-import {MatIconButton} from '@angular/material/button';
+import {MatIconButton, MatButton} from '@angular/material/button';
 import {MatIcon} from '@angular/material/icon';
 import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
 import { FormsModule } from '@angular/forms';
@@ -12,8 +12,9 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
-import {Subscription} from 'rxjs';
+import {Subscription, Observable} from 'rxjs';
 
 @Component({
   selector: 'app-vtt-canvas',
@@ -22,19 +23,23 @@ import {Subscription} from 'rxjs';
     DatePipe,
     NgForOf,
     NgIf,
+    NgStyle,
+    AsyncPipe,
     MatIconButton,
+    MatButton,
     MatIcon,
     MatMenuModule,
     FormsModule,
     MatFormFieldModule,
     MatInputModule,
     MatCheckboxModule,
-    MatSelectModule
+    MatSelectModule,
+    MatTooltipModule
   ],
   templateUrl: './vtt-canvas.html',
   styleUrl: './vtt-canvas.scss',
 })
-export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
+export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   @Input() serverId!: string;
   @Input() userId!: string;
   @Input() character!: ICharacter;
@@ -78,11 +83,24 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
   public showHostTakeover = false;
   private hostDisconnectedSub!: Subscription;
 
+  // Turn Order State
+  public turnOrderState$: Observable<TurnOrderState>;
+  public newEntryName: string = '';
+  public newEntryInitiative: number = 0;
+
   // Expose sync state to UI
   get isSyncing() { return this.syncService.isConnected; }
   get isHosting() { return this.syncService.isHosting; }
 
-  constructor(private dialog: MatDialog, public syncService: VttSync  ) { }
+  constructor(private dialog: MatDialog, public syncService: VttSync  ) {
+    this.turnOrderState$ = this.syncService.turnOrder$.asObservable();
+  }
+
+  ngOnInit() {
+    if (this.character) {
+        this.newEntryName = this.character.name;
+    }
+  }
 
   ngAfterViewInit() {
     // Check if VttSync service already has an engine for this room
@@ -116,6 +134,9 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if ((changes['isHostVttSession'] || changes['isJoiningVttSession']) && this.engine) {
       this.handleSyncState();
+    }
+    if (changes['character'] && this.character) {
+        this.newEntryName = this.character.name;
     }
   }
 
@@ -379,5 +400,65 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges {
     if (this.isSyncing) {
       this.syncService.broadcastAction('map-load', this.engine.getRawConfig());
     }
+  }
+
+  // --- Turn Order ---
+  activateTurnOrder() {
+    this.syncService.updateTurnOrder({
+      isActive: true,
+      isConfirmed: false,
+      entries: []
+    });
+  }
+
+  confirmTurnOrder() {
+    const currentState = this.syncService.turnOrder$.value;
+    const sortedEntries = [...currentState.entries].sort((a, b) => b.initiative - a.initiative);
+    this.syncService.updateTurnOrder({
+      ...currentState,
+      isConfirmed: true,
+      entries: sortedEntries
+    });
+  }
+
+  endTurnOrder() {
+    this.syncService.updateTurnOrder({
+      isActive: false,
+      isConfirmed: false,
+      entries: []
+    });
+  }
+
+  addTurnOrderEntry() {
+    if (!this.newEntryName || this.newEntryInitiative === null) return;
+
+    const currentState = this.syncService.turnOrder$.value;
+    const newEntry: TurnOrderEntry = {
+      id: crypto.randomUUID(),
+      name: this.newEntryName,
+      initiative: this.newEntryInitiative,
+      userId: this.userId
+    };
+
+    const newEntries = [...currentState.entries, newEntry];
+    if (currentState.isConfirmed) {
+        newEntries.sort((a, b) => b.initiative - a.initiative);
+    }
+
+    this.syncService.updateTurnOrder({
+      ...currentState,
+      entries: newEntries
+    });
+
+    // Reset fields (optionally keep name for player)
+    this.newEntryInitiative = 0;
+  }
+
+  removeTurnOrderEntry(entryId: string) {
+    const currentState = this.syncService.turnOrder$.value;
+    this.syncService.updateTurnOrder({
+      ...currentState,
+      entries: currentState.entries.filter(e => e.id !== entryId)
+    });
   }
 }

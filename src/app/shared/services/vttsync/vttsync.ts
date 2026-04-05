@@ -7,6 +7,19 @@ import {Video} from '../video/video';
 import {environment} from '../../../../environments/environment';
 import { BehaviorSubject } from 'rxjs';
 
+export interface TurnOrderEntry {
+  id: string;
+  name: string;
+  initiative: number;
+  userId: string;
+}
+
+export interface TurnOrderState {
+  isActive: boolean;
+  isConfirmed: boolean;
+  entries: TurnOrderEntry[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttSync {
   private socket: Socket | null = null;
@@ -16,6 +29,11 @@ export class VttSync {
   private engine: VttEngine| null = null;
 
   public hostDisconnected$ = new BehaviorSubject<boolean>(false);
+  public turnOrder$ = new BehaviorSubject<TurnOrderState>({
+    isActive: false,
+    isConfirmed: false,
+    entries: []
+  });
 
   constructor(private tokenService: TokenService, private callService: Video) {
   }
@@ -142,6 +160,7 @@ export class VttSync {
     this.isConnected = false;
     this.hostDisconnected$.next(false);
     this.engine = null;
+    this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [] });
   }
 
   broadcastAction(action: string, data: any) {
@@ -257,6 +276,10 @@ export class VttSync {
       case 'ping':
         engine.showPing(data.x, data.y, data.color);
         break;
+
+      case 'turn-order-sync':
+        this.turnOrder$.next(data);
+        break;
     }
     engine.stage.batchDraw();
   }
@@ -285,6 +308,11 @@ export class VttSync {
       y: posY,
       options: tokenOptions
     });
+  }
+
+  updateTurnOrder(state: TurnOrderState) {
+    this.turnOrder$.next(state);
+    this.broadcastAction('turn-order-sync', state);
   }
 
 
