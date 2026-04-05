@@ -75,7 +75,7 @@
 
   <!-- ACTIVE CALL VIEW -->
   @if (localStream) {
-    <div #gridContainer class="grid">
+    <div #gridContainer class="grid count-{{ remoteStreams.length + 1 }}">
       <!-- Local Video -->
       <div class="video-box local" [class.video-hidden]="isVideoOff">
         <video #localVideo autoplay playsinline [muted]="true"></video>
