@@ -81,6 +81,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Broadcast state
   activeOverlayImage: string | null = null;
 
+  // Spotify Requests
+  spotifyRequests: any[] = [];
+  showSpotifyRequests: boolean = false;
+
   // DM Mode State
   isServerOwner: boolean = false;
   isDmMode: boolean = false;
@@ -99,6 +103,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private spotifySyncSub!: Subscription;
   private spotifyActionSub!: Subscription;
   private spotifyStateRequestSub!: Subscription;
+  private spotifyRequestSub!: Subscription;
+  private syncDebounceTimer: any = null;
+  private isSyncing: boolean = false;
+
+
   private themeSyncSub!: Subscription;
   private vttSub!: Subscription;
   private overlaySub!: Subscription;
@@ -160,55 +169,112 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       });
     });
 
+    // ---------------------------------------------------------
+// 1. LISTENER SYNC LOGIC (Strict DJ Mode & Anti-Bounce)
+// ---------------------------------------------------------
     this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
       if (!state.uri || !this.localStream) return;
-      const currentState = await this.spotify.getPlaybackState();
 
-      const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
-      const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
-      const adjustedPosition = state.position + (state.paused ? 0 : drift);
-      const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
-      const isDifferentStatus = currentState?.paused !== state.paused;
-      const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
+      if (this.isServerOwner) {
+        // HOST: Ignore your own auto-polls if you recently clicked something (prevents looping)
+        if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
 
-      if (isDifferentShuffle) {
+        // HOST: Completely ignore manual playback commands from standard users
+        if (state.source === 'manual' && state.hostId && state.hostId !== this.character.ownerId) return;
+      } else {
+        // CLIENT: Only obey the Host
+        const currentServer = this.serverService.getCurrentServer();
+        const actualHostId = currentServer ? this.extractOwnerId(currentServer) : null;
+
+        // Drop the command if it wasn't stamped by the Server Owner
+        if (state.hostId && state.hostId !== actualHostId) return;
+
+        // Anti-bounce lock: Prevent rapid shuffling while Spotify API is loading the last track
+        if (this.isSyncing) return;
+        this.isSyncing = true;
+      }
+
+      try {
+        const currentState = await this.spotify.getPlaybackState();
+        const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
+        const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
+        const adjustedPosition = state.position + (state.paused ? 0 : drift);
+        const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
+        const isDifferentStatus = currentState?.paused !== state.paused;
+        const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
+
+        if (isDifferentShuffle) {
           await this.spotify.toggleShuffle(state.shuffle, true);
-      }
-
-      if (state.command === 'seek') {
-        if (currentState?.track_window?.current_track?.uri === state.uri) {
-          await this.spotify.seek(adjustedPosition, true);
-        }
-      } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
-        if (!state.paused) {
-          if (isDifferentTrack || isDifferentPosition) {
-             await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
-          } else {
-             await this.spotify.togglePlay(true);
-          }
-        } else {
-          if (isDifferentTrack) {
-             await this.spotify.play(state.uri, state.position, true, state.contextUri);
-             setTimeout(() => this.spotify.pause(true), 1000);
-          } else {
-             await this.spotify.pause(true);
-          }
         }
 
-        if (!isDifferentTrack && isDifferentPosition && !state.paused) {
+        if (state.command === 'seek') {
+          if (currentState?.track_window?.current_track?.uri === state.uri) {
             await this.spotify.seek(adjustedPosition, true);
+          }
+        } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
+          if (!state.paused) {
+            if (isDifferentTrack || isDifferentPosition) {
+              await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
+            } else {
+              await this.spotify.togglePlay(true);
+            }
+          } else {
+            if (isDifferentTrack) {
+              await this.spotify.play(state.uri, state.position, true, state.contextUri);
+              setTimeout(() => this.spotify.pause(true), 1000);
+            } else {
+              await this.spotify.pause(true);
+            }
+          }
+
+          if (!isDifferentTrack && isDifferentPosition && !state.paused) {
+            await this.spotify.seek(adjustedPosition, true);
+          }
+        }
+      } finally {
+        // Release the lock after allowing the Spotify API time to settle
+        if (!this.isServerOwner) {
+          setTimeout(() => this.isSyncing = false, 1500);
         }
       }
     });
 
+
+// ---------------------------------------------------------
+// 2. ACTION INTERCEPTOR (Debounce Host / Send Requests)
+// ---------------------------------------------------------
     this.spotifyActionSub = this.spotify.syncAction$.subscribe(action => {
-      if (this.localStream) {
-        this.videoService.sendSpotifyCommand(action.command, action.data);
+      if (!this.localStream) return;
+
+      if (this.isServerOwner) {
+        // HOST: Debounce outbound network commands to prevent rapid-click API fighting
+        if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
+
+        this.syncDebounceTimer = setTimeout(() => {
+          // Stamp the payload with the Host ID so clients know it is authoritative
+          const payload = { ...action.data, hostId: this.character.ownerId };
+          this.videoService.sendSpotifyCommand(action.command, payload, action.source);
+        }, 400); // 400ms debounce
+
+      } else {
+        // CLIENT: Intercept play commands and submit them as Requests instead
+        if (action.command === 'play' && action.data?.uri) {
+            this.videoService.sendSpotifyRequest({
+              uri: action.data.uri,
+              name: action.data.name || 'Requested Song',
+              artist: action.data.artist || 'Unknown Artist',
+              image: action.data.image || '',
+            }, this.character.name);
+        }
       }
     });
 
+
+// ---------------------------------------------------------
+// 3. STATE REQUEST (Stamp Manual Broadcasts)
+// ---------------------------------------------------------
     this.spotifyStateRequestSub = this.videoService.spotifyStateRequest$.subscribe(async (req) => {
-      if (this.localStream) {
+      if (this.localStream && this.isServerOwner) {
         const state = await this.spotify.getPlaybackState();
         if (state && state.track_window?.current_track) {
           this.videoService.sendSpotifyCommand('sync', {
@@ -216,12 +282,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
             position: state.position,
             paused: state.paused,
             contextUri: state.context?.uri,
-            shuffle: state.shuffle_state
-          });
+            shuffle: state.shuffle_state,
+            hostId: this.character.ownerId // Embed host ID for validation
+          }, 'manual');
         }
 
         if (this.activeThemeSession) {
           this.videoService.sendThemeUpdate(this.activeThemeSession);
+        }
+      }
+    });
+
+    this.spotifyRequestSub = this.videoService.spotifyRequest$.subscribe(req => {
+      if (this.isServerOwner) {
+        // Prevent duplicates
+        if (!this.spotifyRequests.some(r => r.uri === req.uri && r.fromName === req.fromName)) {
+           this.spotifyRequests.push(req);
+           this.cdr.detectChanges();
         }
       }
     });
@@ -247,18 +324,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.cdr.detectChanges();
     });
 
-    this.serverDetailsSub = this.serverService.getServerDetailsObservable().subscribe(server => {
-      if (server && this.character && this.character.ownerId) {
-        this.isServerOwner = this.extractOwnerId(server) === this.character.ownerId;
-      } else {
-        this.isServerOwner = false;
-      }
+      this.checkServerOwner();
       this.cdr.detectChanges();
-    });
 
-    if (this.channelId) {
-      await this.serverService.getServerDetails(this.channelId);
+
+
+  }
+
+  checkServerOwner(){
+    const server = this.serverService.getCurrentServer()
+    if (server && this.character && this.character.ownerId) {
+
+      this.isServerOwner = this.extractOwnerId(server) === this.character.ownerId;
+    } else {
+      this.isServerOwner = false;
     }
+    console.log("Is Server Owner: ",this.isServerOwner)
   }
 
   private extractOwnerId(server: IServer): string {
@@ -434,7 +515,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (channelIdChange && channelIdChange.currentValue) {
-      await this.serverService.getServerDetails(channelIdChange.currentValue);
+      this.checkServerOwner()
     }
   }
 
@@ -483,6 +564,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
     if (this.spotifyStateRequestSub) this.spotifyStateRequestSub.unsubscribe();
+    if (this.spotifyRequestSub) this.spotifyRequestSub.unsubscribe();
     if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
     if (this.overlaySub) this.overlaySub.unsubscribe();
@@ -514,5 +596,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   dismissOverlay() {
     this.activeOverlayImage = null;
+  }
+
+  handleSongRequest(request: any) {
+      this.spotify.play(request.uri);
+      this.removeRequest(request);
+  }
+
+  removeRequest(request: any) {
+      this.spotifyRequests = this.spotifyRequests.filter(r => r !== request);
   }
 }

@@ -226,6 +226,12 @@
           <button (click)="showSpotify = !showSpotify" class="btn-action btn-spotify" [class.active]="showSpotify" matTooltip="Spotify">
             <mat-icon>music_note</mat-icon>
           </button>
+
+          <button *ngIf="isServerOwner && spotifyRequests.length > 0" (click)="showSpotifyRequests = !showSpotifyRequests" class="btn-action btn-requests" [class.active]="showSpotifyRequests" matTooltip="Song Requests">
+            <mat-icon [class.pulse]="spotifyRequests.length > 0">playlist_add_check</mat-icon>
+            <span class="badge">{{ spotifyRequests.length }}</span>
+          </button>
+
           <button (click)="toggleAudio()" [class.active]="isAudioMuted" class="btn-action" [matTooltip]="isAudioMuted ? 'Unmute' : 'Mute'">
             <mat-icon>{{ isAudioMuted ? 'mic_off' : 'mic' }}</mat-icon>
           </button>
@@ -285,8 +291,40 @@
   <div class="spotify-overlay" *ngIf="showSpotify && localStream">
     <app-spotify-player
       [isCallActive]="!!localStream"
+      [isServerOwner]="isServerOwner"
+      [userName]="character.name"
       (close)="showSpotify = false">
     </app-spotify-player>
+  </div>
+
+  <!-- Spotify Requests Overlay -->
+  <div class="spotify-requests-overlay glass" *ngIf="showSpotifyRequests && isServerOwner">
+    <div class="overlay-header">
+      <h3>Song Requests</h3>
+      <button class="btn-close" (click)="showSpotifyRequests = false">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+    <div class="requests-list">
+      <div *ngFor="let req of spotifyRequests" class="request-item">
+        <img [src]="req.image || 'assets/spotify-placeholder.png'" class="req-thumb">
+        <div class="req-details">
+          <div class="req-name">{{ req.name }}</div>
+          <div class="req-meta">{{ req.artist }} • Requested by <strong>{{ req.fromName }}</strong></div>
+        </div>
+        <div class="req-actions">
+          <button class="btn-play" (click)="handleSongRequest(req)" matTooltip="Play Now">
+            <mat-icon>play_arrow</mat-icon>
+          </button>
+          <button class="btn-remove" (click)="removeRequest(req)" matTooltip="Dismiss">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+      <div *ngIf="spotifyRequests.length === 0" class="empty-requests">
+        No active requests.
+      </div>
+    </div>
   </div>
 
   <!-- VTT Notification Overlay -->

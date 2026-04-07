@@ -94,7 +94,7 @@ export class SidePanel implements AfterViewInit {
             charisma: 0
           },
           classes: [],
-          ownerId: '',
+          ownerId: user._id,
           race: 'Human? Maybe...',
           servers: ['0'],
           name: user.username, icon: user.profileIcon || null

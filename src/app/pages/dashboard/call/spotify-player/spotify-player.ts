@@ -1,6 +1,7 @@
 import { Component, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
 import { SpotifyService, SpotifySearchResult } from '../../../../shared/services/playlist/spotify.service';
 import { TabService } from '../../../../shared/services/tab/tab-service';
+import { Video } from '../../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
@@ -17,6 +18,8 @@ type ResultGroup = { [key: string]: SpotifySearchResult[] };
 export class SpotifyPlayer implements OnInit, OnDestroy {
   @Input() isCallActive: boolean = false;
   @Input() isTab: boolean = false;
+  @Input() isServerOwner: boolean = false;
+  @Input() userName: string = 'Unknown Player';
   @Output() close = new EventEmitter<void>();
 
   spotifySearch: string = '';
@@ -44,7 +47,8 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
 
   constructor(
     public spotify: SpotifyService,
-    private tabService: TabService
+    private tabService: TabService,
+    private videoService: Video
   ) {}
 
   ngOnInit() {}
@@ -85,7 +89,12 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
       uri = `spotify:${type}:${id}`;
     }
 
-    await this.playTrack({ uri });
+    if (this.isServerOwner) {
+        await this.spotify.play(uri);
+    } else {
+        // If not server owner, request the song/playlist
+        this.videoService.sendSpotifyRequest({ uri, name: 'Spotify Link' }, this.userName);
+    }
     this.spotifySearch = '';
   }
 
@@ -103,8 +112,27 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
 
   async playTrack(item: any) {
     const uri = item.uri || item.track?.uri || item.item?.uri;
-    await this.spotify.play(uri);
+    if (this.isServerOwner || !this.isCallActive) {
+        await this.spotify.play(uri);
+    } else {
+        this.videoService.sendSpotifyRequest(item, this.userName);
+    }
 
+    if (this.spotifySearch) {
+      this.groupedResults = {};
+      this.spotifySearch = '';
+    }
+    this.showPinnedPulldown = false;
+    this.showQueue = false;
+  }
+
+  async requestTrack(item: any) {
+    const uri = item.uri || item.track?.uri || item.item?.uri;
+    if (this.isServerOwner) {
+      await this.spotify.addToQueue(uri);
+    } else {
+      this.videoService.sendSpotifyRequest(item, this.userName);
+    }
     if (this.spotifySearch) {
       this.groupedResults = {};
       this.spotifySearch = '';

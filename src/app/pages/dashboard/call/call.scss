@@ -508,6 +508,23 @@
       box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
     }
   }
+  &.btn-requests {
+      position: relative;
+      .badge {
+          position: absolute; top: -5px; right: -5px;
+          background: #ff4d4d; color: white; font-size: 10px; font-weight: 800;
+          min-width: 18px; height: 18px; border-radius: 9px;
+          display: flex; align-items: center; justify-content: center;
+          border: 2px solid #1e1f22;
+      }
+      .pulse { animation: pulse-red 2s infinite; }
+  }
+}
+
+@keyframes pulse-red {
+    0% { transform: scale(0.95); text-shadow: 0 0 0 rgba(255, 77, 77, 0.7); }
+    70% { transform: scale(1.05); text-shadow: 0 0 10px rgba(255, 77, 77, 0); }
+    100% { transform: scale(0.95); text-shadow: 0 0 0 rgba(255, 77, 77, 0); }
 }
 
 /* --- THEME PICKER OVERLAY (REFINED) --- */
@@ -556,6 +573,56 @@
     width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     text-transform: uppercase; letter-spacing: 0.3px;
   }
+}
+
+/* --- SPOTIFY REQUESTS OVERLAY --- */
+.spotify-requests-overlay {
+    position: absolute; bottom: 90px; left: 24px; width: 320px; max-height: 400px;
+    z-index: 100; display: flex; flex-direction: column;
+    background: rgba(30, 31, 34, 0.95); backdrop-filter: blur(32px);
+    border: 1px solid var(--outline); border-radius: var(--radius-xl); box-shadow: var(--shadow-4);
+    overflow: hidden;
+
+    .overlay-header {
+        padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex; justify-content: space-between; align-items: center;
+        h3 { font-size: 14px; color: white; margin: 0; font-weight: 700; }
+        .btn-close { background: transparent; border: none; color: var(--on-surface-muted); cursor: pointer; &:hover { color: white; } }
+    }
+
+    .requests-list {
+        flex: 1; overflow-y: auto; padding: 8px;
+        &::-webkit-scrollbar { width: 4px; }
+        &::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }
+    }
+
+    .request-item {
+        display: flex; align-items: center; gap: 12px; padding: 8px;
+        border-radius: var(--radius-m); transition: background 0.2s ease;
+        &:hover { background: rgba(255, 255, 255, 0.05); }
+
+        .req-thumb { width: 40px; height: 40px; border-radius: var(--radius-s); object-fit: cover; }
+        .req-details {
+            flex: 1; min-width: 0;
+            .req-name { font-size: 13px; font-weight: 600; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .req-meta { font-size: 11px; color: var(--on-surface-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        }
+        .req-actions {
+            display: flex; gap: 4px;
+            button {
+                width: 28px; height: 28px; border-radius: var(--radius-round);
+                border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+                transition: all 0.2s ease;
+                mat-icon { font-size: 16px; width: 16px; height: 16px; }
+                &.btn-play { background: #1DB954; color: white; &:hover { background: #1ed760; } }
+                &.btn-remove { background: rgba(255, 255, 255, 0.1); color: var(--on-surface-muted); &:hover { color: white; background: rgba(255, 255, 255, 0.2); } }
+            }
+        }
+    }
+
+    .empty-requests {
+        padding: 32px; text-align: center; color: var(--on-surface-muted); font-size: 13px;
+    }
 }
 
 /* --- OTHERS --- */

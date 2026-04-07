@@ -16,23 +16,21 @@ export class Video {
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
   public spotifySync$ = new Subject<any>();
+  public spotifyStateRequest$ = new Subject<{ from: string }>();
+  public spotifyRequest$ = new Subject<any>(); // New: Observable for song requests
   public themeSync$ = new Subject<Theme>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
-  public spotifyStateRequest$ = new Subject<{ from: string }>();
   public overlayImage$ = new Subject<string | null>();
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
 
   constructor() {
-    // Enable verbose logging to help debug ICE issues
     setLogLevel('debug');
-
     this.room = new Room({
       adaptiveStream: true,
       dynacast: true,
     });
-
     this.setupRoomListeners();
   }
 
@@ -42,7 +40,6 @@ export class Video {
       .on(RoomEvent.TrackUnsubscribed, () => this.emitParticipants())
       .on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
           this.emitParticipants();
-          // When someone new joins, if we are the host of a VTT session, broadcast it again
           if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
               this.sendVttCommand('start', this.vttSession$.value.roomId!);
           }
@@ -61,10 +58,17 @@ export class Video {
             this.spotifySync$.next({
               ...data.data,
               from: participant?.identity,
-              command: data.command
+              command: data.command,
+              source: data.source || 'manual'
             });
           } else if (data.type === 'spotify-state-request') {
             this.spotifyStateRequest$.next({ from: participant?.identity || '' });
+          } else if (data.type === 'spotify-request') {
+            this.spotifyRequest$.next({
+                ...data.data,
+                from: participant?.identity || 'Unknown',
+                fromName: data.fromName || 'Unknown Player'
+            });
           } else if (data.type === 'theme-sync') {
             this.themeSync$.next(data.theme);
           } else if (data.type === 'vtt-session') {
@@ -83,34 +87,18 @@ export class Video {
   }
 
   async initVideoCall(channelId: string, character: any) {
-    if (this.room.state === 'connected' && this.currentChannelId === channelId) {
-      console.log('[Video] Already connected to room:', channelId);
-      return;
-    }
-
+    if (this.room.state === 'connected' && this.currentChannelId === channelId) return;
     try {
       const data = await this.getLiveKitConnectionInfo(channelId, character.name);
-      console.log('[Video] Connection Info Received:', data);
-
       const connectOptions: RoomConnectOptions = {
         autoSubscribe: true,
-        rtcConfig: {
-          iceServers: data.iceServers
-        }
+        rtcConfig: { iceServers: data.iceServers }
       };
       await this.room.connect(environment.livekitUrl, data.token, connectOptions);
       this.currentChannelId = channelId;
-      console.log('[Video] Connected to room:', channelId);
-
-      if (character) {
-          await this.room.localParticipant.setMetadata(JSON.stringify(character));
-      }
-
+      if (character) await this.room.localParticipant.setMetadata(JSON.stringify(character));
       this.emitParticipants();
-    } catch (error) {
-      console.error('[Video] Connection error:', error);
-      throw error;
-    }
+    } catch (error) { throw error; }
   }
 
   async updateUserData(channelId: string, character: any) {
@@ -122,26 +110,33 @@ export class Video {
   async startProducing(stream: MediaStream) {
     if (this.localStream === stream && this.room.localParticipant.getTrackPublications().length > 0) return;
     this.localStream = stream;
-
     const videoTrack = stream.getVideoTracks()[0];
     const audioTrack = stream.getAudioTracks()[0];
-
-    if (videoTrack) {
-      await this.room.localParticipant.publishTrack(videoTrack, { name: 'video' });
-    }
-    if (audioTrack) {
-      await this.room.localParticipant.publishTrack(audioTrack, { name: 'audio' });
-    }
+    if (videoTrack) await this.room.localParticipant.publishTrack(videoTrack, { name: 'video' });
+    if (audioTrack) await this.room.localParticipant.publishTrack(audioTrack, { name: 'audio' });
   }
 
-  sendSpotifyCommand(command: string, data: any) {
+  sendSpotifyCommand(command: string, data: any, source: string = 'manual') {
     if (this.room.state !== 'connected') return;
     const payload = new TextEncoder().encode(JSON.stringify({
       type: 'spotify-sync',
       command,
+      source,
+      data: { ...data, timestamp: Date.now() }
+    }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  sendSpotifyRequest(item: any, fromName: string) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({
+      type: 'spotify-request',
+      fromName,
       data: {
-        ...data,
-        timestamp: Date.now()
+          uri: item.uri,
+          name: item.name,
+          artist: item.artist || item.owner || '',
+          image: item.image || (item.images?.[0]?.url) || (item.album?.images?.[0]?.url) || ''
       }
     }));
     this.room.localParticipant.publishData(payload, { reliable: true });
@@ -149,43 +144,27 @@ export class Video {
 
   sendThemeUpdate(theme: Theme) {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'theme-sync',
-      theme
-    }));
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'theme-sync', theme }));
     this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
   requestSpotifyState() {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'spotify-state-request'
-    }));
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'spotify-state-request' }));
     this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
   sendVttCommand(command: 'start' | 'stop', roomId: string) {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'vtt-session',
-      command,
-      roomId
-    }));
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'vtt-session', command, roomId }));
     this.room.localParticipant.publishData(payload, { reliable: true });
-
-    if (command === 'start') {
-        this.vttSession$.next({ active: true, roomId, hostId: this.room.localParticipant.identity });
-    } else {
-        this.vttSession$.next({ active: false, roomId: null, hostId: null });
-    }
+    if (command === 'start') this.vttSession$.next({ active: true, roomId, hostId: this.room.localParticipant.identity });
+    else this.vttSession$.next({ active: false, roomId: null, hostId: null });
   }
 
   broadcastOverlayImage(url: string | null) {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'overlay-image',
-      url
-    }));
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'overlay-image', url }));
     this.room.localParticipant.publishData(payload, { reliable: true });
     this.overlayImage$.next(url);
   }
@@ -200,19 +179,13 @@ export class Video {
   }
 
   private parseMetadata(metadata: string | undefined): any {
-    try {
-      return metadata ? JSON.parse(metadata) : {};
-    } catch {
-      return {};
-    }
+    try { return metadata ? JSON.parse(metadata) : {}; } catch { return {}; }
   }
 
   private getStreamFromParticipant(participant: RemoteParticipant): MediaStream {
     const stream = new MediaStream();
     participant.getTrackPublications().forEach(pub => {
-      if (pub.track && pub.track.mediaStreamTrack) {
-        stream.addTrack(pub.track.mediaStreamTrack);
-      }
+      if (pub.track && pub.track.mediaStreamTrack) stream.addTrack(pub.track.mediaStreamTrack);
     });
     return stream;
   }
@@ -221,11 +194,7 @@ export class Video {
     if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
         this.sendVttCommand('stop', this.vttSession$.value.roomId!);
     }
-
-    if (this.localStream) {
-      this.localStream.getTracks().forEach(t => t.stop());
-    }
-
+    if (this.localStream) this.localStream.getTracks().forEach(t => t.stop());
     await this.room.disconnect();
     this.remoteStreams$.next([]);
     this.vttSession$.next({ active: false, roomId: null, hostId: null });
@@ -233,16 +202,12 @@ export class Video {
     this.currentChannelId = null;
   }
 
-  getLocalStream() {
-    return this.localStream;
-  }
+  getLocalStream() { return this.localStream; }
 
   private async getLiveKitConnectionInfo(room: string, identity: string) {
     const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
     const res = await fetch(url);
-    if (!res.ok) {
-        throw new Error('Failed to fetch LiveKit connection info');
-    }
+    if (!res.ok) throw new Error('Failed to fetch LiveKit connection info');
     return await res.json();
   }
 }
