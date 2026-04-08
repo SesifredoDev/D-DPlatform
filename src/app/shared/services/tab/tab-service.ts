@@ -58,16 +58,24 @@ export class TabService {
   }
 
   closeTab(id: string) {
-    const tabToRemove = this.tabs.value.find(t => t.id === id);
-    if (tabToRemove && tabToRemove.type === 'call') {
+    const tabToClose = this.tabs.value.find(t => t.id === id);
+
+    // Explicitly end the call if the user is closing a call tab
+    if (tabToClose && tabToClose.type === 'call') {
       this.videoService.leaveCall(id);
     }
+
     this.tabs.next(this.tabs.value.filter(t => t.id !== id));
   }
 
   closeAllTabs() {
+    this.tabs.value.forEach((tab=>{
+        this.closeTab(tab.id);
+    }))
     this.tabs.next([]);
   }
+
+
 
   updateTab(id: string, data: Partial<Tab>) {
     const current = this.tabs.value;

@@ -189,6 +189,8 @@ export class VttEngine {
       }));
     }
     this.gridLayer.batchDraw();
+
+    this.updateLighting();
   }
 
   centerMap() {
@@ -204,6 +206,7 @@ export class VttEngine {
 
   setBackground(url, isRemote = false) {
     this.currentMapUrl = url;
+    this.stage.fire('mapLoadingStarted');
     console.log("Setting Background to "+this.currentMapUrl);
     const imageObj = new Image();
     imageObj.onload = () => {
@@ -220,12 +223,11 @@ export class VttEngine {
       this.mapLayer.add(mapImage);
       this.drawGrid(this.currentMapW, this.currentMapH);
       this.centerMap();
+      this.stage.fire('mapLoadingFinished');
     };
-    if(!isRemote) {
-      this.stage.fire("mapChanged",{
-        url: url
-      })
-
+    imageObj.onerror = () => {
+        this.stage.fire('mapLoadingFinished');
+        console.error("Failed to load map image");
     }
     imageObj.src = url;
   }
@@ -262,8 +264,11 @@ export class VttEngine {
         const token = existingGroup.tokenReference;
         if (token) {
           token.updateConfig(options);
-          existingGroup.x(x);
-          existingGroup.y(y);
+          // Only update position if x,y are provided and non-zero
+          if (x || y) {
+            existingGroup.x(x);
+            existingGroup.y(y);
+          }
         }
         this.tokenLayer.batchDraw();
       }
@@ -283,6 +288,21 @@ export class VttEngine {
     }
 
     this.updateLighting();
+  }
+
+  updateTokenConfig(tokenId, options, remote = false) {
+    const existingGroup = this.tokenLayer.findOne('#' + tokenId);
+    if (existingGroup) {
+      const token = existingGroup.tokenReference;
+      if (token) {
+        token.updateConfig(options);
+        this.tokenLayer.batchDraw();
+        this.updateLighting();
+        if (!remote) {
+          this.stage.fire('tokenUpdated', { id: tokenId, options, remote: false });
+        }
+      }
+    }
   }
 
   getTokenConfig(token) {
@@ -319,13 +339,15 @@ export class VttEngine {
     }).play();
   }
 
-  removeToken(tokenId) {
-    const tokenGroup = this.tokenLayer.getChildren().find(g => g.id() === tokenId);
+  removeToken(tokenId, remote = false) {
+    const tokenGroup = this.tokenLayer.findOne('#' + tokenId);
     if (tokenGroup) {
       tokenGroup.destroy();
       this.tokenLayer.batchDraw();
       this.updateLighting();
-      this.stage.fire('tokenDeleted', { id: tokenId });
+      if (!remote) {
+        this.stage.fire('tokenDeleted', { id: tokenId, remote: false });
+      }
     }
   }
   toggleWallMode(active) {

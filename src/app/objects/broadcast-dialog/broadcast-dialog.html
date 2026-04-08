@@ -32,9 +32,19 @@
 </mat-dialog-content>
 
 <mat-dialog-actions align="end">
+  <div class="progress-info" *ngIf="uploading && uploadProgress > 0" style="margin-right: 15px; display: flex; align-items: center; gap: 8px;">
+    <span>{{ uploadProgress }}%</span>
+    <mat-progress-spinner
+      mode="determinate"
+      [value]="uploadProgress"
+      diameter="20"
+      strokeWidth="3">
+    </mat-progress-spinner>
+  </div>
   <button mat-button mat-dialog-close>Cancel</button>
   <button mat-raised-button color="primary" [disabled]="!canBroadcast() || uploading" (click)="broadcast()">
     <span *ngIf="!uploading">Broadcast</span>
-    <mat-spinner diameter="20" *ngIf="uploading"></mat-spinner>
+    <mat-spinner diameter="20" *ngIf="uploading && uploadProgress === 0"></mat-spinner>
+    <span *ngIf="uploading && uploadProgress > 0">Uploading...</span>
   </button>
 </mat-dialog-actions>

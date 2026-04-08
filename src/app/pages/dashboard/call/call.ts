@@ -559,7 +559,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy() {
-    this.isComponentDestroying = true;
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
@@ -570,12 +569,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.overlaySub) this.overlaySub.unsubscribe();
     if (this.serverDetailsSub) this.serverDetailsSub.unsubscribe();
 
-    if (this.videoService.currentChannelId === this.channelId) {
-      if (this.previewStream) {
-        this.previewStream.getTracks().forEach(t => t.stop());
-      }
-    } else {
-      this.leaveCall();
+    // Just clean up local hardware previews.
+    // The actual call room disconnection is now handled by TabService.closeTab()
+    if (this.previewStream) {
+      this.previewStream.getTracks().forEach(t => t.stop());
     }
   }
 

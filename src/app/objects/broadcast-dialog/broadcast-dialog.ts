@@ -41,6 +41,7 @@ export class BroadcastDialog implements OnInit {
   isCallActive: boolean = false;
   isVttActive: boolean = false;
   uploading: boolean = false;
+  uploadProgress: number = 0;
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: { file: File },
@@ -72,8 +73,12 @@ export class BroadcastDialog implements OnInit {
 
   async broadcast() {
     this.uploading = true;
+    this.uploadProgress = 0;
     try {
-      const uploadedFile = await this.fileService.uploadFile(this.data.file);
+      // Always use chunked upload to ensure consistent behavior across all file sizes
+      const uploadedFile = await this.fileService.uploadFileInChunks(this.data.file, (progress) => {
+        this.uploadProgress = progress;
+      });
 
       // 1. Send to Text Channels
       for (const channelId of this.selectedChannels) {
@@ -91,7 +96,7 @@ export class BroadcastDialog implements OnInit {
         if (engine) {
           const tokenOptions = {
             id: crypto.randomUUID(),
-            name: uploadedFile.name,
+            name: uploadedFile.filename || this.data.file.name,
             icon: uploadedFile.url,
             isPlayer: false
           };

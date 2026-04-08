@@ -21,21 +21,10 @@ import {Subscription, Observable} from 'rxjs';
   standalone: true,
   imports: [
     DatePipe,
-    NgForOf,
-    NgIf,
-    NgStyle,
-    NgClass,
-    AsyncPipe,
-    MatIconButton,
-    MatButton,
-    MatIcon,
-    MatMenuModule,
-    FormsModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatCheckboxModule,
-    MatSelectModule,
-    MatTooltipModule
+    NgForOf, NgIf, NgStyle, NgClass, AsyncPipe,
+    MatIconButton, MatButton, MatIcon, MatMenuModule,
+    FormsModule, MatFormFieldModule, MatInputModule,
+    MatCheckboxModule, MatSelectModule, MatTooltipModule
   ],
   templateUrl: './vtt-canvas.html',
   styleUrl: './vtt-canvas.scss',
@@ -70,6 +59,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   public tokenEditConfig: any = {
     name: '',
     icon: '',
+    iconFile: null,
     size: 1,
     forceBorder: false,
     borderColor: '#ffffff',
@@ -83,12 +73,14 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
   public showHostTakeover = false;
   private hostDisconnectedSub!: Subscription;
+  private turnOrderStateSub!: Subscription; // Subscription for turn order state
 
   // Turn Order State
   public turnOrderState$: Observable<TurnOrderState>;
   public newEntryName: string = '';
   public newEntryInitiative: number = 0;
   public turnOrderMinimized = false;
+  private lastAddedEntryId: string | null = null; // To track the last added entry for clearing inputs
 
   // Expose sync state to UI
   get isSyncing() { return this.syncService.isConnected; }
@@ -105,12 +97,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   ngAfterViewInit() {
-    // Check if VttSync service already has an engine for this room
     if (this.syncService.currentRoomId === this.serverId && this.syncService.getEngine()) {
       this.engine = this.syncService.getEngine()!;
-      // Re-attach the engine to the new container element
       this.engine.setContainer(this.container.nativeElement);
-      this.engine.stage.batchDraw(); // Redraw to reflect new container
+      this.engine.stage.batchDraw();
     } else {
       this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
     }
@@ -128,6 +118,14 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
     this.hostDisconnectedSub = this.syncService.hostDisconnected$.subscribe(disconnected => {
         this.showHostTakeover = disconnected && !this.isHosting;
+    });
+
+    this.turnOrderStateSub = this.turnOrderState$.subscribe(state => {
+      // Clear inputs only after the entry is confirmed in the state
+      if (this.lastAddedEntryId && state.entries.some(entry => entry.id === this.lastAddedEntryId)) {
+        this.newEntryInitiative = 0;
+        this.lastAddedEntryId = null;
+      }
     });
 
     this.handleSyncState();
@@ -152,14 +150,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       this.engine.setPermissions(false);
       this.engine.isDM = false;
     } else if (!this.isHostVttSession && !this.isJoiningVttSession && this.syncService.isConnected) {
-      // If the component is no longer marked as hosting or joining, but the service is still connected
-      // to this room, it means the tab is being moved/closed without explicit stop.
-      // We only stop syncing if the serverId doesn't match the currentRoomId in the service,
-      // or if the component is explicitly telling it to stop.
-      if (this.syncService.currentRoomId === this.serverId) {
-        // Do nothing, let the service maintain the connection
-      } else {
-        this.syncService.stopSyncing(true); // Force stop if it's a different room or no longer active
+      if (this.syncService.currentRoomId !== this.serverId) {
+        this.syncService.stopSyncing(true);
       }
     }
   }
@@ -179,24 +171,15 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
   stopSession() {
       this.vttSessionStopped.emit(this.serverId);
-      this.syncService.stopSyncing(true); // Explicitly stop when button is pressed
+      this.syncService.stopSyncing(true);
   }
 
   ngOnDestroy() {
-    if (this.resizeObserver) {
-      this.resizeObserver.disconnect();
-    }
-    if (this.hostDisconnectedSub) {
-      this.hostDisconnectedSub.unsubscribe();
-    }
-
-    // Only stop syncing if the service is no longer managing this specific room,
-    // or if the component is being completely destroyed (e.g., tab closed).
-    // If the service is still connected to this room, it means the tab is being moved.
-    if (this.syncService.currentRoomId === this.serverId) {
-      // Do nothing, the service maintains the connection
-    } else {
-      this.syncService.stopSyncing(true); // Force stop if it's a different room or no longer active
+    if (this.resizeObserver) this.resizeObserver.disconnect();
+    if (this.hostDisconnectedSub) this.hostDisconnectedSub.unsubscribe();
+    if (this.turnOrderStateSub) this.turnOrderStateSub.unsubscribe(); // Unsubscribe
+    if (this.syncService.currentRoomId !== this.serverId) {
+      this.syncService.stopSyncing(true);
     }
   }
 
@@ -206,7 +189,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       const width = Math.floor(rect.width);
       const height = Math.floor(rect.height);
 
-      // Only resize if values actually changed to prevent loop
       if (this.engine.stage.width() !== width || this.engine.stage.height() !== height) {
         this.engine.stage.width(width);
         this.engine.stage.height(height);
@@ -216,7 +198,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
   }
 
-  // --- Token Context Menu ---
   onTokenContextMenu({ token, evt }: any) {
     if (!token.checkPermissions()) return;
 
@@ -224,6 +205,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.tokenEditConfig = {
       name: token.name,
       icon: token.imageUrl,
+      iconFile: null,
       size: token.size,
       forceBorder: token.forceBorder,
       borderColor: token.borderColor,
@@ -238,6 +220,9 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   onTokenIconUpload(event: any) {
     const file = event.target.files[0];
     if (!file) return;
+
+    this.tokenEditConfig.iconFile = file;
+
     const reader = new FileReader();
     reader.onload = (e: any) => {
       this.tokenEditConfig.icon = e.target.result;
@@ -245,41 +230,41 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     reader.readAsDataURL(file);
   }
 
-  selectColor(color: string) {
-    if (this.tokenEditConfig.forceBorder) {
-      this.tokenEditConfig.borderColor = color;
-    } else {
-      this.tokenEditConfig.color = color;
-    }
-  }
-
-  applyTokenConfig() {
+  async applyTokenConfig() {
     if (this.selectedToken) {
-      this.selectedToken.updateConfig(this.tokenEditConfig);
-      if (this.isSyncing) {
-        this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
-      }
+      const tokenId = this.selectedToken.id;
+      const { iconFile, ...cleanConfig } = this.tokenEditConfig;
+      await this.syncService.updateToken(tokenId, cleanConfig, iconFile);
+      this.tokenEditConfig.iconFile = null;
     }
   }
 
   deleteSelectedToken() {
     if (this.selectedToken) {
-      this.engine.removeToken(this.selectedToken.id);
+      const id = this.selectedToken.id;
+      this.engine.removeToken(id);
       if (this.isSyncing) {
-        this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
+        this.syncService.broadcastAction('token-deleted', { id });
       }
     }
   }
 
-  // --- Engine Interactions ---
   addToken() {
-    this.engine.addToken(100, 100, { name: "New Monster" });
-    if (this.isSyncing) this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
+    const id = crypto.randomUUID();
+    const options = { id, name: "New Monster" };
+    this.engine.addToken(100, 100, options);
+    if (this.isSyncing) {
+      this.syncService.broadcastAction('token-added', { x: 100, y: 100, options });
+    }
   }
 
   addPlayer(){
-    this.engine.addToken(100, 100, { name: "New Hero", isPlayer: true });
-    if (this.isSyncing) this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
+    const id = crypto.randomUUID();
+    const options = { id, name: "New Hero", isPlayer: true };
+    this.engine.addToken(100, 100, options);
+    if (this.isSyncing) {
+      this.syncService.broadcastAction('token-added', { x: 100, y: 100, options });
+    }
   }
 
   setMeasureTool(tool: 'line' | 'radius' | 'none') {
@@ -291,7 +276,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   setTool(mode: 'select' | 'draw' | 'delete') {
     this.activeTool = mode;
     this.engine.setMeasurementMode('none');
-
     if (mode === 'select') {
       this.engine.wallManager.setMode('none');
     } else {
@@ -302,23 +286,22 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   toggleLighting() {
     this.lightingEnabled = !this.lightingEnabled;
     this.engine.lightLayer.visible(this.lightingEnabled);
-    if (this.lightingEnabled) {
-      this.engine.updateLighting();
-    }
+    if (this.lightingEnabled) this.engine.updateLighting();
     this.engine.stage.batchDraw();
-    this.engine.stage.fire('lightingToggled', { visible:this.lightingEnabled });
+    if (this.isSyncing) {
+      this.syncService.broadcastAction('lighting-toggle', { visible: this.lightingEnabled });
+    }
   }
 
-  // --- File/Library Management ---
-  onMapUpload(event: any) {
+  async onMapUpload(event: any) {
     const file = event.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e: any) => {
-      this.engine.setBackground(e.target.result);
-      if (this.isSyncing) this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
-    };
-    reader.readAsDataURL(file);
+    try {
+      await this.syncService.setMap(file);
+    } catch (err) {
+      console.error("Failed to upload map", err);
+      alert("Failed to upload map image.");
+    }
   }
 
   async saveCurrentMap(saveAs: boolean = false) {
@@ -374,7 +357,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
         const config = JSON.parse(e.target.result);
         this.engine.loadConfigFromObject(config);
         if (this.isSyncing) {
-          this.syncService.broadcastAction('full-sync', this.engine.getRawConfig());
+          this.syncService.broadcastAction('map-load', config);
         }
       } catch (err) {
         console.error("Failed to parse map JSON", err);
@@ -391,7 +374,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.showLibraryOverlay = false;
 
     if (this.isSyncing) {
-      this.syncService.broadcastAction('map-load', this.engine.getRawConfig());
+      this.syncService.broadcastAction('map-load', map.data);
     }
   }
 
@@ -410,11 +393,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   private async saveLibraryToDisk() {
-    // Save to local storage for "local" saving as well
     const storageKey = `vtt_library_${this.serverId}`;
     localStorage.setItem(storageKey, JSON.stringify(this.mapLibrary));
-
-    // Also try to sync with server if available
     try {
       await this.syncService.saveMapLibrary(this.mapLibrary);
     } catch (e) {
@@ -447,60 +427,38 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
   }
 
-  // --- Turn Order ---
+  selectColor(color: string) {
+    if (this.tokenEditConfig.forceBorder) {
+      this.tokenEditConfig.borderColor = color;
+    } else {
+      this.tokenEditConfig.color = color;
+    }
+  }
+
+  // Turn Order Actions (Calling centralized service methods)
   activateTurnOrder() {
-    this.syncService.updateTurnOrder({
-      isActive: true,
-      isConfirmed: false,
-      entries: [],
-      activeIndex: 0
-    });
+    this.syncService.activateTurnOrder();
   }
 
   confirmTurnOrder() {
-    const currentState = this.syncService.turnOrder$.value;
-    const sortedEntries = [...currentState.entries].sort((a, b) => b.initiative - a.initiative);
-    this.syncService.updateTurnOrder({
-      ...currentState,
-      isConfirmed: true,
-      entries: sortedEntries,
-      activeIndex: 0
-    });
+    this.syncService.confirmTurnOrder();
   }
 
   endTurnOrder() {
-    this.syncService.updateTurnOrder({
-      isActive: false,
-      isConfirmed: false,
-      entries: [],
-      activeIndex: 0
-    });
+    this.syncService.endTurnOrder();
   }
 
   nextTurn() {
-    const currentState = this.syncService.turnOrder$.value;
-    if (!currentState.entries.length) return;
-    const nextIndex = (currentState.activeIndex + 1) % currentState.entries.length;
-    this.syncService.updateTurnOrder({
-      ...currentState,
-      activeIndex: nextIndex
-    });
+    this.syncService.nextTurn();
   }
 
   prevTurn() {
-    const currentState = this.syncService.turnOrder$.value;
-    if (!currentState.entries.length) return;
-    const prevIndex = (currentState.activeIndex - 1 + currentState.entries.length) % currentState.entries.length;
-    this.syncService.updateTurnOrder({
-      ...currentState,
-      activeIndex: prevIndex
-    });
+    this.syncService.prevTurn();
   }
 
   addTurnOrderEntry() {
     if (!this.newEntryName || this.newEntryInitiative === null) return;
 
-    const currentState = this.syncService.turnOrder$.value;
     const newEntry: TurnOrderEntry = {
       id: crypto.randomUUID(),
       name: this.newEntryName,
@@ -508,26 +466,13 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       userId: this.userId
     };
 
-    const newEntries = [...currentState.entries, newEntry];
-    if (currentState.isConfirmed) {
-        newEntries.sort((a, b) => b.initiative - a.initiative);
-    }
-
-    this.syncService.updateTurnOrder({
-      ...currentState,
-      entries: newEntries
-    });
-
-    // Reset fields (optionally keep name for player)
-    this.newEntryInitiative = 0;
+    this.lastAddedEntryId = newEntry.id; // Store the ID of the entry we're trying to add
+    this.syncService.addTurnOrderEntry(newEntry);
+    // Do NOT clear inputs here. They will be cleared by the turnOrderStateSub subscription.
   }
 
   removeTurnOrderEntry(entryId: string) {
-    const currentState = this.syncService.turnOrder$.value;
-    this.syncService.updateTurnOrder({
-      ...currentState,
-      entries: currentState.entries.filter(e => e.id !== entryId)
-    });
+    this.syncService.removeTurnOrderEntry(entryId);
   }
 
   toggleTurnOrderMinimize() {

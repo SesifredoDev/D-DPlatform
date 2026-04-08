@@ -161,10 +161,11 @@ export class SidePanel implements AfterViewInit {
 
 
   selectServer(server: any) {
+
+    this.tabService.closeAllTabs()
     this.selectedServer = server;
     this.serverService.getServerDetails(server._id);
 
-    this.tabService.closeAllTabs()
     this.cdr.markForCheck();
 
   }

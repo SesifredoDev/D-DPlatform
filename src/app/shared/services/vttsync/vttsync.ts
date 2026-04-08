@@ -7,6 +7,7 @@ import {Video} from '../video/video';
 import {environment} from '../../../../environments/environment';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
+import { FileService } from '../file/file';
 
 export interface TurnOrderEntry {
   id: string;
@@ -31,6 +32,12 @@ export interface MapLibraryEntry {
   isArchived?: boolean;
 }
 
+export interface MapLoadingState {
+    loading: boolean;
+    progress: number;
+    message: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttSync {
   private socket: Socket | null = null;
@@ -38,6 +45,9 @@ export class VttSync {
   public isHosting = false;
   public isConnected = false;
   private engine: VttEngine| null = null;
+
+  private localVersion = 0;
+  private resyncing = false;
 
   public hostDisconnected$ = new BehaviorSubject<boolean>(false);
   public turnOrder$ = new BehaviorSubject<TurnOrderState>({
@@ -47,12 +57,19 @@ export class VttSync {
     activeIndex: 0
   });
 
+  public mapLoading$ = new BehaviorSubject<MapLoadingState>({
+      loading: false,
+      progress: 0,
+      message: ''
+  });
+
   private readonly mapApiUrl = `${environment.apiURL}map`;
 
   constructor(
     private tokenService: TokenService,
     private callService: Video,
-    private http: HttpClient
+    private http: HttpClient,
+    private fileService: FileService
   ) {
   }
 
@@ -67,8 +84,13 @@ export class VttSync {
         }
       });
 
+      this.socket.on('connect', () => {
+        this.isConnected = true;
+      });
+
       this.socket.on('connect_error', (err) => {
         console.error('Socket Connection Error:', err.message);
+        this.isConnected = false;
       });
 
       this.socket.on('host-disconnected', () => {
@@ -85,25 +107,39 @@ export class VttSync {
             }
         }
       });
+
+      this.socket.on('disconnect', () => {
+          this.isConnected = false;
+      });
+
+      this.socket.on('reconnect', () => {
+          this.isConnected = true;
+          if (this.currentRoomId) {
+              this.requestResync();
+          }
+      });
     }
     return this.socket;
   }
 
-  startHosting(engine: VttEngine, roomId: string) {
-    const isReattaching = this.currentRoomId === roomId && this.isHosting && this.isConnected;
+  requestResync() {
+      if (!this.currentRoomId || this.resyncing) return;
+      console.log('Requesting resync for room:', this.currentRoomId);
+      this.resyncing = true;
+      this.getSocket().emit('request-resync', this.currentRoomId);
+  }
 
+  startHosting(engine: VttEngine, roomId: string) {
     this.currentRoomId = roomId;
     this.isHosting = true;
-    this.isConnected = true;
     this.engine = engine;
 
     const socket = this.getSocket();
+    const isReattaching = socket.connected && this.currentRoomId === roomId;
 
-    // If we're reattaching, we don't want to overwrite the server's state with a (possibly blank) engine config.
-    // Instead, we just re-join as host.
     socket.emit('host-session', {
       roomId,
-      initialState: isReattaching ? null : engine.getRawConfig()
+      initialState: isReattaching ? null : { ...engine.getRawConfig(), turnOrder: this.turnOrder$.value }
     });
 
     socket.off('remote-action');
@@ -113,8 +149,13 @@ export class VttSync {
 
     socket.off('map-update');
     socket.on('map-update', (config: any) => {
-      // If we reattached but somehow the engine is blanker than the server,
-      // or if we're a new host taking over, load the state.
+      this.resyncing = false;
+      if (config.version !== undefined) {
+          this.localVersion = config.version;
+      }
+      if (config.turnOrder) {
+          this.turnOrder$.next(config.turnOrder);
+      }
       if (isReattaching && engine.currentMapUrl) return;
       engine.loadConfigFromObject(config);
     });
@@ -125,16 +166,15 @@ export class VttSync {
   }
 
   joinSession(engine: VttEngine, roomId: string, character: ICharacter) {
-    const isReattaching = this.currentRoomId === roomId && !this.isHosting && this.isConnected;
-
     this.currentRoomId = roomId;
     this.isHosting = false;
-    this.isConnected = true;
     this.engine = engine;
 
     engine.setLocalCharacter(character);
 
     const socket = this.getSocket();
+    const isReattaching = socket.connected && this.currentRoomId === roomId;
+
     socket.emit('join-session', { roomId, character });
 
     socket.off('map-update');
@@ -143,7 +183,13 @@ export class VttSync {
     socket.off('session-ended');
 
     socket.on('map-update', (config: any) => {
-      // Only load if we don't already have a map loaded or if we're not reattaching
+      this.resyncing = false;
+      if (config.version !== undefined) {
+          this.localVersion = config.version;
+      }
+      if (config.turnOrder) {
+          this.turnOrder$.next(config.turnOrder);
+      }
       if (!isReattaching || !engine.currentMapUrl) {
           engine.loadConfigFromObject(config);
       }
@@ -172,20 +218,27 @@ export class VttSync {
       if (this.isHosting) {
         this.socket.emit('stop-hosting', this.currentRoomId);
       }
+
+      // Explicitly tell the server we are leaving this room so it can calculate cleanup immediately
+      this.socket.emit('leave-session', this.currentRoomId);
+
       this.socket.disconnect();
       this.socket = null;
     }
+
     this.currentRoomId = null;
     this.isHosting = false;
     this.isConnected = false;
     this.hostDisconnected$.next(false);
     this.engine = null;
+    this.localVersion = 0;
     this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [], activeIndex: 0 });
   }
 
   broadcastAction(action: string, data: any) {
-    if (!this.isConnected || !this.currentRoomId) return;
-    this.getSocket().emit('sync-action', {
+    const socket = this.getSocket();
+    if (!socket.connected || !this.currentRoomId) return;
+    socket.emit('sync-action', {
       roomId: this.currentRoomId,
       action,
       data
@@ -208,6 +261,31 @@ export class VttSync {
       this.broadcastAction('ping', data);
     });
 
+    engine.stage.off('mapLoadingStarted');
+    engine.stage.on('mapLoadingStarted', () => {
+        this.mapLoading$.next({ loading: true, progress: 0, message: 'Processing map image...' });
+    });
+
+    engine.stage.off('mapLoadingFinished');
+    engine.stage.on('mapLoadingFinished', () => {
+        this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+    });
+
+    engine.stage.off('tokenAdded');
+    engine.stage.on('tokenAdded', (data: any) => {
+      if (!data.remote) this.broadcastAction('token-added', data);
+    });
+
+    engine.stage.off('tokenDeleted');
+    engine.stage.on('tokenDeleted', (data: any) => {
+      if (!data.remote) this.broadcastAction('token-deleted', data);
+    });
+
+    engine.stage.off('tokenUpdated');
+    engine.stage.on('tokenUpdated', (data: any) => {
+      if (!data.remote) this.broadcastAction('token-update', data);
+    });
+
     if (this.isHosting) {
       engine.stage.off('wallAdded');
       engine.stage.on('wallAdded', (data: any) => {
@@ -218,21 +296,6 @@ export class VttSync {
       engine.stage.on('wallDeleted', (data: any) => {
         this.broadcastAction('wall-deleted', data);
       });
-
-      engine.stage.off('tokenAdded');
-      engine.stage.on('tokenAdded', (data: any) => {
-        if (!data.remote) this.broadcastAction('token-added', data);
-      });
-
-      engine.stage.off('tokenDeleted');
-      engine.stage.on('tokenDeleted', (data: any) => {
-        if (!data.remote) this.broadcastAction('token-deleted', data);
-      });
-
-      engine.stage.off('mapChanged');
-      engine.stage.on('mapChanged', (data: any) => {
-        this.broadcastAction('map-change', data);
-      })
 
       engine.stage.off('lightingToggled');
       engine.stage.on('lightingToggled', (data: any) => {
@@ -247,7 +310,16 @@ export class VttSync {
   }
 
 
-  private handleRemoteAction(engine: VttEngine, { action, data }: any) {
+  private handleRemoteAction(engine: VttEngine, { action, data, version }: any) {
+    if (version !== undefined) {
+        if (version > this.localVersion + 1) {
+            console.warn(`Out of sync! Local: ${this.localVersion}, Remote: ${version}. Requesting resync.`);
+            this.requestResync();
+            return;
+        }
+        this.localVersion = version;
+    }
+
     switch (action) {
       case 'token-move':
         engine.animateTokenMove(data.id, data.x, data.y);
@@ -267,12 +339,16 @@ export class VttSync {
         break;
 
       case 'token-deleted':
-        const token = engine.tokenLayer.getChildren().find(g => g.id() === data.id);
-        if (token) token.destroy();
+        engine.removeToken(data.id, true);
+        break;
+
+      case 'token-update':
+        engine.updateTokenConfig(data.id, data.options, true);
         break;
 
       case 'lighting-toggle':
         engine.lightLayer.visible(data.visible);
+        engine.updateLighting();
         break;
 
       case 'grid-size-change':
@@ -285,6 +361,9 @@ export class VttSync {
 
       case 'map-load':
         engine.loadConfigFromObject(data);
+        if (data.turnOrder) {
+            this.turnOrder$.next(data.turnOrder);
+        }
         break;
 
       case 'measure-sync':
@@ -300,16 +379,19 @@ export class VttSync {
       case 'turn-order-sync':
         this.turnOrder$.next(data);
         break;
+
+      case 'turn-order-add':
+        if (this.isHosting) this.addTurnOrderEntry(data);
+        break;
+
+      case 'turn-order-remove':
+        if (this.isHosting) this.removeTurnOrderEntry(data.id);
+        break;
     }
     engine.stage.batchDraw();
   }
 
   addCharacterToken(engine: VttEngine, character: ICharacter, x?: number, y?: number) {
-    if (!this.isConnected || !this.currentRoomId) {
-      console.error('Cannot add token: Not connected to a session.');
-      return;
-    }
-
     const posX = x ?? 100;
     const posY = y ?? 100;
 
@@ -322,30 +404,151 @@ export class VttSync {
     };
 
     engine.addToken(posX, posY, tokenOptions, false);
+  }
 
-    this.broadcastAction('token-added', {
-      x: posX,
-      y: posY,
-      options: tokenOptions
+  async setMap(mapSource: File | string, onProgress?: (progress: number) => void): Promise<void> {
+    if (!this.engine) {
+      console.error('VttEngine not initialized.');
+      return;
+    }
+
+    let mapUrl: string;
+
+    if (typeof mapSource === 'string') {
+      mapUrl = mapSource;
+    } else {
+      if (!this.isHosting) {
+        console.warn('Only the host can upload new map images directly.');
+        return;
+      }
+      try {
+        this.mapLoading$.next({ loading: true, progress: 0, message: 'Uploading map...' });
+        const uploadedFile = await this.fileService.uploadFileInChunks(mapSource, (progress) => {
+            this.mapLoading$.next({ loading: true, progress, message: `Uploading map (${progress}%)...` });
+            if (onProgress) onProgress(progress);
+        });
+        mapUrl = uploadedFile.url;
+      } catch (error) {
+        this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+        console.error('Failed to upload map image:', error);
+        throw error;
+      }
+    }
+
+    this.engine.setBackground(mapUrl, false);
+
+    if (this.isHosting) {
+      this.broadcastAction('map-change', { url: mapUrl });
+    }
+  }
+
+  async updateToken(tokenId: string, options: any, iconFile?: File): Promise<void> {
+    if (!this.engine) return;
+
+    if (iconFile) {
+      try {
+        this.mapLoading$.next({ loading: true, progress: 0, message: 'Uploading token icon...' });
+        const uploadedFile = await this.fileService.uploadFileInChunks(iconFile, (progress) => {
+          this.mapLoading$.next({ loading: true, progress, message: `Uploading icon (${progress}%)...` });
+        });
+        options.icon = uploadedFile.url;
+      } catch (error) {
+        this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+        console.error('Failed to upload token icon:', error);
+        return;
+      }
+    }
+
+    this.engine.updateTokenConfig(tokenId, options, false);
+    this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+  }
+
+  public updateTurnOrder(state: TurnOrderState) {
+    this.turnOrder$.next(state);
+    if (this.isHosting) {
+        this.broadcastAction('turn-order-sync', state);
+    }
+  }
+
+  public activateTurnOrder() {
+    this.updateTurnOrder({
+      isActive: true,
+      isConfirmed: false,
+      entries: [],
+      activeIndex: 0
     });
   }
 
-  updateTurnOrder(state: TurnOrderState) {
-    this.turnOrder$.next(state);
-    this.broadcastAction('turn-order-sync', state);
+  public endTurnOrder() {
+    this.updateTurnOrder({
+      isActive: false,
+      isConfirmed: false,
+      entries: [],
+      activeIndex: 0
+    });
+  }
+
+  public confirmTurnOrder() {
+    const currentState = this.turnOrder$.value;
+    const sortedEntries = [...currentState.entries].sort((a, b) => b.initiative - a.initiative);
+    this.updateTurnOrder({
+      ...currentState,
+      isConfirmed: true,
+      entries: sortedEntries,
+      activeIndex: 0
+    });
+  }
+
+  public nextTurn() {
+    const currentState = this.turnOrder$.value;
+    if (!currentState.entries.length) return;
+    const nextIndex = (currentState.activeIndex + 1) % currentState.entries.length;
+    this.updateTurnOrder({
+      ...currentState,
+      activeIndex: nextIndex
+    });
+  }
+
+  public prevTurn() {
+    const currentState = this.turnOrder$.value;
+    if (!currentState.entries.length) return;
+    const prevIndex = (currentState.activeIndex - 1 + currentState.entries.length) % currentState.entries.length;
+    this.updateTurnOrder({
+      ...currentState,
+      activeIndex: prevIndex
+    });
+  }
+
+  public addTurnOrderEntry(entry: TurnOrderEntry) {
+    if (this.isHosting || !this.getSocket().connected) {
+      const currentState = this.turnOrder$.value;
+      const newEntries = [...currentState.entries, entry];
+      if (currentState.isConfirmed) {
+        newEntries.sort((a, b) => b.initiative - a.initiative);
+      }
+      this.updateTurnOrder({ ...currentState, entries: newEntries });
+    } else {
+      this.broadcastAction('turn-order-add', entry);
+    }
+  }
+
+  public removeTurnOrderEntry(entryId: string) {
+    if (this.isHosting || !this.getSocket().connected) {
+      const currentState = this.turnOrder$.value;
+      this.updateTurnOrder({
+        ...currentState,
+        entries: currentState.entries.filter(e => e.id !== entryId)
+      });
+    } else {
+      this.broadcastAction('turn-order-remove', { id: entryId });
+    }
   }
 
   getEngine() {
     return this.engine;
   }
 
-  // --- Map Library Methods (Website implementation) ---
-
   async saveMapLibrary(library: MapLibraryEntry[]): Promise<void> {
-    // We send the whole library for this server
-    // Assuming the backend has an endpoint to store this.
-    // If it doesn't exist, we might need to save individual maps.
-    // For now, let's assume a bulk save/update for the server's maps.
     await firstValueFrom(this.http.post(`${this.mapApiUrl}/library`, { library }, { withCredentials: true }));
   }
 

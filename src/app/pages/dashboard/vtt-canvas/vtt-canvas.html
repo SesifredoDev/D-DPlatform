@@ -152,6 +152,17 @@
 
 <div #vttContainer id="vtt-container"></div>
 
+<!-- Map Loading Overlay -->
+<div class="map-loading-overlay" *ngIf="(syncService.mapLoading$ | async)?.loading">
+  <div class="loading-content glass">
+    <div class="spinner"></div>
+    <div class="loading-text">{{ (syncService.mapLoading$ | async)?.message }}</div>
+    <div class="progress-bar-container" *ngIf="(syncService.mapLoading$ | async)?.progress">
+      <div class="progress-bar" [style.width.%]="(syncService.mapLoading$ | async)?.progress"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Turn Order Display -->
 <div class="turn-order-overlay glass" *ngIf="(turnOrderState$ | async) as turnOrder" [hidden]="!turnOrder.isActive" [class.minimized]="turnOrderMinimized">
   <div class="turn-order-header" (click)="toggleTurnOrderMinimize()">
