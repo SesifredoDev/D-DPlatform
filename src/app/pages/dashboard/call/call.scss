@@ -656,6 +656,66 @@
       &:hover { background: var(--brand-blue-hover); transform: translateY(-2px); }
     }
   }
+
+  .broadcast-markdown-container {
+    width: min(900px, calc(100vw - 48px));
+    max-height: min(80vh, calc(100vh - 96px));
+    min-width: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 24px 28px;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--brand-blue-alpha);
+    background: rgba(30, 31, 34, 0.95);
+    color: white;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+
+    markdown {
+      display: block;
+      width: 100%;
+      min-width: 0;
+      color: white;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+
+    markdown ::ng-deep * {
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+
+    markdown ::ng-deep img {
+      display: block;
+      max-width: 100% !important;
+      max-height: min(55vh, 600px) !important;
+      width: auto !important;
+      height: auto !important;
+      margin: 16px auto;
+      object-fit: contain;
+      border-radius: var(--radius-l);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+    }
+
+    .btn-dismiss {
+      align-self: center;
+      background: var(--brand-blue);
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      border-radius: var(--radius-pill);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s ease;
+
+      &:hover { background: var(--brand-blue-hover); transform: translateY(-2px); }
+    }
+  }
 }
+
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

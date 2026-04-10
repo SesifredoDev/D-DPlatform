@@ -1,11 +1,9 @@
-import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, NgZone, OnInit, Output} from '@angular/core';
-
-import {MatCardModule} from '@angular/material/card';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, Output} from '@angular/core';
 
 import {ICharacter} from '../../../shared/models/user/character.model';
 
 import {CharacterService} from '../../../shared/services/character/character';
-import {CommonModule, NgForOf, NgIf} from '@angular/common';
+import {CommonModule} from '@angular/common';
 import {MatSelectModule} from '@angular/material/select';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatListModule} from '@angular/material/list';
@@ -26,6 +24,7 @@ import {
 } from '../../../objects/server-settings-dialog-component/server-settings-dialog-component';
 import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-component/server-add-dialog-component';
 import {VttSync} from '../../../shared/services/vttsync/vttsync';
+import {ObsidianVaultService} from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 
 
 @Component({
@@ -69,10 +68,12 @@ export class SidePanel implements AfterViewInit {
     private tabService: TabService,
     private userService: UserService,
     private serverService: ServerService,
-    private channelService: ChannelService,
+    public channelService: ChannelService,
     private router: Router,
     private dialog: MatDialog,
-    private vttSync: VttSync) {
+    private vttSync: VttSync,
+    public obsidianService: ObsidianVaultService
+  ) {
   }
 
 
@@ -125,13 +126,32 @@ export class SidePanel implements AfterViewInit {
 
     this.serverService.getServerDetailsObservable().subscribe((server) => {
       if (server) {
-
+        this.selectedServer = server
         this.channels = server.channels;
 
         if (this.channels[0]) this.selectChannel(this.channels[0]);
+        console.log(server, this.currentUserId)
+        if (server && this.currentUserId) {
+          this.channels = [...server.channels];
 
-        if (server) {
+          // Only show if user is owner AND a vault is linked
+          if (this.obsidianService.isOwner(server, this.currentUserId) &&
+            this.obsidianService.hasVaultAttached(server._id)) {
+            this.channels.push(this.obsidianService.getObsidianChannel(server._id));
+          }
+
+
           this.groupMembersByRole(server);
+
+          // --- Debugging logs for Obsidian buttons ---
+          console.log('--- Obsidian Button Debugging ---');
+          console.log('selectedServer:', this.selectedServer);
+          console.log('currentUserId:', this.currentUserId);
+          console.log('selectedServer.owner:', (this.selectedServer as any)?.owner);
+          console.log('Is current user owner:', this.currentUserId === (this.selectedServer as any)?.owner);
+          console.log('hasVaultAttached:', this.obsidianService.hasVaultAttached((this.selectedServer as any)?._id));
+          console.log('--- End Debugging ---');
+          // --- End Debugging logs ---
         }
 
       }
@@ -159,15 +179,35 @@ export class SidePanel implements AfterViewInit {
     this.channelService.setChannelObservable(channel);
   }
 
+  openObsidian(){
+    console.log("open Obsidian")
+    if(!this.selectedServer) return
+    let obsidianChannel = this.obsidianService.getObsidianChannel(this.selectedServer._id);
+
+    console.log(obsidianChannel, "opening")
+    this.selectChannel(obsidianChannel)
+  }
+
 
   selectServer(server: any) {
 
     this.tabService.closeAllTabs()
-    this.selectedServer = server;
     this.serverService.getServerDetails(server._id);
 
     this.cdr.markForCheck();
 
+    // --- Debugging logs for Obsidian buttons ---
+    console.log('--- Obsidian Button Debugging (selectServer) ---');
+    console.log('selectedServer:', this.selectedServer);
+    console.log('currentUserId:', this.currentUserId);
+    console.log('selectedServer.owner:', (this.selectedServer as any)?.owner);
+    console.log('Is current user owner:', this.currentUserId === (this.selectedServer as any)?.owner);
+    console.log('hasVaultAttached:', this.obsidianService.hasVaultAttached((this.selectedServer as any)?._id));
+    console.log('--- End Debugging (selectServer) ---');
+    // --- End Debugging logs ---
+  }
+  get isServerOwner(){
+    return this.selectedServer?.owner == this.currentUserId;
   }
 
 
@@ -189,6 +229,25 @@ export class SidePanel implements AfterViewInit {
       minHeight: '500px',
       panelClass: 'custom-dialog-container'
     });
+  }
+
+  async linkObsidian() {
+    if (this.selectedServer) {
+      await this.obsidianService.attachVaultToServer(this.selectedServer._id);
+      // Trigger a refresh of server details to show the new channel
+      this.serverService.getServerDetails(this.selectedServer._id);
+    }
+  }
+
+  linkObsidianLocalhost() {
+    if (this.selectedServer) {
+      const url = prompt('Enter the localhost URL for your Obsidian vault (e.g., http://localhost:27124):');
+      if (url) {
+        this.obsidianService.setVaultLocalhostRoute(this.selectedServer._id, url);
+        // Trigger a refresh of server details to show the new channel
+        this.serverService.getServerDetails(this.selectedServer._id);
+      }
+    }
   }
 
   groupMembersByRole(server: any) {

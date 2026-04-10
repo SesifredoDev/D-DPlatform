@@ -9,6 +9,7 @@ export interface Attachment {
   url: string;
   name: string;
   contentType: string;
+  filename: string; // Added filename property
 }
 
 export interface Reaction {

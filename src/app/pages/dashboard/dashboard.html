@@ -40,6 +40,8 @@
                             [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
             <app-spotify-player [isCallActive]="true"></app-spotify-player>
+          } @else if (tab.type === 'obsidian') {
+            <app-obsidian-view [serverId]="tab.data.serverId"></app-obsidian-view>
           }
         </div>
       }
@@ -89,6 +91,8 @@
                               [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
               <app-spotify-player [isCallActive]="true"></app-spotify-player>
+            } @else if (tab.type === 'obsidian') {
+              <app-obsidian-view [serverId]="tab.data.serverId"></app-obsidian-view>
             }
           </div>
         }

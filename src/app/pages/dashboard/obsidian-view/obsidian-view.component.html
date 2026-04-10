@@ -1,0 +1,218 @@
+<div class="obsidian-view-container">
+  <!-- Top Navigation Bar -->
+  <div class="obsidian-header">
+    <div class="left-section">
+      <button mat-icon-button (click)="isEditing ? cancelEdit() : null" [disabled]="!isEditing" matTooltip="Back to vault">
+        <mat-icon>arrow_back</mat-icon>
+      </button>
+      <div class="vault-info">
+        <span class="vault-name">{{ vaultName || serverId }}</span>
+      </div>
+    </div>
+
+    <div class="right-section">
+      <!-- Broadcast Document Button -->
+      <button *ngIf="isEditing" mat-icon-button (click)="broadcastFullDocument()" matTooltip="Broadcast Document">
+        <mat-icon>broadcast_on_home</mat-icon>
+      </button>
+
+      <button *ngIf="localhostRoute" mat-icon-button (click)="openObsidianVault()" matTooltip="Open in Obsidian">
+        <mat-icon>open_in_new</mat-icon>
+      </button>
+
+      <ng-container *ngIf="isEditing && selectedFileName.endsWith('.md')">
+        <button mat-icon-button (click)="toggleEditMode()" [matTooltip]="isPreview ? 'Edit Source' : 'Show Preview'">
+          <mat-icon>{{ isPreview ? 'edit' : 'visibility' }}</mat-icon>
+        </button>
+      </ng-container>
+    </div>
+  </div>
+
+  <div class="obsidian-main-content">
+    <!-- Sidebar - File Explorer -->
+    <div class="obsidian-sidebar" [class.collapsed]="isEditing && !isPreview"
+         (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+      <div class="sidebar-header">
+        <span>Files</span>
+        <div class="sidebar-actions">
+          <button mat-icon-button (click)="createNewFile()" matTooltip="New Note">
+            <mat-icon>note_add</mat-icon>
+          </button>
+          <button mat-icon-button (click)="loadVaultEntries()" matTooltip="Refresh">
+            <mat-icon>refresh</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="file-tree">
+        <mat-nav-list class="tree-root">
+          <ng-container *ngTemplateOutlet="treeNode; context: { entries: vaultEntries }"></ng-container>
+        </mat-nav-list>
+
+        <!-- Recursive Node Template -->
+        <ng-template #treeNode let-entries="entries" let-depth="depth">
+          <div *ngFor="let entry of entries">
+            <!-- Folder Node -->
+            <mat-expansion-panel *ngIf="entry.kind === 'directory'"
+                                 [hideToggle]="false"
+                                 class="folder-panel"
+                                 [expanded]="false"
+                                 (dragover)="onDragOver($event)"
+                                 (drop)="onDrop($event, entry)"
+                                 (contextmenu)="onContextMenu($event, folderMenuTrigger)">
+              <mat-expansion-panel-header>
+                <mat-panel-title>
+                  <mat-icon>folder</mat-icon>
+                  {{ entry.name }}
+                </mat-panel-title>
+
+                <!-- Hidden trigger for context menu -->
+                <div [style.position]="'fixed'"
+                     [style.left]="contextMenuPosition.x"
+                     [style.top]="contextMenuPosition.y"
+                     [matMenuTriggerFor]="folderMenu"
+                     #folderMenuTrigger="matMenuTrigger">
+                </div>
+
+                <mat-menu #folderMenu="matMenu">
+                  <button mat-menu-item (click)="deleteEntry(entry)">
+                    <mat-icon>delete</mat-icon>
+                    <span>Delete</span>
+                  </button>
+                </mat-menu>
+              </mat-expansion-panel-header>
+
+              <div class="folder-content">
+                <ng-container *ngTemplateOutlet="treeNode; context: { entries: entry.children, depth: (depth || 0) + 1 }"></ng-container>
+              </div>
+            </mat-expansion-panel>
+
+            <!-- File Node -->
+            <mat-list-item *ngIf="entry.kind === 'file'"
+                           (click)="selectFile(entry)"
+                           (contextmenu)="onContextMenu($event, fileMenuTrigger)"
+                           class="file-item"
+                           [class.active]="selectedFileRelativePath === entry.relativePath"
+                           draggable="true"
+                           (dragstart)="onDragStart($event, entry)">
+              <mat-icon matListItemIcon>{{ entry.name.endsWith('.md') ? 'description' : 'insert_drive_file' }}</mat-icon>
+              <div matListItemTitle>{{ getDisplayName(entry.name) }}</div>
+
+              <!-- Hidden trigger for context menu -->
+              <div [style.position]="'fixed'"
+                   [style.left]="contextMenuPosition.x"
+                   [style.top]="contextMenuPosition.y"
+                   [matMenuTriggerFor]="fileMenu"
+                   #fileMenuTrigger="matMenuTrigger">
+              </div>
+
+              <mat-menu #fileMenu="matMenu">
+                <!-- Broadcast File Menu Item -->
+                <button mat-menu-item (click)="selectFile(entry); broadcastFullDocument()">
+                   <mat-icon>broadcast_on_home</mat-icon>
+                   <span>Broadcast</span>
+                </button>
+                <button mat-menu-item (click)="deleteEntry(entry)">
+                  <mat-icon>delete</mat-icon>
+                  <span>Delete</span>
+                </button>
+              </mat-menu>
+            </mat-list-item>
+          </div>
+        </ng-template>
+
+        <div *ngIf="vaultEntries.length === 0 && permissionGranted" class="empty-state">
+          <p>Empty vault.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="obsidian-editor-container">
+      <!-- Welcome / Permission States -->
+      <div *ngIf="!isEditing" class="welcome-screen">
+        <div *ngIf="vaultName && !permissionGranted" class="setup-card">
+          <mat-icon>lock</mat-icon>
+          <h3>Access Required</h3>
+          <p>Grant permission to access <strong>{{ vaultName }}</strong>.</p>
+
+          <div class="browser-info">
+            <mat-icon>info_outline</mat-icon>
+            <p>Due to browser security policies, you must re-authorize access to local folders after page refreshes.</p>
+          </div>
+
+          <button mat-raised-button color="primary" (click)="requestPermission()">Grant Access</button>
+        </div>
+
+        <div *ngIf="!vaultName && !localhostRoute" class="setup-card">
+          <mat-icon>folder_open</mat-icon>
+          <h3>Setup Vault</h3>
+          <p>Link your Obsidian vault to this server.</p>
+
+          <div class="browser-warning" *ngIf="!fileSystemApiSupported">
+            <mat-icon>warning_amber</mat-icon>
+            <p>Your current browser does not support the File System Access API. Please switch to a Chromium-based browser (Chrome, Edge, etc.) to use local folders.</p>
+          </div>
+
+          <div class="browser-info" *ngIf="fileSystemApiSupported">
+            <mat-icon>info_outline</mat-icon>
+            <p>Browsers run in a secure sandbox. Local folder access is limited and requires manual permission to maintain security.</p>
+          </div>
+
+          <div class="actions">
+            <button mat-raised-button color="primary" (click)="attachVault()" [disabled]="!fileSystemApiSupported">
+              Attach Local Folder
+            </button>
+          </div>
+        </div>
+
+        <div *ngIf="permissionGranted && !isEditing" class="no-file-selected">
+          <mat-icon>description</mat-icon>
+          <p>Select a file to view or edit</p>
+        </div>
+      </div>
+
+      <!-- File Content / Editor -->
+      <div *ngIf="isEditing" class="file-content-wrapper">
+        <!-- File Name Bar (Editable) -->
+        <div class="file-name-bar">
+          <input [(ngModel)]="selectedFileDisplayName" (blur)="renameSelectedFile()"
+                 placeholder="Untitled Note" spellcheck="false" class="file-title-input">
+        </div>
+
+        <div class="content-scroll-container">
+          <!-- Selection Broadcast Button (Float/Contextual) -->
+          <div class="selection-actions-container">
+            <button mat-mini-fab color="accent" (click)="broadcastSelection()" matTooltip="Broadcast Selection">
+              <mat-icon>broadcast_on_home</mat-icon>
+            </button>
+          </div>
+
+          <!-- Markdown Previewer -->
+          <div class="preview-mode" *ngIf="isPreview && selectedFileName.endsWith('.md')">
+            <markdown [data]="processedContent" class="obsidian-markdown" (click)="handleMarkdownClick($event)"></markdown>
+          </div>
+
+          <!-- Code/Markdown Editor -->
+          <div class="editor-mode" *ngIf="!isPreview && selectedFileName.endsWith('.md')">
+            <textarea [(ngModel)]="selectedFileContent"
+                      (ngModelChange)="onContentChange()"
+                      placeholder="Start writing..."
+                      spellcheck="false"></textarea>
+          </div>
+
+          <!-- Non-markdown viewer -->
+          <div class="non-markdown-viewer" *ngIf="!selectedFileName.endsWith('.md')">
+            <img *ngIf="isImage" [src]="nonMarkdownUrl" class="viewer-image">
+            <embed *ngIf="isPdf" [src]="nonMarkdownUrl" type="application/pdf" class="viewer-pdf">
+            <div *ngIf="!isImage && !isPdf" class="generic-file">
+              <mat-icon>insert_drive_file</mat-icon>
+              <p>{{ selectedFileName }}</p>
+              <a [href]="nonMarkdownUrl" [download]="selectedFileName" mat-raised-button color="primary">Download File</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

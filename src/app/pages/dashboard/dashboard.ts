@@ -16,6 +16,7 @@ import {Video} from '../../shared/services/video/video';
 import {CommonModule} from '@angular/common';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
+import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 
 @Component({
   selector: 'app-dashboard',
@@ -34,7 +35,8 @@ import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
     CharacterViewer,
     VttCanvas,
     SpotifyPlayer,
-    MatDialogModule
+    MatDialogModule,
+    ObsidianViewComponent
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
@@ -77,7 +79,11 @@ export class Dashboard implements OnInit {
 
     this.channelService.getChannelObservable().subscribe((channel: any) => {
       if (channel && channel._id) {
-        this.tabService.openTab(channel._id, channel.name, channel.type);
+        if (channel.type === 'obsidian') {
+          this.tabService.openTab(channel._id, channel.name, channel.type, 'left', { serverId: channel.server });
+        } else {
+          this.tabService.openTab(channel._id, channel.name, channel.type);
+        }
       }
     });
 
@@ -151,6 +157,7 @@ export class Dashboard implements OnInit {
       case 'character': return 'person';
       case 'vtt': return 'map';
       case 'spotify': return 'music_note';
+      case 'obsidian': return 'book';
       default: return 'window';
     }
   }

@@ -204,7 +204,12 @@
   word-break: break-word;
 
   ::ng-deep {
-    p { margin: 0 0 6px 0; }
+    p { margin: 0 0 6px 0;
+      img{
+        max-width: 50%;
+
+      }
+    }
     p:last-child { margin-bottom: 0; }
   }
 }
@@ -444,4 +449,11 @@
   }
   h3 { color: white; font-size: 24px; margin-bottom: 12px; }
   p { max-width: 320px; opacity: 0.7; }
+}
+
+
+p{
+  img{
+    max-width: 50%;
+  }
 }

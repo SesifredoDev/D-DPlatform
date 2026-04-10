@@ -3,7 +3,7 @@ import { BehaviorSubject } from 'rxjs';
 import { ICharacter } from '../../models/user/character.model';
 import { Video } from '../video/video';
 
-export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper';
+export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper' | 'obsidian';
 
 export interface Tab {
   id: string;
@@ -13,6 +13,7 @@ export interface Tab {
   active: boolean;
   character?: ICharacter;
   whisperRecipient?: any;
+  data?: any; // Added to support arbitrary data for different tab types
 }
 
 @Injectable({ providedIn: 'root' })
@@ -23,14 +24,14 @@ export class TabService {
 
   constructor(private videoService: Video) {}
 
-  openTab(id: string, title: string, type: TabType, pane: "left" | "right" = 'left', character?: ICharacter) {
+  openTab(id: string, title: string, type: TabType, pane: "left" | "right" = 'left', data?: any) { // Changed character to data
     const current = this.tabs.value;
     const existing = current.find(t => t.id === id);
 
     if (existing) {
       this.selectTab(id);
     } else {
-      const newTab: Tab = { id, title, type, pane, active: true, character };
+      const newTab: Tab = { id, title, type, pane, active: true, data }; // Passed data to newTab
       // Deactivate others in the same pane
       const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
       const res = [...updated.map(t=> (t.id === id ? {...t, active: true} : t))];

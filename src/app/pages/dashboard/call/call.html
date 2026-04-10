@@ -343,9 +343,17 @@
   </div>
 
   <!-- BROADCAST OVERLAY -->
-  <div class="broadcast-overlay" *ngIf="activeOverlayImage">
-    <div class="broadcast-image-container glass">
+  <div class="broadcast-overlay" *ngIf="activeOverlayImage || activeOverlayText">
+    <div class="broadcast-image-container glass" *ngIf="activeOverlayImage">
       <img [src]="activeOverlayImage" alt="Broadcast Image">
+      <button class="btn-dismiss" (click)="dismissOverlay()">
+        <mat-icon>close</mat-icon>
+        <span>Dismiss</span>
+      </button>
+    </div>
+
+    <div class="broadcast-markdown-container glass" *ngIf="activeOverlayText">
+      <markdown [data]="activeOverlayText"></markdown>
       <button class="btn-dismiss" (click)="dismissOverlay()">
         <mat-icon>close</mat-icon>
         <span>Dismiss</span>

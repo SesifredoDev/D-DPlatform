@@ -30,13 +30,14 @@ import { MatMenuModule } from '@angular/material/menu';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import { IUser } from '../../../shared/models/user/user.model';
+import { MarkdownComponent } from 'ngx-markdown';
 
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule]
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -80,6 +81,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   // Broadcast state
   activeOverlayImage: string | null = null;
+  activeOverlayText: string | null = null;
 
   // Spotify Requests
   spotifyRequests: any[] = [];
@@ -111,6 +113,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private themeSyncSub!: Subscription;
   private vttSub!: Subscription;
   private overlaySub!: Subscription;
+  private overlayTextSub!: Subscription;
   private serverDetailsSub!: Subscription;
 
   private isComponentDestroying = false;
@@ -321,6 +324,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.overlaySub = this.videoService.overlayImage$.subscribe(url => {
       this.activeOverlayImage = url;
+      this.cdr.detectChanges();
+    });
+
+    this.overlayTextSub = this.videoService.overlayText$.subscribe(text => {
+      this.activeOverlayText = text;
       this.cdr.detectChanges();
     });
 
@@ -567,6 +575,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
     if (this.overlaySub) this.overlaySub.unsubscribe();
+    if (this.overlayTextSub) this.overlayTextSub.unsubscribe();
     if (this.serverDetailsSub) this.serverDetailsSub.unsubscribe();
 
     // Just clean up local hardware previews.
@@ -593,6 +602,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   dismissOverlay() {
     this.activeOverlayImage = null;
+    this.activeOverlayText = null;
   }
 
   handleSongRequest(request: any) {

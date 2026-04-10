@@ -1,0 +1,392 @@
+.obsidian-view-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  color: #dbdee1;
+  background-color: #313338;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+
+  /* Header Styles */
+  .obsidian-header {
+    height: 48px;
+    background-color: #2b2d31;
+    border-bottom: 1px solid #1e1f22;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 1rem;
+
+    .left-section {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+
+      .vault-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 14px;
+        color: #b5bac1;
+
+        .vault-name {
+          font-weight: 600;
+          color: #dbdee1;
+        }
+      }
+    }
+
+    .right-section {
+      display: flex;
+      gap: 4px;
+    }
+  }
+
+  /* Main Layout */
+  .obsidian-main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+
+    /* Sidebar - File Explorer */
+    .obsidian-sidebar {
+      width: 260px;
+      min-width: 260px;
+      background-color: #2b2d31;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #1e1f22;
+      transition: width 0.3s ease-in-out;
+
+      &.collapsed {
+        width: 0;
+        min-width: 0;
+        overflow: hidden;
+        border: none;
+      }
+
+      .sidebar-header {
+        height: 40px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-left: 1rem;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #949ba4;
+        border-bottom: 1px solid rgba(0,0,0,0.1);
+
+        .sidebar-actions {
+          display: flex;
+          gap: 4px;
+        }
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+      }
+
+      .file-tree {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0.5rem 0;
+
+        .tree-root {
+          padding: 0;
+        }
+
+        .folder-panel {
+          background: transparent !important;
+          box-shadow: none !important;
+
+          ::ng-deep .mat-expansion-panel-header {
+            height: 32px !important;
+            padding: 0 8px 0 12px;
+            font-size: 14px;
+
+            &:hover {
+              background-color: #35373c !important;
+            }
+
+            .mat-content {
+              align-items: center;
+              gap: 8px;
+              mat-icon {
+                font-size: 18px;
+                width: 18px;
+                height: 18px;
+                color: #b5bac1;
+              }
+            }
+          }
+
+          .folder-content {
+            padding-left: 12px;
+            border-left: 1px solid #4e5058;
+            margin-left: 10px;
+          }
+
+          /* Folder more actions button */
+          button[mat-icon-button] {
+            width: 24px;
+            height: 24px;
+            line-height: 24px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            mat-icon { font-size: 16px; width: 16px; height: 16px; }
+          }
+          &:hover button[mat-icon-button] { opacity: 1; }
+        }
+
+        .file-item {
+          height: 32px !important;
+          margin-bottom: 2px;
+          cursor: pointer;
+          border-radius: 4px;
+          margin: 0 8px;
+          padding: 0 8px !important;
+
+          &:hover {
+            background-color: #35373c;
+          }
+
+          &.active {
+            background-color: #404249;
+            color: #fff;
+          }
+
+          mat-icon {
+            font-size: 18px;
+            width: 18px;
+            height: 18px;
+            color: #b5bac1;
+          }
+
+          div[matListItemTitle] {
+            font-size: 14px;
+            color: inherit;
+          }
+        }
+      }
+    }
+
+    /* Content Area / Editor */
+    .obsidian-editor-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #313338;
+      overflow: hidden;
+
+      .welcome-screen {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+
+        .setup-card {
+          max-width: 400px;
+          padding: 2rem;
+          background-color: #2b2d31;
+          border-radius: 8px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+
+          mat-icon {
+            font-size: 48px;
+            width: 48px;
+            height: 48px;
+            opacity: 0.5;
+            margin-bottom: 1rem;
+          }
+
+          h3 { margin-bottom: 0.5rem; }
+          p { margin-bottom: 1.5rem; color: #b5bac1; }
+          .actions { display: flex; gap: 0.5rem; justify-content: center; }
+
+          .browser-warning, .browser-info {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            background-color: #3a3d42;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+            text-align: left;
+
+            mat-icon {
+              font-size: 24px;
+              width: 24px;
+              height: 24px;
+              margin-top: 2px;
+              margin-bottom: 0;
+              opacity: 0.8;
+            }
+
+            p {
+              margin: 0;
+              font-size: 13px;
+              line-height: 1.4;
+              color: #b5bac1;
+            }
+          }
+
+          .browser-warning {
+            mat-icon { color: #ffc107; }
+          }
+
+          .browser-info {
+            mat-icon { color: #00a8fc; }
+          }
+        }
+
+        .no-file-selected {
+          opacity: 0.5;
+          mat-icon { font-size: 64px; width: 64px; height: 64px; }
+          p { margin-top: 1rem; font-size: 18px; }
+        }
+      }
+
+      .file-content-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative; /* For positioning selection actions */
+
+        .file-name-bar {
+          padding: 1.5rem 15% 0.5rem;
+          background-color: #313338;
+
+          .file-title-input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-size: 2.5rem;
+            font-weight: 700;
+            outline: none;
+            padding: 0;
+
+            &::placeholder {
+              color: #4e5058;
+            }
+          }
+        }
+
+        .content-scroll-container {
+          flex: 1;
+          overflow-y: auto;
+          position: relative; /* For positioning selection actions */
+
+          .selection-actions-container {
+            position: absolute;
+            top: 10px; /* Adjust as needed */
+            right: 10px; /* Adjust as needed */
+            z-index: 10; /* Ensure it's above content */
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+
+            &.visible {
+              opacity: 1;
+            }
+          }
+        }
+      }
+
+      /* Markdown Previewer */
+      .preview-mode {
+        padding: 0.5rem 15% 5rem;
+        background-color: #313338;
+
+        .obsidian-markdown {
+          color: #dbdee1;
+          line-height: 1.6;
+
+          /* Allow text selection */
+          user-select: text;
+          -webkit-user-select: text;
+          -moz-user-select: text;
+          -ms-user-select: text;
+
+          ::ng-deep {
+            h1 { font-size: 2.2em; border-bottom: 1px solid #4e5058; padding-bottom: 0.3em; margin-top: 0; }
+            h2 { font-size: 1.8em; border-bottom: 1px solid #4e5058; padding-bottom: 0.3em; }
+            a { color: #00a8fc; text-decoration: none; &:hover { text-decoration: underline; } }
+            code { background-color: #1e1f22; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
+            pre { background-color: #1e1f22; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+            blockquote { border-left: 4px solid #4e5058; padding-left: 1rem; color: #b5bac1; font-style: italic; }
+            ul, ol { padding-left: 2rem; }
+            img { max-width: 100%; border-radius: 4px; }
+            .internal-link { cursor: pointer; }
+          }
+        }
+      }
+
+      /* Raw Editor */
+      .editor-mode {
+        display: flex;
+        height: 100%;
+
+        textarea {
+          flex: 1;
+          background: #313338;
+          color: #dbdee1;
+          border: none;
+          padding: 0.5rem 15% 5rem;
+          font-family: 'JetBrains Mono', 'Fira Code', monospace;
+          font-size: 16px;
+          line-height: 1.5;
+          resize: none;
+          outline: none;
+
+          &::placeholder {
+            color: #4e5058;
+          }
+        }
+      }
+
+      /* Non-markdown viewer */
+      .non-markdown-viewer {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 2rem;
+        background-color: #313338;
+        overflow: auto;
+
+        .viewer-image {
+          max-width: 100%;
+          max-height: 80vh;
+          object-fit: contain;
+          border-radius: 8px;
+        }
+
+        .viewer-pdf {
+          width: 100%;
+          height: 80vh;
+          border: none;
+        }
+
+        .generic-file {
+          text-align: center;
+          mat-icon {
+            font-size: 64px;
+            width: 64px;
+            height: 64px;
+            opacity: 0.5;
+            margin-bottom: 1rem;
+          }
+          p {
+            font-size: 1.2rem;
+            margin-bottom: 1.5rem;
+          }
+        }
+      }
+    }
+  }
+}

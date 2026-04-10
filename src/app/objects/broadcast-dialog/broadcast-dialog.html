@@ -1,7 +1,12 @@
-<h2 mat-dialog-title>Broadcast Image</h2>
+<h2 mat-dialog-title>Broadcast Content</h2>
 <mat-dialog-content>
   <div class="preview-container">
-    <img [src]="imagePreview" alt="Preview" class="image-preview">
+    <ng-container *ngIf="hasFile || hasImageUrl">
+      <img [src]="imagePreview" alt="Preview" class="image-preview">
+    </ng-container>
+    <ng-container *ngIf="hasHtml && !hasFile && !hasImageUrl">
+      <div class="html-preview" [innerHTML]="htmlPreview"></div>
+    </ng-container>
   </div>
 
   <div class="options-container">
@@ -14,17 +19,17 @@
           <mat-list-option [value]="channel._id">
             <mat-icon matListItemIcon>chat</mat-icon>
             {{ channel.name }}
-          </mat-list-option>
+          </mat-list-option>s
         }
       </mat-selection-list>
     </div>
 
-    <div class="section" *ngIf="isCallActive">
+    <div class="section" *ngIf="isCallActive && (hasFile || hasImageUrl || hasText || hasHtml)">
       <h4>Active Call</h4>
       <mat-checkbox [(ngModel)]="broadcastToCall">Overlay on Everyone's Screen</mat-checkbox>
     </div>
 
-    <div class="section" *ngIf="isVttActive">
+    <div class="section" *ngIf="isVttActive && (hasFile || hasImageUrl)">
       <h4>VTT</h4>
       <mat-checkbox [(ngModel)]="broadcastToVtt">Add as non-player token</mat-checkbox>
     </div>

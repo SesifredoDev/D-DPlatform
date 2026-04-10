@@ -65,7 +65,6 @@
         <a
           mat-list-item
           class="channel-item"
-          routerLinkActive="active-channel"
           (click)="selectChannel(channel)">
 
           <mat-icon matListItemIcon class="channel-icon">
@@ -79,7 +78,15 @@
         </a>
       }
 
+
     </mat-nav-list>
+
+    <div class="action-row" *ngIf="selectedServer">
+      <!-- Only show link buttons if vault is NOT attached -->
+
+
+      <!-- If vault IS attached, maybe show an "Unlink" or "Settings" button later -->
+    </div>
 
   </div>
 
@@ -140,10 +147,10 @@
             </div>
 
             <mat-menu #memberMenu="matMenu">
-               <button mat-menu-item (click)="whisperUser(member)">
-                 <mat-icon>visibility_off</mat-icon>
-                 <span>Whisper</span>
-               </button>
+              <button mat-menu-item (click)="whisperUser(member)">
+                <mat-icon>visibility_off</mat-icon>
+                <span>Whisper</span>
+              </button>
             </mat-menu>
 
           </div>
@@ -155,6 +162,7 @@
     }
 
   </div>
+
 
 
   <!-- SERVER SWITCHER -->
@@ -219,6 +227,14 @@
       <mat-icon>map</mat-icon>
     </button>
 
+    <ng-container *ngIf="isServerOwner">
+      <button
+        mat-icon-button
+        (click)="openObsidian()"
+        matTooltip="Link Local Obsidian Vault">
+        <mat-icon>folder_special</mat-icon>
+      </button>
+    </ng-container>
 
   </div>
 
