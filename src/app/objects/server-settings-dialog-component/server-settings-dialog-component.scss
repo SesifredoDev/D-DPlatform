@@ -339,9 +339,24 @@ h2 {
 .info-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   background: var(--editor-pane-bg);
   padding: 12px;
   border-radius: var(--radius-m);
+
+  .join-code-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .join-code {
+      font-family: monospace;
+      font-size: 1.1em;
+      letter-spacing: 1px;
+      font-weight: bold;
+      color: var(--primary);
+    }
+  }
 }
 
 .split-panel {

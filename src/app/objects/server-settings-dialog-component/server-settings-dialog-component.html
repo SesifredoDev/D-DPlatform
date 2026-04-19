@@ -92,7 +92,12 @@
 
             <div class="info-row">
               <label>Join Code</label>
-              <span class="join-code">{{serverDetails?.joinCode}}</span>
+              <div class="join-code-container">
+                <span class="join-code">{{serverDetails?.joinCode}}</span>
+                <button mat-icon-button type="button" (click)="onRefreshJoinCode()" matTooltip="Refresh Join Code">
+                  <mat-icon>refresh</mat-icon>
+                </button>
+              </div>
             </div>
 
           </div>

@@ -141,6 +141,16 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     await this.serverService.getServerDetails(this.server._id);
   }
 
+  async onRefreshJoinCode() {
+    if (!this.serverDetails?._id) return;
+    try {
+      await this.serverService.refreshJoinCode(this.serverDetails._id);
+      this.snackBar.open('Join code refreshed!', 'OK', { duration: 2000 });
+    } catch (err) {
+      this.snackBar.open('Failed to refresh join code.', 'Close', { duration: 3000 });
+    }
+  }
+
   // Update the Create Role button logic
   createRole() {
     this.selectedRole = null;

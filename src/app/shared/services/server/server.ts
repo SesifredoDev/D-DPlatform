@@ -132,6 +132,24 @@ export class ServerService {
     await this.getMyServers();
   }
 
+  async refreshJoinCode(serverId: string): Promise<string> {
+    const response = await firstValueFrom(
+      this.http.post<{ joinCode: string }>(
+        `${this.baseUrl}/${serverId}/refresh-join-code`,
+        {},
+        { withCredentials: true }
+      ).pipe(catchError(handleApiError))
+    );
+    // Refresh local state
+    if (this.serverDetailsSubject.value?._id === serverId) {
+      this.serverDetailsSubject.next({
+        ...this.serverDetailsSubject.value,
+        joinCode: response.joinCode
+      });
+    }
+    return response.joinCode;
+  }
+
   getOrCreateWhisperChannel(serverId: string, recipientId?: string): Observable<IChannel> {
     return this.http.post<IChannel>(`${this.baseUrl}/whisper/create`, { serverId, recipientId }, { withCredentials: true })
       .pipe(catchError(handleApiError));
