@@ -5,7 +5,8 @@ import { BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { handleApiError } from '../../utils/api-error.util';
 import { environment } from '../../../../environments/environment';
 import { IServer } from '../../models/server/server.model';
-import {IChannel} from '../../models/server/channel.model';
+import { IChannel } from '../../models/server/channel.model';
+import { FileService } from '../file/file';
 
 @Injectable({
   providedIn: 'root',
@@ -16,7 +17,7 @@ export class ServerService {
   private myServersSubject = new BehaviorSubject<IServer[]>([]);
   private serverDetailsSubject = new BehaviorSubject<IServer | null>(null);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private fileService: FileService) {}
 
   getMyServersObservable(): Observable<IServer[]> {
     return this.myServersSubject.asObservable();
@@ -32,10 +33,17 @@ export class ServerService {
 
   async getMyServers(): Promise<void> {
     try {
-      const data = await firstValueFrom(
+      let data = await firstValueFrom(
         this.http.get<IServer[]>(`${this.baseUrl}/list`, { withCredentials: true })
           .pipe(catchError(handleApiError))
       );
+
+      // Resolve icon URLs
+      data = data.map(server => ({
+        ...server,
+        icon: server.icon ? this.fileService.resolveFileUrl(server.icon) : null
+      }));
+
       this.myServersSubject.next(data);
     } catch (error) {
       console.error('Failed to fetch servers', error);
@@ -44,10 +52,17 @@ export class ServerService {
 
   async getServerDetails(serverId: string): Promise<void> {
     try {
-      const data = await firstValueFrom(
+      let data = await firstValueFrom(
         this.http.get<IServer>(`${this.baseUrl}/${serverId}`, { withCredentials: true })
           .pipe(catchError(handleApiError))
       );
+
+      // Resolve icon URL
+      data = {
+        ...data,
+        icon: data.icon ? this.fileService.resolveFileUrl(data.icon) : null
+      };
+
       this.serverDetailsSubject.next(data);
     } catch (error) {
       console.error('Failed to fetch server details', error);
@@ -66,10 +81,16 @@ export class ServerService {
     if (iconFile) formData.append('icon', iconFile);
 
     // Changed to match the controller logic: /server/:serverId/update
-    const updated = await firstValueFrom(
+    let updated = await firstValueFrom(
       this.http.post<IServer>(`${this.baseUrl}/${serverId}/update`, formData, { withCredentials: true })
         .pipe(catchError(handleApiError))
     );
+
+    // Resolve icon URL
+    updated = {
+      ...updated,
+      icon: updated.icon ? this.fileService.resolveFileUrl(updated.icon) : null
+    };
 
     this.serverDetailsSubject.next(updated);
     await this.getMyServers();

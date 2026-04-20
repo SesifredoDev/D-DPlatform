@@ -1,6 +1,7 @@
 import {IRole} from './role.model';
 import {IUser} from '../user/user.model';
 import {IChannel} from './channel.model';
+import {ICharacter} from '../user/character.model';
 
 export interface IServer {
   _id: string;
@@ -18,4 +19,5 @@ export interface ServerMember {
   user: IUser; // User ID
   roles: string[];
   joinedAt: Date;
+  characters: ICharacter[];
 }

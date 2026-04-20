@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, Output} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, OnDestroy, Output} from '@angular/core';
 
 import {ICharacter} from '../../../shared/models/user/character.model';
 
@@ -25,6 +25,9 @@ import {
 import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-component/server-add-dialog-component';
 import {VttSync} from '../../../shared/services/vttsync/vttsync';
 import {ObsidianVaultService} from '../../../shared/services/ObsidianVault/obsidian-vault-service';
+import {MatTooltipModule} from '@angular/material/tooltip';
+import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
+import {Subscription} from 'rxjs';
 
 
 @Component({
@@ -39,6 +42,7 @@ import {ObsidianVaultService} from '../../../shared/services/ObsidianVault/obsid
     MatButtonModule,
     MatDividerModule,
     MatMenuModule,
+    MatTooltipModule
   ],
 
   templateUrl: './side-panel.html',
@@ -46,7 +50,7 @@ import {ObsidianVaultService} from '../../../shared/services/ObsidianVault/obsid
 
 })
 
-export class SidePanel implements AfterViewInit {
+export class SidePanel implements AfterViewInit, OnDestroy {
 
   @Output() whisperInitiated = new EventEmitter<any>();
 
@@ -61,6 +65,8 @@ export class SidePanel implements AfterViewInit {
 
   currentUserId: string | null = null;
 
+  private subscriptions: Subscription = new Subscription();
+
 
   constructor(
     private cdr: ChangeDetectorRef,
@@ -72,7 +78,8 @@ export class SidePanel implements AfterViewInit {
     private router: Router,
     private dialog: MatDialog,
     private vttSync: VttSync,
-    public obsidianService: ObsidianVaultService
+    public obsidianService: ObsidianVaultService,
+    private messagingSocketService: MessagingSocketService
   ) {
   }
 
@@ -113,26 +120,28 @@ export class SidePanel implements AfterViewInit {
     });
 
 
-    this.serverService.getMyServersObservable().subscribe((servers) => {
+    this.subscriptions.add(this.serverService.getMyServersObservable().subscribe((servers) => {
 
       if (servers.length > 0) {
         this.servers = servers;
-        this.selectServer(servers[0]);
+        if (!this.selectedServer) {
+          this.selectServer(servers[0]);
+        }
 
 
       }
-    })
+    }));
 
 
-    this.serverService.getServerDetailsObservable().subscribe((server) => {
+    this.subscriptions.add(this.serverService.getServerDetailsObservable().subscribe((server) => {
       if (server) {
-        this.selectedServer = server
-        this.channels = server.channels;
+        this.selectedServer = server;
+        this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
 
         if (this.channels[0]) this.selectChannel(this.channels[0]);
-        console.log(server, this.currentUserId)
+
         if (server && this.currentUserId) {
-          this.channels = [...server.channels];
+          this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
 
           // Only show if user is owner AND a vault is linked
           if (this.obsidianService.isOwner(server, this.currentUserId) &&
@@ -142,24 +151,58 @@ export class SidePanel implements AfterViewInit {
 
 
           this.groupMembersByRole(server);
-
-          // --- Debugging logs for Obsidian buttons ---
-          console.log('--- Obsidian Button Debugging ---');
-          console.log('selectedServer:', this.selectedServer);
-          console.log('currentUserId:', this.currentUserId);
-          console.log('selectedServer.owner:', (this.selectedServer as any)?.owner);
-          console.log('Is current user owner:', this.currentUserId === (this.selectedServer as any)?.owner);
-          console.log('hasVaultAttached:', this.obsidianService.hasVaultAttached((this.selectedServer as any)?._id));
-          console.log('--- End Debugging ---');
-          // --- End Debugging logs ---
+          this.messagingSocketService.joinServerRoom(server._id);
         }
 
       }
 
 
-    })
+    }));
+
+    this.subscriptions.add(this.messagingSocketService.memberUpdate$.subscribe((members) => {
+      if (this.selectedServer) {
+        this.selectedServer.members = members;
+        this.groupMembersByRole(this.selectedServer);
+        this.cdr.markForCheck();
+      }
+    }));
+
+    this.subscriptions.add(this.messagingSocketService.characterUpdate$.subscribe((update) => {
+      if (this.selectedServer && this.selectedServer._id === update.serverId) {
+        const charData = update.data;
+
+        this.selectedServer.members = this.selectedServer.members.map(member => {
+          if (member.user._id === charData.ownerId) {
+            let updatedCharacters;
+            if (charData.deleted) {
+              updatedCharacters = member.characters.filter((c: any) => c._id !== charData._id);
+            } else {
+              const exists = member.characters.some((c: any) => c._id === charData._id);
+              if (exists) {
+                updatedCharacters = member.characters.map((c: any) => c._id === charData._id ? charData : c);
+              } else {
+                updatedCharacters = [...member.characters, charData];
+              }
+            }
+            return { ...member, characters: updatedCharacters };
+          }
+          return member;
+        });
+
+        this.groupMembersByRole(this.selectedServer);
+        this.cdr.markForCheck();
+      }
+    }));
+
     this.serverService.getMyServers();
 
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+    if (this.selectedServer) {
+      this.messagingSocketService.leaveServerRoom(this.selectedServer._id);
+    }
   }
 
 
@@ -195,19 +238,13 @@ export class SidePanel implements AfterViewInit {
     this.serverService.getServerDetails(server._id);
 
     this.cdr.markForCheck();
-
-    // --- Debugging logs for Obsidian buttons ---
-    console.log('--- Obsidian Button Debugging (selectServer) ---');
-    console.log('selectedServer:', this.selectedServer);
-    console.log('currentUserId:', this.currentUserId);
-    console.log('selectedServer.owner:', (this.selectedServer as any)?.owner);
-    console.log('Is current user owner:', this.currentUserId === (this.selectedServer as any)?.owner);
-    console.log('hasVaultAttached:', this.obsidianService.hasVaultAttached((this.selectedServer as any)?._id));
-    console.log('--- End Debugging (selectServer) ---');
-    // --- End Debugging logs ---
   }
   get isServerOwner(){
-    return this.selectedServer?.owner == this.currentUserId;
+    if (!this.selectedServer || !this.currentUserId) return false;
+    const ownerId = typeof this.selectedServer.owner === 'string'
+      ? this.selectedServer.owner
+      : this.selectedServer.owner._id;
+    return ownerId === this.currentUserId;
   }
 
 
@@ -338,5 +375,18 @@ export class SidePanel implements AfterViewInit {
     });
   }
 
+  whisperDM() {
+    if (!this.selectedServer || !this.selectedServer.owner) return;
+    const ownerId = typeof this.selectedServer.owner === 'string'
+      ? this.selectedServer.owner
+      : this.selectedServer.owner._id;
+
+    this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, ownerId).subscribe(channel => {
+      if (channel._id) {
+        this.channelService.setChannelObservable(channel);
+        this.tabService.openTab(channel._id, channel.name, 'whisper');
+      }
+    });
+  }
 
 }

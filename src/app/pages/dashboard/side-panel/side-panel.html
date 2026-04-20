@@ -81,6 +81,34 @@
 
     </mat-nav-list>
 
+    <!-- WHISPER SECTION -->
+    <div class="category-header" *ngIf="selectedServer">
+      <mat-icon>expand_more</mat-icon>
+      <span>DM Whispers</span>
+    </div>
+
+    <mat-nav-list class="channel-list" *ngIf="selectedServer">
+      <ng-container *ngIf="isServerOwner">
+        @for (group of groupedMembers; track group) {
+          @for (member of group.members; track member) {
+            @if (member.user._id !== currentUserId) {
+              <a mat-list-item class="channel-item" (click)="whisperUser(member)">
+                <mat-icon matListItemIcon class="channel-icon">visibility_off</mat-icon>
+                <span matListItemTitle class="channel-label">{{ member.user.username }}</span>
+              </a>
+            }
+          }
+        }
+      </ng-container>
+
+      <ng-container *ngIf="!isServerOwner">
+        <a mat-list-item class="channel-item" (click)="whisperDM()">
+          <mat-icon matListItemIcon class="channel-icon">visibility_off</mat-icon>
+          <span matListItemTitle class="channel-label">DM Whisper</span>
+        </a>
+      </ng-container>
+    </mat-nav-list>
+
     <div class="action-row" *ngIf="selectedServer">
       <!-- Only show link buttons if vault is NOT attached -->
 
@@ -105,7 +133,7 @@
 
         @for (member of group.members; track member) {
 
-          <div class="member-row" [matMenuTriggerFor]="memberMenu">
+          <div class="member-row">
 
             <img
               class="member-avatar"
@@ -145,13 +173,6 @@
               }
 
             </div>
-
-            <mat-menu #memberMenu="matMenu">
-              <button mat-menu-item (click)="whisperUser(member)">
-                <mat-icon>visibility_off</mat-icon>
-                <span>Whisper</span>
-              </button>
-            </mat-menu>
 
           </div>
 
