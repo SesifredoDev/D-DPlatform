@@ -97,7 +97,8 @@
   top: 70px;
   left: 0;
   right: 0;
-  background: var(--spotify-black);
+
+  background: var(--background);
   z-index: 20;
   border-bottom: 1px solid var(--spotify-light-grey);
   transform: translateY(-100%);

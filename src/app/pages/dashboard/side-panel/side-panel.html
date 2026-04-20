@@ -152,9 +152,9 @@
   <!-- 3. FOOTER: USER & SYSTEM CONTROLS -->
   <footer class="sidebar-footer">
     <div class="footer-actions">
-      <button mat-icon-button (click)="openSettings()" matTooltip="Server Settings"><mat-icon>settings</mat-icon></button>
-      <button mat-icon-button (click)="openVTT()" matTooltip="World Map"><mat-icon>map</mat-icon></button>
-      <button mat-icon-button *ngIf="isServerOwner" (click)="openObsidian()" matTooltip="Obsidian Vault"><mat-icon>auto_stories</mat-icon></button>
+      <button mat-icon-button *ngIf="isServerOwner" (click)="openSettings()" matTooltip="Server Settings"><mat-icon>settings</mat-icon></button>
+      <button mat-icon-button *ngIf="isServerOwner" (click)="openVTT()" matTooltip="Game Map"><mat-icon>map</mat-icon></button>
+      <button mat-icon-button  (click)="openObsidian()" matTooltip="Obsidian Vault"><mat-icon>auto_stories</mat-icon></button>
     </div>
 
     <div class="footer-brand">
