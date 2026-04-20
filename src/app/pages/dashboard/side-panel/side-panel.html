@@ -1,262 +1,166 @@
 <div class="sidebar-container">
 
-  <!-- TOP SECTION -->
-  <div class="top-section">
+  <!-- 1. SERVER HEADER (Switcher now at top for better UX) -->
+  <header class="server-header" *ngIf="selectedServer">
+    <button mat-button class="server-dropdown-btn" [matMenuTriggerFor]="serverMenu">
+      <img
+        class="server-icon-mini"
+        [src]="selectedServer.icon || 'https://www.gravatar.com/avatar/'+selectedServer._id+'?d=identicon'"
+        (error)="$any($event.target).src = 'assets/default-avatar.png'">
+      <span class="server-name-text">{{ selectedServer.name }}</span>
+      <mat-icon class="chevron-icon">expand_more</mat-icon>
+    </button>
 
-    <div class="selector-row">
-      <button
-        mat-icon-button
-        class="manage-chars-btn"
-        matTooltip="Manage Characters"
-        (click)="goToManageCharacters()">
-        <mat-icon>people</mat-icon>
+    <mat-menu #serverMenu="matMenu" xPosition="after" yPosition="below" class="custom-glass-menu">
+      <div class="menu-label">My Servers</div>
+      @for (server of servers; track server) {
+        <button mat-menu-item (click)="selectServer(server)" [class.active-item]="server._id === selectedServer._id">
+          <img class="menu-icon-img" [src]="server.icon || 'https://www.gravatar.com/avatar/'+server._id+'?d=identicon'" (error)="$any($event.target).src = 'assets/default-avatar.png'">
+          <span>{{ server.name }}</span>
+        </button>
+      }
+      <mat-divider></mat-divider>
+      <button mat-menu-item (click)="openAddServerDialog()">
+        <mat-icon>add_circle</mat-icon>
+        <span>Create Server</span>
       </button>
-      @if (selectedServer) {
-        <mat-form-field appearance="fill" class="character-select">
-          <mat-select
-            [value]="selectedCharacter"
-            (selectionChange)="onCharacterChange($event.value)">
+    </mat-menu>
+  </header>
 
+  <!-- 2. SCROLLABLE CONTENT AREA -->
+  <div class="main-content-scroll">
+
+    <!-- CHARACTER SECTION (Your Identity) -->
+    <section class="identity-section" *ngIf="selectedCharacter">
+      <div class="identity-card" (click)="goToManageCharacters()" matTooltip="Manage Characters">
+        <div class="avatar-container">
+          <img
+            class="identity-avatar"
+            [src]="selectedCharacter.icon || 'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
+            (error)="$any($event.target).src = 'assets/default-avatar.png'">
+          <div class="status-indicator online"></div>
+        </div>
+        <div class="identity-info">
+          <div class="char-name">{{ selectedCharacter.name }}</div>
+          <div class="char-race">{{ selectedCharacter.race }}</div>
+        </div>
+        <mat-icon class="edit-hint">settings</mat-icon>
+      </div>
+
+      <!-- Character Switcher -->
+      <div class="char-switcher-row" *ngIf="selectedServer">
+        <mat-form-field appearance="outline" class="char-select-field">
+          <mat-select [value]="selectedCharacter" (selectionChange)="onCharacterChange($event.value)">
             @for (char of characters; track char) {
               @if (char.servers.includes(selectedServer._id) || char.servers[0] === '0') {
-                <mat-option [value]="char">
-                  {{ char.name }}
-                </mat-option>
+                <mat-option [value]="char">{{ char.name }}</mat-option>
               }
             }
-
           </mat-select>
         </mat-form-field>
-      }
-
-    </div>
-
-    @if (selectedCharacter) {
-      <div class="profile-card">
-
-        <img
-          class="avatar-img"
-          [src]="selectedCharacter.icon || 'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
-          alt="Character Icon"
-          (error)="$any($event.target).src = 'assets/default-avatar.png'">
-
-        <div class="profile-text">
-          <div class="character-name">{{ selectedCharacter.name }}</div>
-          <div class="character-sub">{{ selectedCharacter.race }}</div>
-        </div>
-
       </div>
-    }
+    </section>
 
-  </div>
+    <!-- NAVIGATION: CHANNELS -->
+    <section class="nav-section">
+      <div class="section-header">
+        <span class="title">Channels</span>
+        <button mat-icon-button class="mini-btn" *ngIf="isServerOwner"><mat-icon>add</mat-icon></button>
+      </div>
 
+      <nav class="side-nav">
+        @for (channel of channels; track channel) {
+          <a class="nav-item" (click)="selectChannel(channel)" [class.active]="channelService.currentChannel?._id === channel._id">
+            <mat-icon class="item-icon">{{ channel.icon || 'tag' }}</mat-icon>
+            <span class="item-label">{{ channel.name }}</span>
+          </a>
+        }
+      </nav>
+    </section>
 
-  <!-- CHANNEL SECTION -->
-  <div class="middle-section">
+    <!-- NAVIGATION: DM WHISPERS -->
+    <section class="nav-section">
+      <div class="section-header">
+        <span class="title">Direct Whispers</span>
+      </div>
 
-    <div class="category-header">
-      <mat-icon>expand_more</mat-icon>
-      <span>Channels</span>
-    </div>
-
-    <mat-nav-list class="channel-list">
-
-      @for (channel of channels; track channel) {
-        <a
-          mat-list-item
-          class="channel-item"
-          (click)="selectChannel(channel)">
-
-          <mat-icon matListItemIcon class="channel-icon">
-            {{ channel.icon }}
-          </mat-icon>
-
-          <span matListItemTitle class="channel-label">
-            {{ channel.name }}
-          </span>
-
-        </a>
-      }
-
-
-    </mat-nav-list>
-
-    <!-- WHISPER SECTION -->
-    <div class="category-header" *ngIf="selectedServer">
-      <mat-icon>expand_more</mat-icon>
-      <span>DM Whispers</span>
-    </div>
-
-    <mat-nav-list class="channel-list" *ngIf="selectedServer">
-      <ng-container *ngIf="isServerOwner">
-        @for (group of groupedMembers; track group) {
-          @for (member of group.members; track member) {
-            @if (member.user._id !== currentUserId) {
-              <a mat-list-item class="channel-item" (click)="whisperUser(member)">
-                <mat-icon matListItemIcon class="channel-icon">visibility_off</mat-icon>
-                <span matListItemTitle class="channel-label">{{ member.user.username }}</span>
-              </a>
+      <nav class="side-nav">
+        <!-- Owner View: List of all users to whisper -->
+        <ng-container *ngIf="isServerOwner">
+          @for (group of groupedMembers; track group) {
+            @for (member of group.members; track member) {
+              @if (member.user._id !== currentUserId) {
+                <a class="nav-item whisper-item" (click)="whisperUser(member)">
+                  <img class="mini-avatar" [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
+                  <span class="item-label">{{ member.user.username }}</span>
+                </a>
+              }
             }
           }
-        }
-      </ng-container>
+        </ng-container>
 
-      <ng-container *ngIf="!isServerOwner">
-        <a mat-list-item class="channel-item" (click)="whisperDM()">
-          <mat-icon matListItemIcon class="channel-icon">visibility_off</mat-icon>
-          <span matListItemTitle class="channel-label">DM Whisper</span>
-        </a>
-      </ng-container>
-    </mat-nav-list>
+        <!-- Player View: Just the DM -->
+        <ng-container *ngIf="!isServerOwner">
+          <a class="nav-item whisper-item" (click)="whisperDM()">
+            <mat-icon class="item-icon">security</mat-icon>
+            <span class="item-label">Whisper the DM</span>
+          </a>
+        </ng-container>
+      </nav>
+    </section>
 
-    <div class="action-row" *ngIf="selectedServer">
-      <!-- Only show link buttons if vault is NOT attached -->
-
-
-      <!-- If vault IS attached, maybe show an "Unlink" or "Settings" button later -->
-    </div>
-
-  </div>
-
-
-  <!-- MEMBER LIST -->
-  <div class="member-sidebar">
-
-    @for (group of groupedMembers; track group) {
-
-      <div class="role-group">
-
-        <div class="role-header">
-          {{ group.role.name.toUpperCase() }}
-          <span class="count">{{ group.members.length }}</span>
-        </div>
-
-        @for (member of group.members; track member) {
-
-          <div class="member-row">
-
-            <img
-              class="member-avatar"
-              [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'"
-              (error)="$any($event.target).src = 'assets/default-avatar.png'"
-            >
-
-            <div class="member-info">
-
-              <div class="member-name">
-                {{ member.user.username }}
-              </div>
-
-              @if (member.characters.length) {
-
-                <div class="character-row">
-
-                  @for (char of member.characters; track char) {
-
-                    <div class="character-chip" (click)="openCharacter(char); $event.stopPropagation()"
-                         (contextmenu)="onRightClickCharacter($event, char)">
-
-                      <img
-                        class="char-icon"
-                        [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
-                        (error)="$any($event.target).src = 'assets/default-avatar.png'"
-                      >
-
-                      <span>{{ char.name }}</span>
-
-                    </div>
-
-                  }
-
-                </div>
-
-              }
-
-            </div>
-
-          </div>
-
-        }
-
+    <!-- SOCIAL: MEMBER LIST -->
+    <section class="members-section">
+      <div class="section-header">
+        <span class="title">In This Realm</span>
       </div>
 
-    }
+      <div class="member-list">
+        @for (group of groupedMembers; track group) {
+          <div class="role-category">
+            <div class="category-name">{{ group.role.name }} — {{ group.members.length }}</div>
+
+            @for (member of group.members; track member) {
+              <div class="member-card">
+                <div class="member-main">
+                  <img class="member-avatar" [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
+                  <div class="member-details">
+                    <span class="username">{{ member.user.username }}</span>
+                  </div>
+                </div>
+
+                <!-- Display Member's Characters as small icons -->
+                <div class="member-chars" *ngIf="member.characters?.length">
+                  @for (char of member.characters; track char) {
+                    <img
+                      class="tiny-char-icon"
+                      [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
+                      [matTooltip]="char.name"
+                      (click)="openCharacter(char)"
+                      (contextmenu)="onRightClickCharacter($event, char)">
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </section>
 
   </div>
 
-
-
-  <!-- SERVER SWITCHER -->
-  @if (selectedServer && servers) {
-
-    <div class="bottom-section">
-
-      <button
-        mat-button
-        class="server-btn"
-        [matMenuTriggerFor]="serverMenu">
-
-        <mat-icon>dns</mat-icon>
-        <span class="btn-text">{{ selectedServer.name }}</span>
-        <mat-icon class="chevron">expand_less</mat-icon>
-
-      </button>
-
-      <mat-menu
-        #serverMenu="matMenu"
-        xPosition="after"
-        yPosition="above">
-
-        <div class="menu-title">SELECT SERVER</div>
-
-        @for (index of servers; track index) {
-          <button
-            mat-menu-item
-            (click)="selectServer(index)">
-            {{ index.name }}
-          </button>
-        }
-
-      </mat-menu>
-
+  <!-- 3. FOOTER: USER & SYSTEM CONTROLS -->
+  <footer class="sidebar-footer">
+    <div class="footer-actions">
+      <button mat-icon-button (click)="openSettings()" matTooltip="Server Settings"><mat-icon>settings</mat-icon></button>
+      <button mat-icon-button (click)="openVTT()" matTooltip="World Map"><mat-icon>map</mat-icon></button>
+      <button mat-icon-button *ngIf="isServerOwner" (click)="openObsidian()" matTooltip="Obsidian Vault"><mat-icon>auto_stories</mat-icon></button>
     </div>
 
-  }
-
-
-  <!-- USER CONTROLS -->
-  <div class="user-controls">
-
-    <button
-      mat-icon-button
-      *ngIf="selectedServer"
-      (click)="openSettings()"
-      matTooltip="User Settings">
-      <mat-icon>menu</mat-icon>
-    </button>
-
-    <button
-      mat-icon-button
-      (click)="openAddServerDialog()"
-      matTooltip="Add Server">
-      <mat-icon>add</mat-icon>
-    </button>
-    <button
-      mat-icon-button
-      (click)="openVTT()"
-      matTooltip="Open Map">
-      <mat-icon>map</mat-icon>
-    </button>
-
-    <ng-container *ngIf="isServerOwner">
-      <button
-        mat-icon-button
-        (click)="openObsidian()"
-        matTooltip="Link Local Obsidian Vault">
-        <mat-icon>folder_special</mat-icon>
-      </button>
-    </ng-container>
-
-  </div>
+    <div class="footer-brand">
+      <span class="brand-text">D&D PLATFORM</span>
+      <span class="version-text">v1.2.0</span>
+    </div>
+  </footer>
 
 </div>

@@ -39,6 +39,15 @@
 
   // Strength Tones (Shared Overlay)
   --glow-intensity: 0.5;
+
+  // Modern Brand Colors
+  --brand-blue: #5865f2;
+  --brand-blue-alpha: rgba(88, 101, 242, 0.2);
+  --surface-light: rgba(255, 255, 255, 0.05);
+  --surface-lighter: rgba(255, 255, 255, 0.1);
+  --on-surface-muted: rgba(255, 255, 255, 0.5);
+  --on-surface-variant: rgba(255, 255, 255, 0.7);
+  --surface-variant: rgba(255, 255, 255, 0.03);
 }
 
 /* ================= MODERN DARK THEME ================= */

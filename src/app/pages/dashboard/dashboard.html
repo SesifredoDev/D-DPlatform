@@ -33,7 +33,7 @@
           } @else if (tab.type === 'text' || tab.type === 'whisper') {
             <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
           } @else if(tab.type ==='character'){
-            <app-character-viewer [character]="tab.character"></app-character-viewer>
+            <app-character-viewer [character]="tab.data"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
             <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
                             [isHostVttSession]="tab.id === vttHostSessionId"
@@ -84,7 +84,7 @@
             } @else if (tab.type === 'text' || tab.type === 'whisper') {
               <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
             } @else if(tab.type ==='character'){
-              <app-character-viewer [character]="tab.character"></app-character-viewer>
+              <app-character-viewer [character]="tab.data"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
               <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
                               [isHostVttSession]="tab.id === vttHostSessionId"

@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { ICharacter } from '../../models/user/character.model';
 import { Video } from '../video/video';
+import { ThemeService } from '../theme/theme.service';
 
 export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper' | 'obsidian';
 
@@ -22,7 +23,7 @@ export class TabService {
   private tabs = new BehaviorSubject<Tab[]>([]);
   tabs$ = this.tabs.asObservable();
 
-  constructor(private videoService: Video) {}
+  constructor(private videoService: Video, private themeService: ThemeService) {}
 
   openTab(id: string, title: string, type: TabType, pane: "left" | "right" = 'left', data?: any) { // Changed character to data
     const current = this.tabs.value;
@@ -64,6 +65,7 @@ export class TabService {
     // Explicitly end the call if the user is closing a call tab
     if (tabToClose && tabToClose.type === 'call') {
       this.videoService.leaveCall(id);
+      this.themeService.revertToSavedTheme();
     }
 
     this.tabs.next(this.tabs.value.filter(t => t.id !== id));

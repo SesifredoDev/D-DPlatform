@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { catchError } from 'rxjs/operators';
-import {Observable, Subject} from 'rxjs';
+import {BehaviorSubject, Observable, Subject} from 'rxjs';
 
 import {environment} from '../../../../environments/environment';
 import {handleApiError} from '../../utils/api-error.util';
@@ -13,8 +13,14 @@ export class ChannelService {
 
   private baseUrl = environment.apiURL+'server';
 
-  private selectedChannelObservable = new Subject<IChannel | null>();
+  private selectedChannelSubject = new BehaviorSubject<IChannel | null>(null);
+  public currentChannel$ = this.selectedChannelSubject.asObservable();
+
   constructor(private http: HttpClient) {}
+
+  get currentChannel(): IChannel | null {
+    return this.selectedChannelSubject.value;
+  }
 
   listChannels(serverId: string): Observable<any[]> {
     return this.http
@@ -58,11 +64,11 @@ export class ChannelService {
 
 
   getChannelObservable(){
-    return this.selectedChannelObservable;
+    return this.currentChannel$;
   }
 
   setChannelObservable(channel: IChannel){
-    this.selectedChannelObservable.next(channel);
+    this.selectedChannelSubject.next(channel);
   }
 
 }
