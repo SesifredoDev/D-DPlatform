@@ -1,92 +1,133 @@
 import { Injectable, Renderer2, RendererFactory2 } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 
-export type Theme =
-  | 'modern-dark'
-  | 'classic-parchment'
-  | 'eldritch-void'
-  | 'tone-heroic'
-  | 'tone-grimdark'
-  | 'tone-feywild'
-  | 'tone-archivist'
-  | 'tone-cyber'
-  | 'tone-forest'
-  | 'tone-creepy'
-  | 'tone-infernal'
-  | 'tone-astral'
-  | 'tone-underdark'
-  | 'tone-royal';
-
-export interface ThemeOption {
-  id: Theme;
-  name: string;
-  primary: string;   // Primary brand color
-  secondary: string; // Secondary/Background color
+export interface ThemeColors {
+  primary: string;
+  background: string;
 }
+
+export interface PinnedTheme {
+  id: string;
+  name: string;
+  colors: ThemeColors;
+}
+
+export const DEFAULT_THEME_COLORS: ThemeColors = {
+  primary: '#7289da',
+  background: '#121212'
+};
 
 @Injectable({
   providedIn: 'root'
 })
 export class ThemeService {
   private renderer: Renderer2;
-  private currentTheme = new BehaviorSubject<Theme>('eldritch-void');
-  currentTheme$ = this.currentTheme.asObservable();
-  private _savedTheme: Theme = 'eldritch-void';
+  private _savedColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
 
-  public readonly availableThemes: ThemeOption[] = [
-    { id: 'modern-dark', name: 'Modern Dark', primary: '#7289da', secondary: '#1e1f22' },
-    { id: 'classic-parchment', name: 'Classic Parchment', primary: '#5d4037', secondary: '#f4e4bc' },
-    { id: 'eldritch-void', name: 'Eldritch Void', primary: '#bf5af2', secondary: '#1c0a2e' },
-    { id: 'tone-heroic', name: 'Heroic Paladin', primary: '#ffd700', secondary: '#fdfcf0' },
-    { id: 'tone-grimdark', name: 'Iron Dungeon', primary: '#ff0000', secondary: '#1a1a1a' },
-    { id: 'tone-feywild', name: 'Feywild Bloom', primary: '#ff00ff', secondary: '#1a0525' },
-    { id: 'tone-archivist', name: 'Archivist Ink', primary: '#2c3e50', secondary: '#f4f1ea' },
-    { id: 'tone-cyber', name: 'Cyber Neon', primary: '#00ffff', secondary: '#0a001a' },
-    { id: 'tone-forest', name: 'Deep Forest', primary: '#00ff88', secondary: '#0a2e1f' },
-    { id: 'tone-creepy', name: 'Abyssal Whisper', primary: '#4a5d4e', secondary: '#0f0f0f' },
-    { id: 'tone-infernal', name: 'Infernal Forge', primary: '#ff4500', secondary: '#260a0a' },
-    { id: 'tone-astral', name: 'Astral Sea', primary: '#448aff', secondary: '#0d1b35' },
-    { id: 'tone-underdark', name: 'Underdark Gloom', primary: '#9d00ff', secondary: '#140024' },
-    { id: 'tone-royal', name: 'Royal Court', primary: '#ffd700', secondary: '#4a0404' }
-  ];
+  private _colors = new BehaviorSubject<ThemeColors>(this._savedColors);
+  colors$ = this._colors.asObservable();
+
+  private _pinnedThemes = new BehaviorSubject<PinnedTheme[]>([]);
+  pinnedThemes$ = this._pinnedThemes.asObservable();
 
   constructor(rendererFactory: RendererFactory2) {
     this.renderer = rendererFactory.createRenderer(null, null);
+    this.loadPinnedThemes();
+    // Always start with factory defaults on refresh/load
+    this.applyTheme(DEFAULT_THEME_COLORS, true);
+  }
 
-    const savedTheme = localStorage.getItem('app-theme') as Theme;
-    if (savedTheme && this.isValidTheme(savedTheme)) {
-      this._savedTheme = savedTheme;
-    } else {
-      this._savedTheme = 'modern-dark';
+  applyTheme(colors: ThemeColors, save: boolean = false) {
+    if (save) {
+      this._savedColors = { ...colors };
     }
-    this.setTheme(this._savedTheme);
+
+    this._colors.next(colors);
+
+    const root = document.documentElement;
+    root.style.setProperty('--primary', colors.primary);
+    root.style.setProperty('--background', colors.background);
+
+    const primaryRgb = this.hexToRgb(colors.primary);
+    const bgRgb = this.hexToRgb(colors.background);
+
+    const surface = this.adjustBrightness(colors.background, 15);
+    root.style.setProperty('--surface', surface);
+    root.style.setProperty('--outline', `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.25)`);
+    root.style.setProperty('--primary-glow', `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.4)`);
+
+    const luminance = (0.299 * bgRgb.r + 0.587 * bgRgb.g + 0.114 * bgRgb.b) / 255;
+    const onBackground = luminance > 0.5 ? '#121212' : '#eef0f6';
+    root.style.setProperty('--on-background', onBackground);
+    root.style.setProperty('--accent', colors.primary);
+
+    document.body.style.backgroundColor = colors.background;
+    document.body.style.color = onBackground;
   }
 
-  private isValidTheme(theme: string): theme is Theme {
-    return this.availableThemes.some(t => t.id === theme);
+  revertToSaved() {
+    this.applyTheme(this._savedColors, false);
   }
 
-  setTheme(theme: Theme) {
-    const previousTheme = this.currentTheme.value;
-    this.renderer.removeClass(document.body, previousTheme);
-    this.renderer.addClass(document.body, theme);
-    this.currentTheme.next(theme);
-    localStorage.setItem('app-theme', theme);
-    this._savedTheme = theme;
+  resetToDefault() {
+    this.applyTheme(DEFAULT_THEME_COLORS, true);
   }
 
-  applyTemporaryTheme(theme: Theme) {
-    const previousTheme = this.currentTheme.value;
-    this.renderer.removeClass(document.body, previousTheme);
-    this.renderer.addClass(document.body, theme);
-    this.currentTheme.next(theme);
+  // --- PINNED THEMES LOGIC ---
+
+  private loadPinnedThemes() {
+    const saved = localStorage.getItem('app-pinned-themes');
+    if (saved) {
+      try {
+        this._pinnedThemes.next(JSON.parse(saved));
+      } catch (e) {
+        this._pinnedThemes.next([]);
+      }
+    }
   }
 
-  revertToSavedTheme() {
-    this.applyTemporaryTheme(this._savedTheme);
+  pinTheme(name: string, colors: ThemeColors) {
+    const current = this._pinnedThemes.value;
+    const newTheme: PinnedTheme = {
+      id: Date.now().toString(),
+      name,
+      colors: { ...colors }
+    };
+    const updated = [...current, newTheme];
+    this._pinnedThemes.next(updated);
+    localStorage.setItem('app-pinned-themes', JSON.stringify(updated));
   }
 
-  getTheme(): Theme {
-    return this.currentTheme.value;
+  removePinnedTheme(id: string) {
+    const updated = this._pinnedThemes.value.filter(t => t.id !== id);
+    this._pinnedThemes.next(updated);
+    localStorage.setItem('app-pinned-themes', JSON.stringify(updated));
+  }
+
+  private hexToRgb(hex: string): { r: number, g: number, b: number } {
+    let r = 0, g = 0, b = 0;
+    const cleanHex = hex.startsWith('#') ? hex.substring(1) : hex;
+    if (cleanHex.length === 3) {
+      r = parseInt(cleanHex[0] + cleanHex[0], 16);
+      g = parseInt(cleanHex[1] + cleanHex[1], 16);
+      b = parseInt(cleanHex[2] + cleanHex[2], 16);
+    } else if (cleanHex.length === 6) {
+      r = parseInt(cleanHex.substring(0, 2), 16);
+      g = parseInt(cleanHex.substring(2, 4), 16);
+      b = parseInt(cleanHex.substring(4, 6), 16);
+    }
+    return { r, g, b };
+  }
+
+  private adjustBrightness(hex: string, percent: number): string {
+    const rgb = this.hexToRgb(hex);
+    const r = Math.min(255, Math.max(0, rgb.r + percent));
+    const g = Math.min(255, Math.max(0, rgb.g + percent));
+    const b = Math.min(255, Math.max(0, rgb.b + percent));
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  getColors(): ThemeColors {
+    return this._colors.value;
   }
 }

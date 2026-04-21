@@ -48,10 +48,8 @@
   --on-surface-muted: rgba(255, 255, 255, 0.5);
   --on-surface-variant: rgba(255, 255, 255, 0.7);
   --surface-variant: rgba(255, 255, 255, 0.03);
-}
 
-/* ================= MODERN DARK THEME ================= */
-body.modern-dark {
+  // Default values
   --primary: #7289da;
   --primary-glow: rgba(114, 137, 218, 0.4);
   --surface: #1e1f22;
@@ -61,129 +59,12 @@ body.modern-dark {
   --accent: #4a90e2;
 }
 
-/* =============================================================================
-   VTT THEME REPOSITORY - REINFORCED TONES
-   ============================================================================= */
-
-/* 2. Classic Parchment - More "Ancient" */
-body.classic-parchment {
-  --primary: #5d4037;
-  --primary-glow: rgba(93, 64, 55, 0.2);
-  --surface: #f4e4bc;
-  --background: #eaddca;
-  --on-background: #2b1e14;
-  --outline: rgba(93, 64, 55, 0.3);
-  --accent: #a67c52;
-}
-
-/* 3. Eldritch Void - Deep Cosmic Purple */
-body.eldritch-void {
-  --primary: #bf5af2;
-  --primary-glow: rgba(191, 90, 242, 0.5);
-  --surface: #1c0a2e;
-  --background: #0d0415;
-  --on-background: #f3e5f5;
-  --accent: #00ffd5;
-  --outline: rgba(191, 90, 242, 0.4);
-}
-
-/* 4. Heroic Paladin - Radiant Gold */
-body.tone-heroic {
-  --primary: #ffd700;
-  --primary-glow: rgba(255, 215, 0, 0.3);
-  --surface: #fdfcf0;
-  --background: #ffffff;
-  --on-background: #002b5b;
-  --accent: #3f72af;
-  --outline: rgba(255, 215, 0, 0.5);
-}
-
-/* 5. Iron Dungeon - Blood & Stone */
-body.tone-grimdark {
-  --primary: #ff0000;
-  --primary-glow: rgba(255, 0, 0, 0.4);
-  --surface: #1a1a1a;
-  --background: #0a0a0a;
-  --on-background: #dcdcdc;
-  --accent: #7b0000;
-  --outline: rgba(255, 0, 0, 0.3);
-}
-
-/* 6. Feywild Bloom - Vibrant Neon Nature */
-body.tone-feywild {
-  --primary: #ff00ff;
-  --primary-glow: rgba(255, 0, 255, 0.5);
-  --surface: #1a0525;
-  --background: #0d0214;
-  --on-background: #ffffff;
-  --accent: #39ff14;
-  --outline: rgba(255, 0, 255, 0.5);
-}
-
-/* 8. Cyber Neon - High Contrast */
-body.tone-cyber {
-  --primary: #00ffff;
-  --primary-glow: rgba(0, 255, 255, 0.6);
-  --surface: #0a001a;
-  --background: #050010;
-  --on-background: #ffffff;
-  --accent: #ff00ff;
-  --outline: #00ffff;
-}
-
-/* 9. Deep Forest - Emerald Density */
-body.tone-forest {
-  --primary: #00ff88;
-  --primary-glow: rgba(0, 255, 136, 0.4);
-  --surface: #0a2e1f;
-  --background: #04140d;
-  --on-background: #e0ffed;
-  --accent: #88ff00;
-  --outline: rgba(0, 255, 136, 0.4);
-}
-
-/* 11. Infernal Forge - Magma Strong */
-body.tone-infernal {
-  --primary: #ff4500;
-  --primary-glow: rgba(255, 69, 0, 0.6);
-  --surface: #260a0a;
-  --background: #0f0505;
-  --on-background: #ffebe0;
-  --accent: #ffcc00;
-  --outline: rgba(255, 69, 0, 0.5);
-}
-
-/* 12. Astral Sea - Deep Starscape */
-body.tone-astral {
-  --primary: #448aff;
-  --primary-glow: rgba(68, 138, 255, 0.5);
-  --surface: #0d1b35;
-  --background: #050c1c;
-  --on-background: #e3f2fd;
-  --accent: #ff4081;
-  --outline: rgba(68, 138, 255, 0.4);
-}
-
-/* 13. Underdark Gloom - Bioluminescent Poison */
-body.tone-underdark {
-  --primary: #9d00ff;
-  --primary-glow: rgba(157, 0, 255, 0.5);
-  --surface: #140024;
-  --background: #0a0014;
-  --on-background: #e0d0ff;
-  --accent: #00ffa2;
-  --outline: rgba(157, 0, 255, 0.5);
-}
-
-/* 14. Royal Court - Imperial Majesty */
-body.tone-royal {
-  --primary: #ffd700;
-  --primary-glow: rgba(255, 215, 0, 0.5);
-  --surface: #4a0404;
-  --background: #2b0202;
-  --on-background: #fff3e0;
-  --accent: #ff9800;
-  --outline: rgba(255, 215, 0, 0.6);
+body {
+  background-color: var(--background);
+  color: var(--on-background);
+  font-family: var(--font-family-main);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  margin: 0;
 }
 
 /* =============================================================================
@@ -192,16 +73,15 @@ body.tone-royal {
 
 .panel, #toolbar.glass {
   background-color: var(--surface);
-  border: 2px solid var(--outline) !important; // Stronger borders
-  box-shadow: 0 0 15px var(--primary-glow);   // Ambient glow
+  border: 2px solid var(--outline) !important;
+  box-shadow: 0 0 15px var(--primary-glow);
   color: var(--on-background);
 }
 
-.button-primary, button.mat-mdc-icon-button.active, button.active-light {
+.button-primary, button.mat-mdc-icon-button.active, button.active-light, .btn-primary-join {
   background-color: var(--primary) !important;
   color: #fff !important;
   box-shadow: 0 0 12px var(--primary-glow);
-  filter: saturate(1.2);
 }
 
 .map-label {

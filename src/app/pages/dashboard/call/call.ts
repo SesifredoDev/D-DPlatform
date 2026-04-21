@@ -25,12 +25,20 @@ import { ActivatedRoute } from '@angular/router';
 import { SpotifyPlayer } from './spotify-player/spotify-player';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { Theme, ThemeOption, ThemeService } from '../../../shared/services/theme/theme.service';
+import { PinnedTheme, ThemeColors, ThemeService } from '../../../shared/services/theme/theme.service';
 import { MatMenuModule } from '@angular/material/menu';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import { IUser } from '../../../shared/models/user/user.model';
 import { MarkdownComponent } from 'ngx-markdown';
+
+interface ParticipantStream {
+  id: string;
+  stream?: MediaStream;
+  userData?: ICharacter;
+  ping?: number;
+  isLocal?: boolean;
+}
 
 @Component({
   selector: 'app-video-call',
@@ -58,7 +66,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   localStream: MediaStream | null = null;
   previewStream: MediaStream | null = null;
-  remoteStreams: { id: string; stream: MediaStream; userData: ICharacter }[] = [];
+  remoteStreams: ParticipantStream[] = [];
+  localParticipantPing: number | undefined;
+
 
   isAudioMuted = false;
   isVideoOff = false;
@@ -69,10 +79,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // UI States
   showSpotify: boolean = false;
   showThemePicker: boolean = false;
+  showPinNaming: boolean = false;
+  newThemeName: string = '';
 
   // Theme state
-  activeThemeSession: Theme | null = null;
-  availableThemes: ThemeOption[] = [];
+  activeColors: ThemeColors;
+  pinnedThemes: PinnedTheme[] = [];
 
   // VTT Session state
   vttSession: { active: boolean, roomId: string | null, hostId: string | null } = { active: false, roomId: null, hostId: null };
@@ -111,6 +123,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
 
   private themeSyncSub!: Subscription;
+  private pinnedThemesSub!: Subscription;
   private vttSub!: Subscription;
   private overlaySub!: Subscription;
   private overlayTextSub!: Subscription;
@@ -127,7 +140,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     public themeService: ThemeService,
     private serverService: ServerService
   ) {
-    this.availableThemes = this.themeService.availableThemes;
+    this.activeColors = this.themeService.getColors();
   }
 
   async ngOnInit() {
@@ -155,10 +168,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     this.streamSub = this.videoService.remoteStreams$.subscribe(streams => {
-      this.remoteStreams = streams.map(r => ({
+      // The first element is always the local participant
+      const localParticipantData = streams.find(p => p.isLocal);
+      if (localParticipantData) {
+        this.localParticipantPing = localParticipantData.ping;
+      }
+
+      this.remoteStreams = streams.filter(p => !p.isLocal).map(r => ({
         id: r.id,
         stream: r.stream,
-        userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter
+        userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
+        ping: r.ping
       }));
 
       setTimeout(() => {
@@ -202,7 +222,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
         const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
         const adjustedPosition = state.position + (state.paused ? 0 : drift);
-        const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 5000;
+
+        // Tightened sync threshold from 5s to 2s
+        const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 2000;
+
         const isDifferentStatus = currentState?.paused !== state.paused;
         const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
 
@@ -246,7 +269,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 // ---------------------------------------------------------
 // 2. ACTION INTERCEPTOR (Debounce Host / Send Requests)
 // ---------------------------------------------------------
-    this.spotifyActionSub = this.spotify.syncAction$.subscribe(action => {
+    this.spotifyActionSub = this.spotify.syncAction$.subscribe((action: any) => {
       if (!this.localStream) return;
 
       if (this.isServerOwner) {
@@ -290,8 +313,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           }, 'manual');
         }
 
-        if (this.activeThemeSession) {
-          this.videoService.sendThemeUpdate(this.activeThemeSession);
+        if (this.activeColors) {
+          this.videoService.sendThemeUpdate(this.activeColors);
         }
       }
     });
@@ -306,9 +329,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
     });
 
-    this.themeSyncSub = this.videoService.themeSync$.subscribe(theme => {
-      this.activeThemeSession = theme;
-      this.themeService.applyTemporaryTheme(theme);
+    this.themeSyncSub = this.videoService.themeSync$.subscribe(colors => {
+      this.activeColors = colors;
+      this.themeService.applyTheme(colors, false); // DO NOT save call atmosphere to local player preference
+    });
+
+    this.pinnedThemesSub = this.themeService.pinnedThemes$.subscribe(themes => {
+      this.pinnedThemes = themes;
+      this.cdr.detectChanges();
     });
 
     this.vttSub = this.videoService.vttSession$.subscribe(session => {
@@ -424,17 +452,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         throw new Error('Acquired stream is not active');
       }
 
+      // SYNC: Transfer preview settings to live state
       this.isAudioMuted = this.isPreviewMuted;
-      this.isVideoOff = !this.isPreviewVideoOff;
+      this.isVideoOff = this.isPreviewVideoOff;
 
+      // Apply initial track states
       this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
-      this.localStream.getVideoTracks().forEach(t => t.enabled = this.isVideoOff);
+      this.localStream.getVideoTracks().forEach(t => t.enabled = !this.isVideoOff);
 
       const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
       this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.initVideoCall(this.channelId, characterToBroadcast);
 
       await this.videoService.startProducing(this.localStream);
+
+      // Explicitly tell LiveKit the desired initial state
+      await this.videoService.setCameraEnabled(!this.isVideoOff);
+      await this.videoService.setMicrophoneEnabled(!this.isAudioMuted);
 
       setTimeout(() => {
         if (this.localVideo) {
@@ -460,8 +494,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   async leaveCall() {
     await this.videoService.leaveCall(this.channelId);
-    this.themeService.revertToSavedTheme();
-    this.activeThemeSession = null;
+    this.themeService.resetToDefault();
     this.localStream = null;
     this.remoteStreams = [];
     this.showSpotify = false;
@@ -476,6 +509,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.localStream) {
       this.isAudioMuted = !this.isAudioMuted;
       this.localStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
+      this.videoService.setMicrophoneEnabled(!this.isAudioMuted);
     } else {
       this.isPreviewMuted = !this.isPreviewMuted;
       if (this.previewStream) {
@@ -488,6 +522,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.localStream) {
       this.isVideoOff = !this.isVideoOff;
       this.localStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));
+      this.videoService.setCameraEnabled(!this.isVideoOff);
     } else {
       this.isPreviewVideoOff = !this.isPreviewVideoOff;
       if (this.previewStream) {
@@ -527,28 +562,48 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  openCharacter(character: ICharacter) {
+  openCharacter(character: ICharacter | undefined) {
     if (character?._id) {
       this.tabService.openTab(character._id, character.name, 'character', 'right', character);
     }
   }
 
-  syncTheme(theme: Theme) {
-    this.activeThemeSession = theme;
-    this.themeService.applyTemporaryTheme(theme);
-    this.videoService.sendThemeUpdate(theme);
+  // --- THEME PICKER LOGIC ---
+
+  updateThemeLocally(key: keyof ThemeColors, color: string) {
+    this.activeColors = { ...this.activeColors, [key]: color };
+    this.themeService.applyTheme(this.activeColors, false);
   }
 
-  previewTheme(theme: Theme) {
-    this.themeService.applyTemporaryTheme(theme);
+  confirmTheme() {
+    this.themeService.applyTheme(this.activeColors, true);
+    this.videoService.sendThemeUpdate(this.activeColors);
+    this.showThemePicker = false;
   }
 
-  clearThemePreview() {
-    if (this.activeThemeSession) {
-      this.themeService.applyTemporaryTheme(this.activeThemeSession);
-    } else {
-      this.themeService.revertToSavedTheme();
-    }
+  cancelTheme() {
+    this.themeService.revertToSaved();
+    this.activeColors = this.themeService.getColors();
+    this.showThemePicker = false;
+    this.showPinNaming = false;
+  }
+
+  resetToFactory() {
+    this.themeService.resetToDefault();
+    this.activeColors = this.themeService.getColors();
+    this.videoService.sendThemeUpdate(this.activeColors);
+  }
+
+  selectPinnedTheme(theme: PinnedTheme) {
+    this.activeColors = { ...theme.colors };
+    this.themeService.applyTheme(this.activeColors, false);
+  }
+
+  pinCurrentTheme() {
+    if (!this.newThemeName.trim()) return;
+    this.themeService.pinTheme(this.newThemeName, this.activeColors);
+    this.newThemeName = '';
+    this.showPinNaming = false;
   }
 
   toggleDmMode() {
@@ -573,6 +628,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.spotifyStateRequestSub) this.spotifyStateRequestSub.unsubscribe();
     if (this.spotifyRequestSub) this.spotifyRequestSub.unsubscribe();
     if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
+    if (this.pinnedThemesSub) this.pinnedThemesSub.unsubscribe();
     if (this.vttSub) this.vttSub.unsubscribe();
     if (this.overlaySub) this.overlaySub.unsubscribe();
     if (this.overlayTextSub) this.overlayTextSub.unsubscribe();

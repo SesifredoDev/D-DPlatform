@@ -65,7 +65,7 @@ export class TabService {
     // Explicitly end the call if the user is closing a call tab
     if (tabToClose && tabToClose.type === 'call') {
       this.videoService.leaveCall(id);
-      this.themeService.revertToSavedTheme();
+      this.themeService.resetToDefault();
     }
 
     this.tabs.next(this.tabs.value.filter(t => t.id !== id));

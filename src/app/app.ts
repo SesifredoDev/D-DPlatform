@@ -13,7 +13,6 @@ export class App {
   protected readonly title = signal('d-d-platform');
 
   constructor(private themeService: ThemeService) {
-    this.themeService.setTheme('modern-dark')
-    // ThemeService constructor handles initial theme application to <body>
+    // ThemeService constructor handles initial theme application to document root
   }
 }

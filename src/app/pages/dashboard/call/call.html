@@ -135,6 +135,11 @@
                 @if (isAudioMuted) {
                   <mat-icon class="mute-icon">mic_off</mat-icon>
                 }
+                <!-- Local Ping Badge -->
+                <div class="ping-badge" *ngIf="localParticipantPing" [class.laggy]="localParticipantPing > 200">
+                    <mat-icon>sensors</mat-icon>
+                    <span>{{ localParticipantPing }}ms</span>
+                </div>
               </div>
               <div class="sub-row">
                 <span class="char-race">{{ (isDmMode ? dmCharacter : character).race }}</span>
@@ -203,6 +208,11 @@
               <div class="unit-info">
                 <div class="name-row">
                   <span class="char-name">{{ remote.userData.name || 'Unnamed' }}</span>
+                   <!-- Remote Ping Badge -->
+                  <div class="ping-badge" *ngIf="remote.ping" [class.laggy]="remote.ping > 200">
+                      <mat-icon>sensors</mat-icon>
+                      <span>{{ remote.ping }}ms</span>
+                  </div>
                 </div>
                 <div class="sub-row">
                   <span class="char-race">{{ remote.userData.race }}</span>
@@ -265,25 +275,65 @@
     <div class="theme-picker-overlay glass" *ngIf="showThemePicker">
         <div class="overlay-header">
             <h3>Atmosphere</h3>
-            <button class="btn-close" (click)="showThemePicker = false">
-                <mat-icon>close</mat-icon>
-            </button>
+            <div class="header-actions">
+               <button class="btn-reset-factory" (click)="resetToFactory()" matTooltip="Reset to Default">
+                  <mat-icon>settings_backup_restore</mat-icon>
+               </button>
+               <button class="btn-close" (click)="cancelTheme()">
+                  <mat-icon>close</mat-icon>
+               </button>
+            </div>
         </div>
 
-        <div class="theme-scroll-area" (click)="$event.stopPropagation()">
-          @for (t of availableThemes; track t.id) {
-            <div class="theme-item"
-                 (click)="syncTheme(t.id)"
-                 (mouseenter)="previewTheme(t.id)"
-                 (mouseleave)="clearThemePreview()">
-              <div class="theme-swatch" [class.active]="activeThemeSession === t.id">
-                  <div class="swatch-split primary" [style.background]="t.primary"></div>
-                  <div class="swatch-split secondary" [style.background]="t.secondary"></div>
-                  <mat-icon *ngIf="activeThemeSession === t.id">check</mat-icon>
+        <div class="color-scroll-area" (click)="$event.stopPropagation()" *ngIf="isServerOwner">
+           <div class="color-field">
+             <label>Theme Color</label>
+             <input type="color" [ngModel]="activeColors.primary" (ngModelChange)="updateThemeLocally('primary', $event)">
+           </div>
+           <div class="color-field">
+             <label>Background</label>
+             <input type="color" [ngModel]="activeColors.background" (ngModelChange)="updateThemeLocally('background', $event)">
+           </div>
+
+           <!-- Pinned Themes Section -->
+           <div class="pinned-section">
+              <div class="section-title">
+                <span>Pinned Favorites</span>
+                <button class="btn-add-pin" (click)="showPinNaming = !showPinNaming" matTooltip="Pin Current Colors">
+                  <mat-icon>push_pin</mat-icon>
+                </button>
               </div>
-              <span class="theme-label">{{ t.name }}</span>
-            </div>
-          }
+
+              <!-- Pin Naming Input -->
+              <div class="pin-naming-box" *ngIf="showPinNaming">
+                <input type="text" [(ngModel)]="newThemeName" placeholder="Theme Name..." (keyup.enter)="pinCurrentTheme()">
+                <button (click)="pinCurrentTheme()"><mat-icon>check</mat-icon></button>
+              </div>
+
+              <div class="pinned-list">
+                 <div *ngFor="let t of pinnedThemes" class="pinned-chip" (click)="selectPinnedTheme(t)">
+                    <div class="chip-preview" [style.background]="t.colors.primary"></div>
+                    <span class="chip-name">{{ t.name }}</span>
+                    <mat-icon class="btn-delete-pin" (click)="$event.stopPropagation(); themeService.removePinnedTheme(t.id)">close</mat-icon>
+                 </div>
+                 <div *ngIf="pinnedThemes.length === 0" class="empty-pinned">No pinned themes.</div>
+              </div>
+           </div>
+
+           <div class="picker-actions">
+              <button class="btn-confirm" (click)="confirmTheme()">
+                <mat-icon>check</mat-icon>
+                <span>Broadcast to All</span>
+              </button>
+           </div>
+        </div>
+
+        <div class="guest-theme-view" *ngIf="!isServerOwner">
+          <p>The Dungeon Master is controlling the atmosphere.</p>
+          <div class="current-swatch-preview">
+            <div [style.background]="activeColors.primary"></div>
+            <div [style.background]="activeColors.background"></div>
+          </div>
         </div>
     </div>
   }
