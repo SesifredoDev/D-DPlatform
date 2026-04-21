@@ -11,9 +11,10 @@
     </div>
 
     <div class="right-section">
-      <!-- Broadcast Document Button -->
-      <button *ngIf="isEditing" mat-icon-button (click)="broadcastFullDocument()" matTooltip="Broadcast Document">
-        <mat-icon>broadcast_on_home</mat-icon>
+      <!-- Unified Broadcast Button -->
+      <button *ngIf="isEditing" mat-icon-button (click)="broadcast()"
+              [matTooltip]="hasActiveSelection ? 'Broadcast Selection' : 'Broadcast Document'">
+        <mat-icon [color]="hasActiveSelection ? 'accent' : null">broadcast_on_home</mat-icon>
       </button>
 
       <button *ngIf="localhostRoute" mat-icon-button (click)="openObsidianVault()" matTooltip="Open in Obsidian">
@@ -182,23 +183,22 @@
 
         <div class="content-scroll-container">
           <!-- Selection Broadcast Button (Float/Contextual) -->
-          <div class="selection-actions-container">
-            <button mat-mini-fab color="accent" (click)="broadcastSelection()" matTooltip="Broadcast Selection">
+          <div class="selection-actions-container" [class.visible]="hasActiveSelection">
+            <button mat-mini-fab color="accent" (click)="broadcast()" matTooltip="Broadcast Selection">
               <mat-icon>broadcast_on_home</mat-icon>
             </button>
           </div>
 
-          <!-- Markdown Previewer -->
-          <div class="preview-mode" *ngIf="isPreview && selectedFileName.endsWith('.md')">
-            <markdown [data]="processedContent" class="obsidian-markdown" (click)="handleMarkdownClick($event)"></markdown>
-          </div>
-
-          <!-- Code/Markdown Editor -->
-          <div class="editor-mode" *ngIf="!isPreview && selectedFileName.endsWith('.md')">
-            <textarea [(ngModel)]="selectedFileContent"
-                      (ngModelChange)="onContentChange()"
-                      placeholder="Start writing..."
-                      spellcheck="false"></textarea>
+          <!-- Milkdown Editor (Replaces Markdown Previewer and Textarea) -->
+          <div class="editor-wrapper" *ngIf="selectedFileName.endsWith('.md')">
+            <app-milkdown-editor
+              [markdown]="selectedFileContent"
+              [serverId]="serverId"
+              [currentFilePath]="selectedFileRelativePath"
+              [isPreview]="isPreview"
+              (markdownChange)="onContentChange($event)"
+              (onLinkClick)="onWikilinkClick($event)">
+            </app-milkdown-editor>
           </div>
 
           <!-- Non-markdown viewer -->

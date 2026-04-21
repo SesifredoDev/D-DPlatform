@@ -19,18 +19,14 @@ export class ObsidianVaultService {
   private readonly STORAGE_KEY_PREFIX = 'obsidian_handle_';
   private readonly LOCALHOST_ROUTE_STORAGE_KEY_PREFIX = 'obsidian_localhost_route_';
 
+  private vaultCache: Map<string, VaultEntry[]> = new Map();
+
   constructor() {}
 
-  /**
-   * Checks if the File System Access API is supported by the current browser.
-   */
   isFileSystemApiSupported(): boolean {
     return 'showDirectoryPicker' in window;
   }
 
-  /**
-   * Triggers the browser folder picker and saves the handle to IndexedDB for persistence.
-   */
   async attachVaultToServer(serverId: string): Promise<string> {
     if (!this.isFileSystemApiSupported()) {
       throw new Error('File System Access API is not supported in this browser.');
@@ -40,13 +36,9 @@ export class ObsidianVaultService {
       const handle = await (window as any).showDirectoryPicker({
         mode: 'readwrite'
       });
-
-      // Persist the actual handle object in IndexedDB
       await set(`${this.STORAGE_KEY_PREFIX}${serverId}`, handle);
-
-      // We still keep a small marker in localStorage for quick synchronous checks
       localStorage.setItem(`${this.STORAGE_KEY_PREFIX}${serverId}_exists`, 'true');
-
+      this.vaultCache.delete(serverId);
       return handle.name;
     } catch (err) {
       console.error('User cancelled or browser blocked folder access', err);
@@ -54,9 +46,6 @@ export class ObsidianVaultService {
     }
   }
 
-  /**
-   * Retrieves the stored FileSystemDirectoryHandle from IndexedDB.
-   */
   async getVaultHandle(serverId: string): Promise<FileSystemDirectoryHandle | null> {
     const handle = await get(`${this.STORAGE_KEY_PREFIX}${serverId}`);
     return (handle as FileSystemDirectoryHandle) || null;
@@ -67,36 +56,41 @@ export class ObsidianVaultService {
     return (await (handle as any).requestPermission(options)) === 'granted';
   }
 
-  /**
-   * Recursively lists files and directories in the vault.
-   */
-  async listVaultFiles(serverId: string): Promise<VaultEntry[]> {
+  async listVaultFiles(serverId: string, useCache = true): Promise<VaultEntry[]> {
+    if (useCache && this.vaultCache.has(serverId) && this.vaultCache.get(serverId)!.length > 0) {
+      return this.vaultCache.get(serverId)!;
+    }
+
     const handle = await this.getVaultHandle(serverId);
     if (!handle) return [];
 
-    return this.scanDirectory(handle);
+    const entries = await this.scanDirectory(handle);
+    this.vaultCache.set(serverId, entries);
+    return entries;
   }
 
   private async scanDirectory(directoryHandle: FileSystemDirectoryHandle, path = ''): Promise<VaultEntry[]> {
     const entries: VaultEntry[] = [];
-    for await (const entry of (directoryHandle as any).values()) {
-      const relativePath = path ? `${path}/${entry.name}` : entry.name;
+    try {
+        for await (const entry of (directoryHandle as any).values()) {
+          const relativePath = path ? `${path}/${entry.name}` : entry.name;
+          if (entry.name.startsWith('.')) continue;
 
-      if (entry.name.startsWith('.')) continue;
+          const vaultEntry: VaultEntry = {
+            name: entry.name,
+            kind: entry.kind,
+            handle: entry,
+            relativePath: relativePath,
+            parentPath: path
+          };
 
-      const vaultEntry: VaultEntry = {
-        name: entry.name,
-        kind: entry.kind,
-        handle: entry,
-        relativePath: relativePath,
-        parentPath: path
-      };
-
-      if (entry.kind === 'directory') {
-        vaultEntry.children = await this.scanDirectory(entry, relativePath);
-      }
-
-      entries.push(vaultEntry);
+          if (entry.kind === 'directory') {
+            vaultEntry.children = await this.scanDirectory(entry, relativePath);
+          }
+          entries.push(vaultEntry);
+        }
+    } catch (e) {
+        console.error("Error scanning directory", path, e);
     }
 
     return entries.sort((a, b) => {
@@ -105,38 +99,26 @@ export class ObsidianVaultService {
     });
   }
 
-  /**
-   * Resolves a target path relative to a base path, handling '.' and '..' segments.
-   * @param basePath The base directory path (e.g., 'folder1/subfolder').
-   * @param targetPath The path to resolve (e.g., '../image.png', 'another/file.md', 'file.txt').
-   * @returns The resolved absolute path relative to the vault root.
-   */
   resolveRelativePath(basePath: string, targetPath: string): string {
-    const baseParts = basePath.split('/').filter(p => p !== '');
-    const targetParts = targetPath.split('/').filter(p => p !== '');
+    const baseParts = basePath.split(/[/\\]/).filter(p => p !== '');
+    const targetParts = targetPath.split(/[/\\]/).filter(p => p !== '');
     const resolvedParts: string[] = [...baseParts];
 
     for (const part of targetParts) {
       if (part === '..') {
-        resolvedParts.pop(); // Go up one directory
+        resolvedParts.pop();
       } else if (part !== '.') {
-        resolvedParts.push(part); // Add directory/file name
+        resolvedParts.push(part);
       }
     }
     return resolvedParts.join('/');
   }
 
-  /**
-   * Finds a file by its exact filename (case-insensitive) anywhere in the vault.
-   * This is a fallback for when a direct relative path doesn't work.
-   * @param serverId The ID of the server/vault.
-   * @param filename The base name of the file to find (e.g., 'image.jpeg').
-   * @returns The full relative path of the file if found, otherwise null.
-   */
   async findFileByFilename(serverId: string, filename: string): Promise<string | null> {
-    const vaultEntries = await this.listVaultFiles(serverId); // This will re-scan or use cached entries
-    const lowerFilename = filename.toLowerCase();
+    // If cache is empty, try to list files once
+    let vaultEntries = await this.listVaultFiles(serverId);
 
+    const lowerFilename = filename.toLowerCase();
     const search = (entries: VaultEntry[]): string | null => {
       for (const entry of entries) {
         if (entry.kind === 'file' && entry.name.toLowerCase() === lowerFilename) {
@@ -154,12 +136,8 @@ export class ObsidianVaultService {
   }
 
   async readFile(serverId: string, relativePath: string): Promise<string> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
-
-    const fileHandle = await this.getFileHandleByPath(rootHandle, relativePath);
-    const file = await fileHandle.getFile();
-    return await file.text();
+    const blob = await this.readFileAsBlob(serverId, relativePath);
+    return await blob.text();
   }
 
   async readFileAsBlob(serverId: string, relativePath: string): Promise<Blob> {
@@ -167,8 +145,7 @@ export class ObsidianVaultService {
     if (!rootHandle) throw new Error('Vault not found');
 
     const fileHandle = await this.getFileHandleByPath(rootHandle, relativePath);
-    const file = await fileHandle.getFile();
-    return file;
+    return await fileHandle.getFile();
   }
 
   async writeFile(serverId: string, relativePath: string, content: string): Promise<void> {
@@ -179,6 +156,7 @@ export class ObsidianVaultService {
     const writable = await fileHandle.createWritable();
     await writable.write(content);
     await writable.close();
+    this.vaultCache.delete(serverId);
   }
 
   async renameFile(serverId: string, oldPath: string, newName: string): Promise<string> {
@@ -186,25 +164,22 @@ export class ObsidianVaultService {
     if (!rootHandle) throw new Error('Vault not found');
 
     const fileHandle = await this.getFileHandleByPath(rootHandle, oldPath);
-
-    // Check if move/rename is supported directly
     if ((fileHandle as any).move) {
       await (fileHandle as any).move(newName);
     } else {
-      // Fallback: Copy and Delete
       const file = await fileHandle.getFile();
       const content = await file.text();
-      const pathParts = oldPath.split('/');
+      const pathParts = oldPath.split(/[/\\]/).filter(p => p !== '');
       pathParts.pop();
       const newPath = pathParts.length > 0 ? `${pathParts.join('/')}/${newName}` : newName;
-
       await this.writeFile(serverId, newPath, content);
       await this.deleteEntry(serverId, oldPath);
       return newPath;
     }
 
-    const pathParts = oldPath.split('/');
+    const pathParts = oldPath.split(/[/\\]/).filter(p => p !== '');
     pathParts.pop();
+    this.vaultCache.delete(serverId);
     return pathParts.length > 0 ? `${pathParts.join('/')}/${newName}` : newName;
   }
 
@@ -212,19 +187,17 @@ export class ObsidianVaultService {
     const rootHandle = await this.getVaultHandle(serverId);
     if (!rootHandle) throw new Error('Vault not found');
 
-    const entryName = entryPath.split('/').pop()!;
+    const entryName = entryPath.split(/[/\\]/).pop()!;
     const newRelativePath = targetDirectoryPath ? `${targetDirectoryPath}/${entryName}` : entryName;
 
-    // We can't easily move directories with the current API if .move() isn't available
-    // but for files it's easier.
-    const parts = entryPath.split('/');
+    const parts = entryPath.split(/[/\\]/).filter(p => p !== '');
     const fileName = parts.pop()!;
     let sourceDir = rootHandle;
     for (const part of parts) {
       sourceDir = await sourceDir.getDirectoryHandle(part);
     }
 
-    const targetParts = targetDirectoryPath ? targetDirectoryPath.split('/') : [];
+    const targetParts = targetDirectoryPath ? targetDirectoryPath.split(/[/\\]/).filter(p => p !== '') : [];
     let targetDir = rootHandle;
     for (const part of targetParts) {
       targetDir = await targetDir.getDirectoryHandle(part);
@@ -240,6 +213,7 @@ export class ObsidianVaultService {
       await sourceDir.removeEntry(fileName);
     }
 
+    this.vaultCache.delete(serverId);
     return newRelativePath;
   }
 
@@ -247,7 +221,7 @@ export class ObsidianVaultService {
     const rootHandle = await this.getVaultHandle(serverId);
     if (!rootHandle) throw new Error('Vault not found');
 
-    const parts = relativePath.split('/');
+    const parts = relativePath.split(/[/\\]/).filter(p => p !== '');
     const name = parts.pop()!;
     let currentDir = rootHandle;
 
@@ -256,6 +230,7 @@ export class ObsidianVaultService {
     }
 
     await currentDir.removeEntry(name, { recursive: true });
+    this.vaultCache.delete(serverId);
   }
 
   private async getFileHandleByPath(
@@ -263,10 +238,12 @@ export class ObsidianVaultService {
     path: string,
     create = false
   ): Promise<FileSystemFileHandle> {
-    const parts = path.split('/');
-    const fileName = parts.pop()!;
-    let currentDir = root;
+    const parts = path.split(/[/\\]/).filter(p => p !== '');
+    const fileName = parts.pop();
 
+    if (!fileName) throw new Error("Invalid path: no filename found");
+
+    let currentDir = root;
     for (const part of parts) {
       currentDir = await currentDir.getDirectoryHandle(part, { create });
     }

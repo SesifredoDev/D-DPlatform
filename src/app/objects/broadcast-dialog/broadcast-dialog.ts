@@ -369,6 +369,7 @@ export class BroadcastDialog implements OnInit {
       const filenameBase = file.name || this.nextGeneratedImageName(context);
       const uploaded = await this.uploadFile(file, filenameBase);
       context.uploadedEmbeddedFiles.set(tokenUrl, uploaded);
+      this.addAttachment(context, uploaded); // Ensure they are added as message attachments
       console.log(`[BroadcastDialog] Pre-upload complete for ${tokenUrl} -> ${uploaded.url}`);
     }
   }

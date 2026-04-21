@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, OnDestroy } from '@angular/core';
+import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import { ActivatedRoute } from '@angular/router';
@@ -10,7 +10,6 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatTreeModule } from '@angular/material/tree';
-import { MarkdownComponent } from 'ngx-markdown';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
 import { Subject, Subscription } from 'rxjs';
@@ -18,6 +17,7 @@ import { debounceTime } from 'rxjs/operators';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { BroadcastDialog, BroadcastData, BroadcastEmbeddedFile } from '../../../objects/broadcast-dialog/broadcast-dialog';
+import { MilkdownEditorComponent } from '../../../shared/components/milkdown-editor/milkdown-editor.component';
 
 @Component({
   selector: 'app-obsidian-view',
@@ -32,10 +32,10 @@ import { BroadcastDialog, BroadcastData, BroadcastEmbeddedFile } from '../../../
     MatInputModule,
     MatExpansionModule,
     MatTreeModule,
-    MarkdownComponent,
     MatTooltipModule,
     MatMenuModule,
-    MatDialogModule
+    MatDialogModule,
+    MilkdownEditorComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -47,7 +47,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
   vaultEntries: VaultEntry[] = [];
 
   selectedFileContent: string = '';
-  processedContent: string = '';
+  // processedContent is not needed for Milkdown as it handles its own rendering
 
   selectedFileName: string = ''; // Full filename with extension
   selectedFileDisplayName: string = ''; // Name without extension for editing
@@ -65,6 +65,8 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
   // Context Menu Support
   contextMenuPosition = { x: '0px', y: '0px' };
 
+  hasActiveSelection: boolean = false;
+
   private objectUrls: string[] = [];
   private contentChanged = new Subject<void>();
   private autoSaveSubscription?: Subscription;
@@ -73,7 +75,8 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     private obsidianVaultService: ObsidianVaultService,
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
@@ -97,11 +100,36 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     ).subscribe(() => {
       this.saveFile();
     });
+
+    document.addEventListener('selectionchange', this.handleSelectionChange);
   }
 
   ngOnDestroy(): void {
     this.revokeObjectUrls();
     this.autoSaveSubscription?.unsubscribe();
+    document.removeEventListener('selectionchange', this.handleSelectionChange);
+  }
+
+  private handleSelectionChange = () => {
+    const selection = window.getSelection();
+    const hasSelection = !!(selection && !selection.isCollapsed && this.isSelectionInEditor(selection));
+
+    if (this.hasActiveSelection !== hasSelection) {
+      this.hasActiveSelection = hasSelection;
+      this.cdr.detectChanges();
+    }
+  };
+
+  private isSelectionInEditor(selection: Selection): boolean {
+    if (selection.rangeCount === 0) return false;
+    let node: Node | null = selection.getRangeAt(0).commonAncestorContainer;
+    while (node) {
+      if (node instanceof HTMLElement && node.classList.contains('milkdown-container')) {
+        return true;
+      }
+      node = node.parentNode;
+    }
+    return false;
   }
 
   async loadVaultInfo(): Promise<void> {
@@ -146,7 +174,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
 
   async loadVaultEntries(): Promise<void> {
     this.vaultEntries = await this.obsidianVaultService.listVaultFiles(this.serverId);
-    console.log('Vault entries loaded:', this.vaultEntries);
   }
 
   async selectFile(entry: VaultEntry): Promise<void> {
@@ -164,7 +191,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       this.nonMarkdownUrl = null;
       this.selectedFileContent = await this.obsidianVaultService.readFile(this.serverId, entry.relativePath);
       this.isPreview = true;
-      await this.processContent();
     } else {
       const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, entry.relativePath);
       const url = URL.createObjectURL(blob);
@@ -225,7 +251,10 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     return name.endsWith('.md') ? name.slice(0, -3) : name;
   }
 
-  onContentChange(): void {
+  onContentChange(newContent?: string): void {
+    if (newContent !== undefined) {
+      this.selectedFileContent = newContent;
+    }
     this.contentChanged.next();
   }
 
@@ -319,107 +348,12 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
 
   async toggleEditMode(): Promise<void> {
     if (!this.selectedFileName.endsWith('.md')) return; // Non-editable
-
     this.isPreview = !this.isPreview;
-    if (this.isPreview) {
-      await this.processContent();
-    }
-  }
-
-  private async processContent(): Promise<void> {
-    console.log('processContent: Starting...');
-    this.revokeObjectUrls();
-    let content = this.selectedFileContent;
-    const currentFileDir = this.selectedFileRelativePath.split('/').slice(0, -1).join('/');
-    console.log('processContent: Current file directory:', currentFileDir);
-
-    const embedRegex = /!\[\[(.*?)\]\]/g;
-    let match;
-    const replacements: { original: string, replacement: string }[] = [];
-
-    while ((match = embedRegex.exec(content)) !== null) {
-      const fullMatch = match[0];
-      const linkContent = match[1].trim(); // Trim whitespace
-      const parts = linkContent.split('|');
-      const filePath = parts[0].trim(); // Trim whitespace
-      const width = parts[1] ? parts[1].trim() : ''; // Obsidian supports width like ![[img.png|300]]
-      console.log(`processContent: Found embed: "${fullMatch}", extracted filePath: "${filePath}", width: "${width}"`);
-
-      let resolvedPath: string | null = null;
-
-      // 1. Try exact path from root
-      try {
-        await this.obsidianVaultService.readFileAsBlob(this.serverId, filePath);
-        resolvedPath = filePath;
-        console.log(`processContent: Resolved by direct path: "${resolvedPath}"`);
-      } catch (e) {
-        console.log(`processContent: Direct path failed for "${filePath}". Error:`, e);
-        // 2. Try relative to current file
-        const relativeToCurrent = this.obsidianVaultService.resolveRelativePath(currentFileDir, filePath);
-        try {
-          await this.obsidianVaultService.readFileAsBlob(this.serverId, relativeToCurrent);
-          resolvedPath = relativeToCurrent;
-          console.log(`processContent: Resolved by relative path: "${resolvedPath}"`);
-        } catch (e2) {
-          console.log(`processContent: Relative path failed for "${relativeToCurrent}". Error:`, e2);
-          // 3. Global search by filename
-          const filenameOnly = filePath.split('/').pop()?.split('\\').pop(); // Get just the filename
-          if (filenameOnly) {
-            resolvedPath = await this.obsidianVaultService.findFileByFilename(this.serverId, filenameOnly);
-            console.log(`processContent: Resolved by global filename search for "${filenameOnly}": "${resolvedPath}"`);
-          } else {
-            console.log(`processContent: Could not extract filename from "${filePath}" for global search.`);
-          }
-        }
-      }
-
-      if (resolvedPath) {
-        try {
-          const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, resolvedPath);
-          const url = URL.createObjectURL(blob);
-          this.objectUrls.push(url);
-          console.log(`processContent: Created object URL: "${url}" for resolved path: "${resolvedPath}"`);
-
-          let replacement = '';
-          const style = width ? `width: ${width}px; max-width: 100%;` : `max-width: 100%;`;
-
-          if (this.isImageFile(resolvedPath)) {
-            replacement = `<img src="${url}" alt="${filePath}" style="${style} border-radius: 4px;">`;
-          } else if (this.isPdfFile(resolvedPath)) {
-            replacement = `<embed src="${url}" type="application/pdf" width="100%" height="600px">`;
-          } else {
-            replacement = `<a href="${url}" target="_blank">Download ${filePath}</a>`;
-          }
-          replacements.push({ original: fullMatch, replacement });
-          console.log(`processContent: Generated replacement HTML for "${fullMatch}":`, replacement);
-        } catch (e) {
-          console.warn('processContent: Could not load embed after resolution:', resolvedPath, 'Error:', e);
-        }
-      } else {
-        console.warn(`processContent: No resolved path found for embed: "${fullMatch}"`);
-      }
-    }
-
-    for (const r of replacements) {
-      content = content.replace(r.original, r.replacement);
-    }
-
-    const linkRegex = /\[\[(.*?)\]\]/g;
-    content = content.replace(linkRegex, (match, p1) => {
-      const parts = p1.split('|');
-      const targetPath = parts[0].trim();
-      const displayName = parts[1] ? parts[1].trim() : targetPath;
-      // Use both data-path and title to avoid sanitization issues
-      return `<a class="internal-link" data-path="${targetPath}" title="${targetPath}" style="color: #00a8fc; cursor: pointer;">${displayName}</a>`;
-    });
-
-    this.processedContent = content;
-    console.log('processContent: Finished. Processed content updated.');
   }
 
   private isImageFile(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase();
-    return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext || '');
+    return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'avif'].includes(ext || '');
   }
 
   private isPdfFile(path: string): boolean {
@@ -431,44 +365,21 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     this.objectUrls = [];
   }
 
-  handleMarkdownClick(event: MouseEvent): void {
-    const target = event.target as HTMLElement;
-    const link = target.closest('.internal-link');
-
-    if (link) {
-      console.log('handleMarkdownClick: INTERNAL LINK CLICKED');
-      // Try multiple attributes in case sanitizer strips data-path
-      let path = link.getAttribute('data-path') || link.getAttribute('title');
-
-      // If attributes are stripped, fallback to text content (only if no alias was used)
-      if (!path) {
-        path = link.textContent?.trim() || null;
-        console.log('handleMarkdownClick: Fallback to text content:', path);
-      }
-
-      console.log('handleMarkdownClick: Path extracted:', path);
-      if (path) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.openInternalLink(path);
-      }
+  onWikilinkClick(path: string): void {
+    if (path) {
+      this.openInternalLink(path);
     }
   }
 
   private async openInternalLink(linkPath: string): Promise<void> {
-    // Clean up input: trim and remove invisible characters (like zero-width spaces)
     linkPath = linkPath.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
-    console.log(`openInternalLink: Triggered for path "${linkPath}"`);
-
     const currentFileDir = this.selectedFileRelativePath.split('/').slice(0, -1).join('/');
 
-    // 1. Try exact match from root or with .md
     let entry = this.findEntryByPath(linkPath, this.vaultEntries);
     if (!entry && !linkPath.toLowerCase().endsWith('.md')) {
       entry = this.findEntryByPath(`${linkPath}.md`, this.vaultEntries);
     }
 
-    // 2. Try relative to current file
     if (!entry) {
       const relativePath = this.obsidianVaultService.resolveRelativePath(currentFileDir, linkPath);
       entry = this.findEntryByPath(relativePath, this.vaultEntries);
@@ -477,7 +388,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       }
     }
 
-    // 3. Global search by filename (anywhere in the vault) - this satisfies "find filename.md in any folder"
     if (!entry) {
       const fileName = linkPath.split('/').pop()!;
       entry = this.findEntryByName(fileName, this.vaultEntries);
@@ -488,7 +398,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       }
     }
 
-    // 4. Try global search by base name (ignore extension)
     if (!entry) {
       const fileName = linkPath.split('/').pop()!;
       const baseName = fileName.includes('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
@@ -496,10 +405,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     }
 
     if (entry) {
-      console.log(`openInternalLink: Found matching entry at "${entry.relativePath}"`);
       await this.selectFile(entry);
-    } else {
-      console.warn(`Internal link target not found: ${linkPath}`);
     }
   }
 
@@ -542,7 +448,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     this.selectedFileDisplayName = '';
     this.selectedFileRelativePath = '';
     this.selectedFileContent = '';
-    this.processedContent = '';
     this.nonMarkdownUrl = null;
     this.isImage = false;
     this.isPdf = false;
@@ -555,7 +460,16 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     }
   }
 
-  // --- Broadcast Functionality ---
+  /**
+   * Unified broadcast method that decides whether to broadcast
+   * the selection or the full document.
+   */
+  async broadcast(): Promise<void> {
+    const broadcastedSelection = await this.broadcastSelection();
+    if (!broadcastedSelection) {
+      await this.broadcastFullDocument();
+    }
+  }
 
   async broadcastFullDocument(): Promise<void> {
     if (!this.selectedFileContent && !this.nonMarkdownUrl) return;
@@ -570,7 +484,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       data.text = markdownBroadcast.markdown;
       data.embeddedFiles = markdownBroadcast.embeddedFiles;
     } else {
-      // For images/PDFs, we need to get the actual file blob or use the URL
       const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, this.selectedFileRelativePath);
       data.file = new File([blob], this.selectedFileName, { type: blob.type });
     }
@@ -582,37 +495,52 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     });
   }
 
-  async broadcastSelection(): Promise<void> {
+  async broadcastSelection(): Promise<boolean> {
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
 
     const range = selection.getRangeAt(0);
     const container = document.createElement('div');
     container.appendChild(range.cloneContents());
 
-    // Check if the selection is within our markdown content
     let node: Node | null = range.commonAncestorContainer;
     let withinMarkdown = false;
     while (node) {
-      if (node instanceof HTMLElement && node.classList.contains('obsidian-markdown')) {
+      if (node instanceof HTMLElement && node.classList.contains('milkdown-container')) {
         withinMarkdown = true;
         break;
       }
       node = node.parentNode;
     }
 
-    if (!withinMarkdown) return;
+    if (!withinMarkdown) return false;
+
+    const embeddedFiles: BroadcastEmbeddedFile[] = [];
+    const tokenCache = new Map<string, string>();
+
+    // 1. Resolve images in the HTML selection (rendered <img> tags)
+    const imgs = Array.from(container.querySelectorAll('img'));
+    for (const img of imgs) {
+      const src = img.getAttribute('src');
+      if (src) {
+        const tokenizedUrl = await this.resolveAndTokenizeImage(src, img.getAttribute('alt') || 'image', embeddedFiles, tokenCache);
+        img.setAttribute('src', tokenizedUrl);
+      }
+    }
+
+    // 2. Resolve markdown in the text part of the selection
+    const markdownBroadcast = await this.buildBroadcastMarkdown(selection.toString(), embeddedFiles, tokenCache);
 
     const data: BroadcastData = {
-      text: selection.toString(),
+      text: markdownBroadcast.markdown,
+      embeddedFiles: markdownBroadcast.embeddedFiles,
       htmlContent: container.innerHTML,
       source: 'obsidian-view-selection'
     };
 
-    // If only an image is selected, handle it as an image broadcast
-    const images = container.getElementsByTagName('img');
-    if (images.length === 1 && container.innerText.trim() === '') {
-       data.imageUrl = images[0].src;
+    // Special case for single image selection
+    if (imgs.length === 1 && container.innerText.trim() === '') {
+       data.imageUrl = imgs[0].src;
     }
 
     this.dialog.open(BroadcastDialog, {
@@ -620,76 +548,181 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       maxWidth: '600px',
       width: '100%'
     });
+
+    return true;
   }
 
-  private async buildBroadcastMarkdown(content: string): Promise<{ markdown: string; embeddedFiles: BroadcastEmbeddedFile[] }> {
-    const embedRegex = /!\[\[(.*?)\]\]/g;
-    let rebuiltContent = '';
-    let lastIndex = 0;
-    const embeddedFiles: BroadcastEmbeddedFile[] = [];
+  /**
+   * Resolves a local path/URL to a file in the vault, prepares a tokenized BroadcastEmbeddedFile,
+   * and returns the token URL. Returns original URL if it can't be resolved or is already external.
+   */
+  private async resolveAndTokenizeImage(url: string, alt: string, embeddedFiles: BroadcastEmbeddedFile[], cache: Map<string, string>): Promise<string> {
+    if (!url) return url;
 
-    for (const match of content.matchAll(embedRegex)) {
-      const fullMatch = match[0];
-      const linkContent = match[1].trim();
-      const startIndex = match.index ?? 0;
+    // Normalize and cleanup the URL/path
+    let cleanUrl = url.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
 
-      rebuiltContent += content.slice(lastIndex, startIndex);
-      rebuiltContent += await this.convertObsidianEmbedToMarkdown(linkContent, embeddedFiles);
-      lastIndex = startIndex + fullMatch.length;
+    // 1. Strip browser-prepended origin if present (e.g. http://localhost/)
+    const origin = window.location.origin;
+    if (cleanUrl.startsWith(origin)) {
+      cleanUrl = cleanUrl.substring(origin.length);
+      if (cleanUrl.startsWith('/')) cleanUrl = cleanUrl.substring(1);
     }
 
-    rebuiltContent += content.slice(lastIndex);
-    return { markdown: rebuiltContent, embeddedFiles };
+    // 2. Decode the URL first, as it might be mangled/encoded by the browser or editor
+    let decodedUrl = '';
+    try {
+      decodedUrl = decodeURIComponent(cleanUrl);
+    } catch (e) {
+      decodedUrl = cleanUrl;
+    }
+
+    // 3. Strip leading/trailing angle brackets < > often added by markdown parsers for autolinks
+    decodedUrl = decodedUrl.replace(/^<+|<+$/g, '').replace(/^>+|>+$/g, '');
+
+    // 4. Now check if it's already a valid external/final URL
+    if (/^https?:\/\//i.test(decodedUrl) || decodedUrl.startsWith('broadcast-file://') || decodedUrl.startsWith('blob:')) {
+      // If it doesn't contain our internal markers, we treat it as an external resource and return original URL
+      if (!decodedUrl.includes('wikilink-blob:') && !decodedUrl.includes('file:///')) {
+         return url;
+      }
+    }
+
+    let searchPath = decodedUrl;
+    if (decodedUrl.startsWith('file:///')) {
+      searchPath = decodedUrl.replace('file:///', '');
+    } else if (decodedUrl.startsWith('wikilink-blob:')) {
+      searchPath = decodedUrl.replace('wikilink-blob:', '');
+    }
+
+    // Normalize slashes for consistency
+    searchPath = searchPath.replace(/\\/g, '/');
+
+    const resolvedPath = await this.resolveEmbedPath(searchPath);
+    if (!resolvedPath || !this.isImageFile(resolvedPath)) {
+      console.warn(`[ObsidianView] Could not resolve image path for broadcast: ${searchPath}`);
+      return url;
+    }
+
+    // Check cache to avoid double-tokenizing the same resolved path
+    if (cache.has(resolvedPath)) {
+       return cache.get(resolvedPath)!;
+    }
+
+    try {
+      const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, resolvedPath);
+      const filename = alt?.trim() || resolvedPath.split('/').pop() || 'image';
+      const file = new File([blob], filename, { type: blob.type });
+      const tokenUrl = `broadcast-file://${crypto.randomUUID()}`;
+
+      embeddedFiles.push({ tokenUrl, file });
+      cache.set(resolvedPath, tokenUrl);
+      console.log(`[ObsidianView] Tokenized image: ${resolvedPath} -> ${tokenUrl}`);
+      return tokenUrl;
+    } catch (e) {
+      console.error(`[ObsidianView] Error reading resolved image for broadcast: ${resolvedPath}`, e);
+      return url;
+    }
   }
 
-  private async convertObsidianEmbedToMarkdown(linkContent: string, embeddedFiles: BroadcastEmbeddedFile[]): Promise<string> {
+  private async buildBroadcastMarkdown(content: string, existingEmbeddedFiles: BroadcastEmbeddedFile[] = [], existingCache: Map<string, string> = new Map()): Promise<{ markdown: string; embeddedFiles: BroadcastEmbeddedFile[] }> {
+    const embeddedFiles = existingEmbeddedFiles;
+    const tokenCache = existingCache;
+
+    // 1. First Pass: Handle Obsidian-style embeds: ![[image.png]]
+    const embedRegex = /!\[\[(.*?)\]\]/g;
+    let intermediateContent = '';
+    let lastIndex = 0;
+
+    const embedMatches = Array.from(content.matchAll(embedRegex));
+    for (const match of embedMatches) {
+      intermediateContent += content.slice(lastIndex, match.index);
+      const linkContent = match[1].trim();
+
+      const parts = linkContent.split('|');
+      const filePath = parts[0].trim().replace(/\\/g, '/');
+      const alt = parts.length > 1 ? parts[1].trim() : filePath;
+
+      const tokenizedUrl = await this.resolveAndTokenizeImage(filePath, alt, embeddedFiles, tokenCache);
+      intermediateContent += `![${alt}](${tokenizedUrl})`;
+      lastIndex = (match.index || 0) + match[0].length;
+    }
+    intermediateContent += content.slice(lastIndex);
+
+    // 2. Second Pass: Handle standard Markdown images: ![alt](url)
+    const standardImageRegex = /!\[(.*?)\]\(([^)]+)\)/g;
+    const matches = Array.from(intermediateContent.matchAll(standardImageRegex));
+
+    let finalContent = '';
+    lastIndex = 0;
+
+    for (const match of matches) {
+      finalContent += intermediateContent.slice(lastIndex, match.index);
+      const alt = match[1];
+      const url = match[2].trim();
+
+      const tokenizedUrl = await this.resolveAndTokenizeImage(url, alt, embeddedFiles, tokenCache);
+      finalContent += `![${alt}](${tokenizedUrl})`;
+
+      lastIndex = (match.index || 0) + match[0].length;
+    }
+    finalContent += intermediateContent.slice(lastIndex);
+
+    return { markdown: finalContent, embeddedFiles };
+  }
+
+  private async convertObsidianEmbedToMarkdown(linkContent: string, embeddedFiles: BroadcastEmbeddedFile[], cache: Map<string, string>): Promise<string> {
     const parts = linkContent.split('|');
-    const filePath = parts[0].trim();
+    const filePath = parts[0].trim().replace(/\\/g, '/');
     const resolvedPath = await this.resolveEmbedPath(filePath);
 
     if (!resolvedPath) {
       return `![[${linkContent}]]`;
     }
 
+    if (this.isImageFile(resolvedPath)) {
+      const altText = parts.length > 1 ? parts[1].trim() : (resolvedPath.split('/').pop() || filePath);
+      const tokenUrl = await this.resolveAndTokenizeImage(resolvedPath, altText, embeddedFiles, cache);
+      return `![${altText}](${tokenUrl})`;
+    }
+
     const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, resolvedPath);
     const objectUrl = URL.createObjectURL(blob);
     this.objectUrls.push(objectUrl);
 
-    if (this.isImageFile(resolvedPath)) {
-      const altText = filePath.split('/').pop()?.split('\\').pop() || filePath;
-      const file = new File([blob], altText, { type: blob.type });
-      const tokenUrl = `broadcast-file://${crypto.randomUUID()}`;
-      embeddedFiles.push({ tokenUrl, file });
-      return `![${altText}](${tokenUrl})`;
-    }
-
     if (this.isPdfFile(resolvedPath)) {
-      const fileName = filePath.split('/').pop()?.split('\\').pop() || filePath;
+      const fileName = resolvedPath.split('/').pop() || filePath;
       return `[${fileName}](${objectUrl})`;
     }
 
-    const fileName = filePath.split('/').pop()?.split('\\').pop() || filePath;
+    const fileName = resolvedPath.split('/').pop() || filePath;
     return `[${fileName}](${objectUrl})`;
   }
 
   private async resolveEmbedPath(filePath: string): Promise<string | null> {
     const currentFileDir = this.selectedFileRelativePath.split('/').slice(0, -1).join('/');
+    const cleanPath = filePath.trim().replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\\/g, '/');
 
+    // Attempt 1: Direct path
     try {
-      await this.obsidianVaultService.readFileAsBlob(this.serverId, filePath);
-      return filePath;
-    } catch {
-      const relativeToCurrent = this.obsidianVaultService.resolveRelativePath(currentFileDir, filePath);
+      await this.obsidianVaultService.readFileAsBlob(this.serverId, cleanPath);
+      return cleanPath;
+    } catch (e) {}
 
-      try {
-        await this.obsidianVaultService.readFileAsBlob(this.serverId, relativeToCurrent);
-        return relativeToCurrent;
-      } catch {
-        const filenameOnly = filePath.split('/').pop()?.split('\\').pop();
-        return filenameOnly
-          ? await this.obsidianVaultService.findFileByFilename(this.serverId, filenameOnly)
-          : null;
-      }
+    // Attempt 2: Relative path
+    const relativeToCurrent = this.obsidianVaultService.resolveRelativePath(currentFileDir, cleanPath);
+    try {
+      await this.obsidianVaultService.readFileAsBlob(this.serverId, relativeToCurrent);
+      return relativeToCurrent;
+    } catch (e) {}
+
+    // Attempt 3: Filename only search
+    const filenameOnly = cleanPath.includes('/') ? cleanPath.split('/').pop()! : cleanPath;
+    const foundByFilename = await this.obsidianVaultService.findFileByFilename(this.serverId, filenameOnly);
+    if (foundByFilename) {
+      return foundByFilename;
     }
+
+    return null;
   }
 }
