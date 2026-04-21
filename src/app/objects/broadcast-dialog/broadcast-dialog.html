@@ -12,27 +12,54 @@
   <div class="options-container">
     <h3>Select Destinations</h3>
 
-    <div class="section">
-      <h4>Text Channels</h4>
-      <mat-selection-list [(ngModel)]="selectedChannels">
-        @for (channel of textChannels; track channel._id) {
-          <mat-list-option [value]="channel._id">
-            <mat-icon matListItemIcon>chat</mat-icon>
-            {{ channel.name }}
-          </mat-list-option>s
-        }
-      </mat-selection-list>
-    </div>
+    <mat-tab-group>
+      <mat-tab label="Channels">
+        <div class="section">
+          <mat-selection-list [(ngModel)]="selectedChannels">
+            @for (channel of textChannels; track channel._id) {
+              <mat-list-option [value]="channel._id">
+                <mat-icon matListItemIcon>chat</mat-icon>
+                {{ channel.name }}
+              </mat-list-option>
+            }
+          </mat-selection-list>
+          <div *ngIf="textChannels.length === 0" class="empty-list">No text channels available.</div>
+        </div>
+      </mat-tab>
 
-    <div class="section" *ngIf="isCallActive && (hasFile || hasImageUrl || hasText || hasHtml)">
-      <h4>Active Call</h4>
-      <mat-checkbox [(ngModel)]="broadcastToCall">Overlay on Everyone's Screen</mat-checkbox>
-    </div>
+      <mat-tab label="Whispers">
+        <div class="section">
+          <mat-selection-list [(ngModel)]="selectedMembers">
+            @for (member of serverMembers; track member.user._id) {
+              <mat-list-option [value]="member.user._id">
+                <img matListItemIcon [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/' + member.user._id + '?d=identicon'" class="user-avatar-mini">
+                {{ member.user.username }}
+              </mat-list-option>
+            }
+          </mat-selection-list>
+          <div *ngIf="serverMembers.length === 0" class="empty-list">No other members in this server.</div>
+        </div>
+      </mat-tab>
 
-    <div class="section" *ngIf="isVttActive && (hasFile || hasImageUrl)">
-      <h4>VTT</h4>
-      <mat-checkbox [(ngModel)]="broadcastToVtt">Add as non-player token</mat-checkbox>
-    </div>
+      <mat-tab label="Active Overlays" *ngIf="isCallActive || isVttActive">
+        <div class="section">
+           <div class="overlay-option" *ngIf="isCallActive && (hasFile || hasImageUrl || hasText || hasHtml)">
+              <mat-checkbox [(ngModel)]="broadcastToCall">
+                <strong>Broadcast to Call Overlay</strong>
+                <p>Display this content on everyone's screen in the active video call.</p>
+              </mat-checkbox>
+           </div>
+
+           <div class="overlay-option" *ngIf="isVttActive && (hasFile || hasImageUrl)">
+              <mat-checkbox [(ngModel)]="broadcastToVtt">
+                <strong>Add to VTT Map</strong>
+                <p>Create a non-player token on the active battlemap.</p>
+              </mat-checkbox>
+           </div>
+        </div>
+      </mat-tab>
+    </mat-tab-group>
+
   </div>
 </mat-dialog-content>
 

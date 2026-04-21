@@ -15,6 +15,7 @@ import { Message, Attachment } from '../../shared/services/message/message';
 import { Video } from '../../shared/services/video/video';
 import { VttSync } from '../../shared/services/vttsync/vttsync';
 import { FileService } from '../../shared/services/file/file';
+import { UserService } from '../../shared/services/user/user';
 import { DomSanitizer, SafeHtml, SafeUrl } from '@angular/platform-browser';
 
 export interface BroadcastData {
@@ -72,6 +73,10 @@ export class BroadcastDialog implements OnInit {
 
   textChannels: IChannel[] = [];
   selectedChannels: string[] = [];
+
+  serverMembers: any[] = [];
+  selectedMembers: string[] = [];
+
   broadcastToCall: boolean = false;
   broadcastToVtt: boolean = false;
 
@@ -85,6 +90,8 @@ export class BroadcastDialog implements OnInit {
   hasHtml: boolean = false;
   hasImageUrl: boolean = false;
 
+  currentServerId: string | null = null;
+
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: BroadcastData,
     private dialogRef: MatDialogRef<BroadcastDialog>,
@@ -93,6 +100,7 @@ export class BroadcastDialog implements OnInit {
     private videoService: Video,
     private vttSync: VttSync,
     private fileService: FileService,
+    private userService: UserService,
     private sanitizer: DomSanitizer
   ) {
     if (data.file) {
@@ -119,7 +127,12 @@ export class BroadcastDialog implements OnInit {
   ngOnInit() {
     const currentServer = this.serverService.getCurrentServer();
     if (currentServer) {
+      this.currentServerId = currentServer._id;
       this.textChannels = currentServer.channels.filter(c => c.type === 'text');
+
+      this.userService.getMe().subscribe(me => {
+        this.serverMembers = (currentServer.members || []).filter((m: any) => m.user._id !== me._id);
+      });
     }
 
     this.isCallActive = !!this.videoService.currentChannelId;
@@ -129,7 +142,8 @@ export class BroadcastDialog implements OnInit {
   canBroadcast() {
     const canBroadcastToCallVtt = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && (this.broadcastToCall || this.broadcastToVtt);
     const canBroadcastToTextChannels = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && this.selectedChannels.length > 0;
-    return canBroadcastToCallVtt || canBroadcastToTextChannels;
+    const canBroadcastToWhispers = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && this.selectedMembers.length > 0;
+    return canBroadcastToCallVtt || canBroadcastToTextChannels || canBroadcastToWhispers;
   }
 
   async broadcast() {
@@ -182,6 +196,18 @@ export class BroadcastDialog implements OnInit {
         for (const channelId of this.selectedChannels) {
           console.log(`[BroadcastDialog] Sending message to channel ${channelId}`);
           await this.messageService.sendMessage(channelId, finalMessageContent, undefined, context.attachments).toPromise();
+        }
+      }
+
+      // 4b. Send to Whispers
+      if (this.selectedMembers.length > 0 && this.currentServerId) {
+        for (const memberId of this.selectedMembers) {
+           console.log(`[BroadcastDialog] Initiating whisper for member ${memberId}`);
+           const channel: any = await this.serverService.getOrCreateWhisperChannel(this.currentServerId, memberId).toPromise();
+           if (channel && channel._id) {
+             console.log(`[BroadcastDialog] Sending whisper to channel ${channel._id}`);
+             await this.messageService.sendMessage(channel._id, finalMessageContent, undefined, context.attachments).toPromise();
+           }
         }
       }
 

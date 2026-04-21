@@ -343,6 +343,15 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
   }
 
+  openCall() {
+    const callChannel = this.selectedServer?.channels.find(c => c.type === ChannelType.Call);
+    if (callChannel) {
+      this.selectChannel(callChannel);
+    } else {
+      console.warn('No video call channel found in this server.');
+    }
+  }
+
   onRightClickCharacter(event: MouseEvent, character: ICharacter) {
     event.preventDefault(); // Prevent browser context menu
 
