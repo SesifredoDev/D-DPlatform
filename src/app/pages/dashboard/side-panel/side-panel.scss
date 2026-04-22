@@ -77,6 +77,21 @@
       margin-left: 4px;
     }
   }
+
+  .empty-server-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-s);
+    color: rgba(255, 255, 255, 0.3);
+
+    .server-name-text {
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+  }
 }
 
 /* -----------------------------------------------------------------------------
@@ -95,6 +110,49 @@
     background: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     &:hover { background: var(--primary); }
+  }
+}
+
+/* EMPTY STATE */
+.empty-state-container {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  text-align: center;
+
+  .empty-state-content {
+    max-width: 240px;
+
+    .empty-icon {
+      font-size: 64px;
+      width: 64px;
+      height: 64px;
+      margin-bottom: var(--space-l);
+      color: rgba(255, 255, 255, 0.05);
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: var(--space-s);
+    }
+
+    p {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.4);
+      line-height: 1.6;
+      margin-bottom: var(--space-xl);
+    }
+
+    button {
+      width: 100%;
+      border-radius: var(--radius-m);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
   }
 }
 

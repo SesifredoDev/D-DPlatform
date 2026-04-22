@@ -121,15 +121,15 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
 
     this.subscriptions.add(this.serverService.getMyServersObservable().subscribe((servers) => {
-
+      this.servers = servers;
       if (servers.length > 0) {
-        this.servers = servers;
         if (!this.selectedServer) {
           this.selectServer(servers[0]);
         }
-
-
+      } else {
+        this.selectedServer = null;
       }
+      this.cdr.markForCheck();
     }));
 
 

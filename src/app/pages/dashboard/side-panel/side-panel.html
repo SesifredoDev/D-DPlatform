@@ -27,11 +27,30 @@
     </mat-menu>
   </header>
 
+  <header class="server-header" *ngIf="!selectedServer">
+    <div class="empty-server-header">
+      <span class="server-name-text">No Realms Found</span>
+    </div>
+  </header>
+
   <!-- 2. SCROLLABLE CONTENT AREA -->
   <div class="main-content-scroll">
 
+    <!-- NO SERVERS STATE -->
+    <div class="empty-state-container" *ngIf="servers.length === 0">
+      <div class="empty-state-content">
+        <mat-icon class="empty-icon">fort</mat-icon>
+        <h3>Your journey awaits</h3>
+        <p>You haven't joined any realms yet. Create your own world or join a friend's campaign to begin.</p>
+        <button mat-flat-button color="primary" (click)="openAddServerDialog()">
+          <mat-icon>add</mat-icon>
+          Create Realm
+        </button>
+      </div>
+    </div>
+
     <!-- CHARACTER SECTION (Your Identity) -->
-    <section class="identity-section" *ngIf="selectedCharacter">
+    <section class="identity-section" *ngIf="selectedCharacter && servers.length > 0">
       <div class="identity-card" (click)="goToManageCharacters()" matTooltip="Manage Characters">
         <div class="avatar-container">
           <img
@@ -62,7 +81,7 @@
     </section>
 
     <!-- NAVIGATION: CHANNELS -->
-    <section class="nav-section">
+    <section class="nav-section" *ngIf="selectedServer">
       <div class="section-header">
         <span class="title">Channels</span>
         <button mat-icon-button class="mini-btn" *ngIf="isServerOwner"><mat-icon>add</mat-icon></button>
@@ -79,7 +98,7 @@
     </section>
 
     <!-- NAVIGATION: DM WHISPERS -->
-    <section class="nav-section">
+    <section class="nav-section" *ngIf="selectedServer">
       <div class="section-header">
         <span class="title">Direct Whispers</span>
       </div>
@@ -110,7 +129,7 @@
     </section>
 
     <!-- SOCIAL: MEMBER LIST -->
-    <section class="members-section">
+    <section class="members-section" *ngIf="selectedServer">
       <div class="section-header">
         <span class="title">In This Realm</span>
       </div>
@@ -155,10 +174,10 @@
       <button mat-icon-button *ngIf="isServerOwner" (click)="openSettings()" matTooltip="Server Settings">
         <mat-icon>settings</mat-icon>
       </button>
-      <button mat-icon-button (click)="openVTT()" matTooltip="Game Map">
+      <button mat-icon-button *ngIf="selectedServer" (click)="openVTT()" matTooltip="Game Map">
         <mat-icon>map</mat-icon>
       </button>
-      <button mat-icon-button (click)="openObsidian()" matTooltip="Obsidian Vault">
+      <button mat-icon-button *ngIf="selectedServer" (click)="openObsidian()" matTooltip="Obsidian Vault">
         <mat-icon>auto_stories</mat-icon>
       </button>
 
