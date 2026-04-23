@@ -85,7 +85,13 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     private serverService: ServerService,
     private http: HttpClient
   ) {
-    this.userService.getMe().subscribe(user => this.currentUserId = user._id);
+    this.userService.getMe().subscribe(user => {
+      this.currentUserId = user._id;
+      const server = this.serverService.getCurrentServer();
+      if (server) {
+        this.updateWhisperState(server);
+      }
+    });
   }
 
   ngOnInit() {

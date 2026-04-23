@@ -4,6 +4,7 @@ import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject, Observable } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
+import { UserService } from '../user/user';
 
 export interface Attachment {
   url: string;
@@ -36,21 +37,27 @@ export interface MessageData {
 export class Message {
   private socket: Socket;
   private channelMessages = new Map<string, BehaviorSubject<MessageData[]>>();
+  private joinedChannels = new Set<string>();
+  private socketAuthReady = false;
 
-  constructor(private http: HttpClient) {
+  constructor(private http: HttpClient, private userService: UserService) {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
-      transports: ['websocket']
+      transports: ['websocket'],
+      autoConnect: false
+    });
+
+    this.socket.on('connect', () => {
+      this.joinedChannels.forEach(channelId => {
+        this.socket.emit('join_channel', channelId);
+      });
     });
 
     this.socket.on('new_message', (message: MessageData) => {
       const channelId = message.channel;
       const subject = this.channelMessages.get(channelId);
       if (subject) {
-        // Logic to only show whispers if intended for current user or they are the author
-        // Actually the backend should probably handle the emit logic better, but for now
-        // let's assume we might receive it and the UI will filter or it's already filtered by backend
         subject.next([...subject.value, message]);
       }
     });
@@ -67,6 +74,27 @@ export class Message {
         subject.next(messages);
       }
     });
+
+    this.userService.getMe().subscribe({
+      next: (user) => {
+        this.socket.auth = { userId: user._id };
+        this.socketAuthReady = true;
+        this.connectSocket();
+      },
+      error: (err) => {
+        console.error('Failed to resolve socket user identity', err);
+      }
+    });
+  }
+
+  private connectSocket() {
+    if (!this.socketAuthReady) {
+      return;
+    }
+
+    if (!this.socket.connected && !this.socket.active) {
+      this.socket.connect();
+    }
   }
 
   joinChannel(channelId: string): Observable<MessageData[]> {
@@ -74,12 +102,12 @@ export class Message {
       this.channelMessages.set(channelId, new BehaviorSubject<MessageData[]>([]));
     }
 
+    this.joinedChannels.add(channelId);
+
     if (this.socket.connected) {
       this.socket.emit('join_channel', channelId);
     } else {
-      this.socket.once('connect', () => {
-        this.socket.emit('join_channel', channelId);
-      });
+      this.connectSocket();
     }
 
     this.getHistory(channelId).subscribe(history => {
@@ -91,11 +119,14 @@ export class Message {
 
   leaveChannel(channelId: string) {
     this.socket.emit('leave_channel', channelId);
+    this.joinedChannels.delete(channelId);
     this.channelMessages.delete(channelId);
   }
 
   getHistory(channelId: string) {
-    return this.http.get<MessageData[]>(`${environment.apiURL}message/${channelId}`);
+    return this.http.get<MessageData[]>(`${environment.apiURL}message/${channelId}`, {
+      withCredentials: true
+    });
   }
 
   sendMessage(channelId: string, content: string, characterId?: string, attachments?: Attachment[], replyTo?: string, isWhisper?: boolean, recipientId?: string) {

@@ -1,4 +1,4 @@
-<div class="chat-container" [class.whisper-channel]="isWhisperMode">
+<div class="chat-container">
   @if(showNewMessageIndicator){
     <div class="new-message-indicator" (click)="scrollToBottom(true)">
       <mat-icon>arrow_downward</mat-icon>
@@ -9,7 +9,7 @@
   <div class="messages-viewport">
     <div #messageContainer class="messages-scroller" (scroll)="onScroll()">
       @for (msg of messages; track msg._id; let i = $index) {
-        <div class="message-group" [id]="msg._id" [class.whisper]="msg.isWhisper">
+        <div class="message-group" [id]="msg._id">
 
           @if(msg.replyTo) {
             <div class="reply-context">
@@ -31,12 +31,6 @@
             <div class="content-column">
               <div class="message-meta">
                 <span class="author-name">{{ msg.character?.name || msg.author?.username }}</span>
-                @if(msg.isWhisper && !isWhisperMode) {
-                  <span class="whisper-label">
-                    <mat-icon>visibility_off</mat-icon>
-                    Whisper to {{ msg.recipient?.username || 'the DM' }}
-                  </span>
-                }
                 <span class="timestamp">{{ msg.createdAt | date:'HH:mm' }}</span>
               </div>
 
@@ -95,10 +89,10 @@
       } @empty {
         <div class="empty-state">
           <div class="empty-icon-wrapper">
-            <mat-icon>{{ isWhisperMode ? 'visibility_off' : 'forum' }}</mat-icon>
+            <mat-icon>forum</mat-icon>
           </div>
-          <h3>{{ isWhisperMode ? 'Private Whisper Channel' : 'Welcome to the Chronicle' }}</h3>
-          <p>{{ isWhisperMode ? 'This channel is only visible to you and ' + (whisperRecipient?.username || 'the DM') : 'This is the start of your adventure. Scribe your first message below.' }}</p>
+          <h3>Welcome to the Chronicle</h3>
+          <p>This is the start of your adventure. Scribe your first message below.</p>
         </div>
       }
     </div>
@@ -124,17 +118,10 @@
       </div>
     }
 
-    @if(isWhisperMode) {
-      <div class="whisper-preview">
-        <mat-icon>visibility_off</mat-icon>
-        <span>Whispering to <strong>{{ whisperRecipient?.username || 'the DM' }}</strong></span>
-      </div>
-    }
-
-    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0" [class.whisper-mode]="isWhisperMode">
+    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
       <textarea
         #messageInput
-        [placeholder]="isWhisperMode ? 'Scribe a whisper...' : 'Scribe a message to the chronicle...'"
+        placeholder="Scribe a message to the chronicle..."
         [(ngModel)]="newMessageContent"
         (keydown)="handleKeyDown($event)"
         cdkTextareaAutosize
