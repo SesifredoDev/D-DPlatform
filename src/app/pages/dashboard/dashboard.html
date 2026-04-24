@@ -9,13 +9,13 @@
   (actionPerformed)="onSidePanelAction()">
 </app-side-panel>
 
-<main class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" cdkDropListGroup>
+<main #editorArea class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" [class.split-active]="rightTabs.length > 0 && !isMobile" cdkDropListGroup>
 
   <!-- LEFT PANE -->
   <div class="pane"
        id="left-pane"
        cdkDropList
-       [style.flex-basis.px]="isMobile ? '100%' : leftWidth"
+       [style.flex-basis]="leftPaneBasis"
        [cdkDropListData]="'left'"
        (cdkDropListDropped)="onDrop($event)">
 

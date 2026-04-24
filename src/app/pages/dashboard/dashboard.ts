@@ -1,4 +1,4 @@
-import {ChangeDetectorRef, Component, HostListener, OnInit} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {MatButtonModule, MatIconButton} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
 import {CharacterService} from '../../shared/services/character/character';
@@ -41,12 +41,13 @@ import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })
-export class Dashboard implements OnInit {
+export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChild('editorArea') private editorAreaRef?: ElementRef<HTMLElement>;
 
   leftTabs: Tab[] = [];
   rightTabs: Tab[] = [];
   allTabs: Tab[] = [];
-  leftWidth: number = window.innerWidth / 2;
+  leftWidth = 0;
   isResizing = false;
 
   userInfo: any = null;
@@ -58,6 +59,10 @@ export class Dashboard implements OnInit {
 
   isMobile: boolean = window.innerWidth <= 768;
   showSidePanel: boolean = !this.isMobile;
+  private readonly minPaneWidth = 280;
+  private pendingLeftWidth: number | null = null;
+  private animationFrameId: number | null = null;
+  private resizeObserver?: ResizeObserver;
 
   constructor(
     private tabService: TabService,
@@ -67,7 +72,9 @@ export class Dashboard implements OnInit {
     private videoService: Video,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
-  ) {}
+  ) {
+    this.leftWidth = this.getDefaultSplitWidth(window.innerWidth);
+  }
 
   ngOnInit() {
     this.tabService.tabs$.subscribe(tabs => {
@@ -98,6 +105,22 @@ export class Dashboard implements OnInit {
     });
   }
 
+  ngAfterViewInit() {
+    this.syncLayoutBounds();
+    if (typeof ResizeObserver !== 'undefined' && this.editorAreaRef?.nativeElement) {
+      this.resizeObserver = new ResizeObserver(() => this.syncLayoutBounds());
+      this.resizeObserver.observe(this.editorAreaRef.nativeElement);
+    }
+  }
+
+  ngOnDestroy() {
+    this.resizeObserver?.disconnect();
+    if (this.animationFrameId !== null) {
+      cancelAnimationFrame(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+  }
+
   private updatePaneTabs() {
     if (this.isMobile) {
       this.leftTabs = this.allTabs;
@@ -106,6 +129,7 @@ export class Dashboard implements OnInit {
       this.leftTabs = this.allTabs.filter(t => t.pane === 'left');
       this.rightTabs = this.allTabs.filter(t => t.pane === 'right');
     }
+    this.syncLayoutBounds();
     this.cdr.detectChanges();
   }
 
@@ -127,6 +151,7 @@ export class Dashboard implements OnInit {
   }
 
   startResizing(event: MouseEvent) {
+    if (this.isMobile || this.rightTabs.length === 0) return;
     this.isResizing = true;
     event.preventDefault();
   }
@@ -134,22 +159,20 @@ export class Dashboard implements OnInit {
   @HostListener('window:mousemove', ['$event'])
   onMouseMove(event: MouseEvent) {
     if (!this.isResizing || this.isMobile) return;
-    const sidebarWidth = 260;
-    const newWidth = event.clientX - sidebarWidth;
-    if (newWidth > 200 && (window.innerWidth - event.clientX) > 200) {
-      this.leftWidth = newWidth;
-    }
+    this.scheduleLeftWidthUpdate(event.clientX);
   }
 
   @HostListener('window:mouseup')
   onMouseUp() {
     this.isResizing = false;
+    this.pendingLeftWidth = null;
   }
 
   @HostListener('window:resize', ['$event'])
   onResize(event: any) {
     const wasMobile = this.isMobile;
     this.isMobile = window.innerWidth <= 768;
+    this.syncLayoutBounds();
     if (wasMobile !== this.isMobile) {
       this.showSidePanel = !this.isMobile;
       this.updatePaneTabs();
@@ -240,5 +263,60 @@ export class Dashboard implements OnInit {
       width: '500px',
       maxWidth: '90vw'
     });
+  }
+
+  get leftPaneBasis(): string | null {
+    if (this.isMobile || this.rightTabs.length === 0) {
+      return null;
+    }
+
+    return `${this.leftWidth}px`;
+  }
+
+  private scheduleLeftWidthUpdate(pointerClientX: number) {
+    this.pendingLeftWidth = this.resolveLeftWidthFromPointer(pointerClientX);
+    if (this.pendingLeftWidth === null || this.animationFrameId !== null) {
+      return;
+    }
+
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.animationFrameId = null;
+      if (this.pendingLeftWidth === null) {
+        return;
+      }
+
+      this.leftWidth = this.pendingLeftWidth;
+      this.pendingLeftWidth = null;
+      this.cdr.detectChanges();
+    });
+  }
+
+  private resolveLeftWidthFromPointer(pointerClientX: number): number | null {
+    const editorRect = this.editorAreaRef?.nativeElement.getBoundingClientRect();
+    if (!editorRect) {
+      return null;
+    }
+
+    const pointerOffset = pointerClientX - editorRect.left;
+    return this.clampLeftWidth(pointerOffset, editorRect.width);
+  }
+
+  private syncLayoutBounds() {
+    const editorWidth = this.editorAreaRef?.nativeElement.getBoundingClientRect().width;
+    if (!editorWidth || this.isMobile || this.rightTabs.length === 0) {
+      return;
+    }
+
+    this.leftWidth = this.clampLeftWidth(this.leftWidth, editorWidth);
+  }
+
+  private clampLeftWidth(leftWidth: number, totalWidth: number): number {
+    const maxWidth = Math.max(this.minPaneWidth, totalWidth - this.minPaneWidth);
+    const nextWidth = leftWidth || this.getDefaultSplitWidth(totalWidth);
+    return Math.round(Math.min(Math.max(nextWidth, this.minPaneWidth), maxWidth));
+  }
+
+  private getDefaultSplitWidth(totalWidth: number): number {
+    return Math.round(Math.max(this.minPaneWidth, totalWidth / 2));
   }
 }

@@ -141,6 +141,14 @@
     }
   }
 
+  &.split-active .pane {
+    transition: flex-basis 0.14s ease-out;
+  }
+
+  &.resizing-active .pane {
+    transition: none !important;
+  }
+
   /* =================================
      MODERN GLASS TABS (TOP)
   ================================= */
@@ -246,24 +254,42 @@
      RESIZER
   ================================= */
   .resizer-handle {
-    width: 2px;
+    width: 8px;
     background: var(--outline);
     cursor: col-resize;
     z-index: 10;
-    transition: all var(--transition-standard);
+    transition: background-color var(--transition-standard), box-shadow var(--transition-standard);
     position: relative;
+    flex: 0 0 8px;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 2px;
+      height: 72px;
+      transform: translate(-50%, -50%);
+      border-radius: var(--radius-pill);
+      background: rgba(255, 255, 255, 0.28);
+      transition: inherit;
+    }
 
     &::after {
       content: '';
       position: absolute;
-      left: -4px;
-      width: 10px;
+      left: -6px;
+      width: 20px;
       height: 100%;
     }
 
     &:hover, &:active {
       background: var(--brand-blue);
       box-shadow: 0 0 12px var(--brand-blue);
+
+      &::before {
+        background: rgba(255, 255, 255, 0.95);
+      }
     }
   }
 }
