@@ -26,6 +26,8 @@ export interface CallParticipantMetadata {
   deviceType: DeviceInfo['deviceType'];
   deviceRole: CallDeviceRole;
   character: any;
+  selectedVideoSource?: CompanionSourceId;
+  selectedAudioSource?: CompanionSourceId;
 }
 
 export interface CompanionDeviceOption {
@@ -75,14 +77,11 @@ export class Video {
   public currentChannelId: string | null = null;
 
   private participantStreams = new Map<string, MediaStream>();
+  private effectiveParticipantStreams = new Map<string, MediaStream>();
   private pingInterval: any;
   private currentParticipantMetadata: CallParticipantMetadata | null = null;
   private currentParticipantIdentity: string | null = null;
   private phoneCompanionTargetIdentity: string | null = null;
-  private forwardedCompanionVideoTrack: MediaStreamTrack | null = null;
-  private forwardedCompanionAudioTrack: MediaStreamTrack | null = null;
-  private activeCompanionVideoIdentity: string | null = null;
-  private activeCompanionAudioIdentity: string | null = null;
   private companionSyncPromise: Promise<void> | null = null;
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
@@ -264,7 +263,7 @@ export class Video {
         this.resolveDeviceRole(deviceInfo),
         character
       );
-      await this.room.localParticipant.setMetadata(JSON.stringify(this.currentParticipantMetadata));
+      await this.publishLocalMetadata();
       this.emitParticipants();
     }
   }
@@ -279,7 +278,7 @@ export class Video {
   }
 
   async setCameraEnabled(enabled: boolean) {
-    const currentTrack = this.forwardedCompanionVideoTrack || this.currentVideoPublicationTrack;
+    const currentTrack = this.currentVideoPublicationTrack;
     if (currentTrack) {
       currentTrack.enabled = enabled;
       return;
@@ -291,7 +290,7 @@ export class Video {
   }
 
   async setMicrophoneEnabled(enabled: boolean) {
-    const currentTrack = this.forwardedCompanionAudioTrack || this.currentAudioPublicationTrack;
+    const currentTrack = this.currentAudioPublicationTrack;
     if (currentTrack) {
       currentTrack.enabled = enabled;
       return;
@@ -304,11 +303,13 @@ export class Video {
 
   async selectVideoSource(sourceId: CompanionSourceId) {
     this.selectedVideoSource$.next(sourceId);
+    await this.updateSelectedSourcesMetadata();
     await this.syncCompanionState();
   }
 
   async selectAudioSource(sourceId: CompanionSourceId) {
     this.selectedAudioSource$.next(sourceId);
+    await this.updateSelectedSourcesMetadata();
     await this.syncCompanionState();
   }
 
@@ -402,7 +403,7 @@ export class Video {
         id: p.identity,
         userData: participantMeta?.character || {},
         participantMeta,
-        stream: this.participantStreams.get(p.identity),
+        stream: this.buildEffectiveParticipantStream(p.identity, participantMeta),
         ping: rtt
       };
     });
@@ -484,6 +485,7 @@ export class Video {
     this.selectedVideoSource$.next('desktop-local');
     this.selectedAudioSource$.next('desktop-local');
     this.participantStreams.clear();
+    this.effectiveParticipantStreams.clear();
     this.vttSession$.next({ active: false, roomId: null, hostId: null });
     this.localStream = null;
     this.currentChannelId = null;
@@ -492,16 +494,6 @@ export class Video {
     this.phoneCompanionTargetIdentity = null;
     this.currentVideoPublicationTrack = null;
     this.currentAudioPublicationTrack = null;
-    this.activeCompanionVideoIdentity = null;
-    this.activeCompanionAudioIdentity = null;
-    if (this.forwardedCompanionVideoTrack) {
-      this.forwardedCompanionVideoTrack.stop();
-      this.forwardedCompanionVideoTrack = null;
-    }
-    if (this.forwardedCompanionAudioTrack) {
-      this.forwardedCompanionAudioTrack.stop();
-      this.forwardedCompanionAudioTrack = null;
-    }
   }
 
   private buildParticipantIdentity(userId: string, deviceId: string): string {
@@ -519,7 +511,9 @@ export class Video {
       deviceId: deviceInfo.deviceId,
       deviceType: deviceInfo.deviceType,
       deviceRole,
-      character
+      character,
+      selectedVideoSource: deviceRole === 'desktop-main' ? this.selectedVideoSource$.value : 'desktop-local',
+      selectedAudioSource: deviceRole === 'desktop-main' ? this.selectedAudioSource$.value : 'desktop-local'
     };
   }
 
@@ -579,6 +573,7 @@ export class Video {
       return;
     }
 
+    await this.normalizeSelectedSources();
     await this.applyPublishedTracks();
   }
 
@@ -590,23 +585,18 @@ export class Video {
   }
 
   private async applyVideoSource() {
-    const nextSource = this.resolveVideoTrack();
-    if (this.currentVideoPublicationTrack === nextSource.track) return;
+    const nextSource = this.localStream?.getVideoTracks()[0] || null;
+    if (this.currentVideoPublicationTrack === nextSource) return;
 
     if (this.currentVideoPublicationTrack) {
       await this.room.localParticipant.unpublishTrack(this.currentVideoPublicationTrack, false);
-      if (this.currentVideoPublicationTrack === this.forwardedCompanionVideoTrack) {
-        this.currentVideoPublicationTrack.stop();
-      }
     }
 
-    this.forwardedCompanionVideoTrack = nextSource.forwardedTrack;
-    this.activeCompanionVideoIdentity = nextSource.identity;
-    this.currentVideoPublicationTrack = nextSource.track;
+    this.currentVideoPublicationTrack = nextSource;
 
-    if (nextSource.track) {
-      nextSource.track.contentHint = 'motion';
-      await this.room.localParticipant.publishTrack(nextSource.track, {
+    if (nextSource) {
+      nextSource.contentHint = 'motion';
+      await this.room.localParticipant.publishTrack(nextSource, {
         ...Video.cameraPublishOptions,
         name: 'video',
       });
@@ -614,22 +604,17 @@ export class Video {
   }
 
   private async applyAudioSource() {
-    const nextSource = this.resolveAudioTrack();
-    if (this.currentAudioPublicationTrack === nextSource.track) return;
+    const nextSource = this.localStream?.getAudioTracks()[0] || null;
+    if (this.currentAudioPublicationTrack === nextSource) return;
 
     if (this.currentAudioPublicationTrack) {
       await this.room.localParticipant.unpublishTrack(this.currentAudioPublicationTrack, false);
-      if (this.currentAudioPublicationTrack === this.forwardedCompanionAudioTrack) {
-        this.currentAudioPublicationTrack.stop();
-      }
     }
 
-    this.forwardedCompanionAudioTrack = nextSource.forwardedTrack;
-    this.activeCompanionAudioIdentity = nextSource.identity;
-    this.currentAudioPublicationTrack = nextSource.track;
+    this.currentAudioPublicationTrack = nextSource;
 
-    if (nextSource.track && this.currentParticipantMetadata?.deviceRole !== 'phone-camera') {
-      await this.room.localParticipant.publishTrack(nextSource.track, {
+    if (nextSource && this.currentParticipantMetadata?.deviceRole !== 'phone-camera') {
+      await this.room.localParticipant.publishTrack(nextSource, {
         audioPreset: AudioPresets.speech,
         dtx: true,
         red: true,
@@ -638,40 +623,104 @@ export class Video {
     }
   }
 
-  private resolveVideoTrack(): { track: MediaStreamTrack | null; forwardedTrack: MediaStreamTrack | null; identity: string | null } {
-    const selectedIdentity = this.selectedVideoSource$.value;
-    if (selectedIdentity !== 'desktop-local') {
-      const companionTrack = this.participantStreams.get(selectedIdentity)?.getVideoTracks()[0] || null;
-      if (companionTrack) {
-        const clonedTrack = companionTrack.clone();
-        return { track: clonedTrack, forwardedTrack: clonedTrack, identity: selectedIdentity };
-      }
-      this.selectedVideoSource$.next('desktop-local');
+  private buildEffectiveParticipantStream(
+    participantIdentity: string,
+    metadata: CallParticipantMetadata | null
+  ): MediaStream | undefined {
+    const sourceStream = this.participantStreams.get(participantIdentity);
+    if (!sourceStream) {
+      this.effectiveParticipantStreams.delete(participantIdentity);
+      return undefined;
     }
 
-    return {
-      track: this.localStream?.getVideoTracks()[0] || null,
-      forwardedTrack: null,
-      identity: null,
-    };
+    if (metadata?.deviceRole !== 'desktop-main') {
+      this.effectiveParticipantStreams.delete(participantIdentity);
+      return sourceStream;
+    }
+
+    const effectiveStream = this.effectiveParticipantStreams.get(participantIdentity) || new MediaStream();
+    effectiveStream.getTracks().forEach(track => effectiveStream.removeTrack(track));
+
+    const selectedVideoTrack = this.resolveEffectiveTrack(metadata.selectedVideoSource, 'video', sourceStream);
+    const selectedAudioTrack = this.resolveEffectiveTrack(metadata.selectedAudioSource, 'audio', sourceStream);
+
+    if (selectedVideoTrack) {
+      effectiveStream.addTrack(selectedVideoTrack);
+    }
+    if (selectedAudioTrack) {
+      effectiveStream.addTrack(selectedAudioTrack);
+    }
+
+    this.effectiveParticipantStreams.set(participantIdentity, effectiveStream);
+    return effectiveStream;
   }
 
-  private resolveAudioTrack(): { track: MediaStreamTrack | null; forwardedTrack: MediaStreamTrack | null; identity: string | null } {
-    const selectedIdentity = this.selectedAudioSource$.value;
-    if (selectedIdentity !== 'desktop-local') {
-      const companionTrack = this.participantStreams.get(selectedIdentity)?.getAudioTracks()[0] || null;
-      if (companionTrack) {
-        const clonedTrack = companionTrack.clone();
-        return { track: clonedTrack, forwardedTrack: clonedTrack, identity: selectedIdentity };
+  private resolveEffectiveTrack(
+    sourceId: CompanionSourceId | undefined,
+    kind: 'audio' | 'video',
+    fallbackStream: MediaStream
+  ): MediaStreamTrack | null {
+    const getter = kind === 'video' ? 'getVideoTracks' : 'getAudioTracks';
+    if (sourceId && sourceId !== 'desktop-local') {
+      const selectedTrack = this.participantStreams.get(sourceId)?.[getter]()[0] || null;
+      if (selectedTrack) {
+        return selectedTrack;
       }
-      this.selectedAudioSource$.next('desktop-local');
     }
 
-    return {
-      track: this.localStream?.getAudioTracks()[0] || null,
-      forwardedTrack: null,
-      identity: null,
+    return fallbackStream[getter]()[0] || null;
+  }
+
+  private async updateSelectedSourcesMetadata() {
+    if (!this.currentParticipantMetadata || this.currentParticipantMetadata.deviceRole !== 'desktop-main') {
+      return;
+    }
+
+    this.currentParticipantMetadata = {
+      ...this.currentParticipantMetadata,
+      selectedVideoSource: this.selectedVideoSource$.value,
+      selectedAudioSource: this.selectedAudioSource$.value,
     };
+
+    await this.publishLocalMetadata();
+    this.emitParticipants();
+  }
+
+  private async normalizeSelectedSources() {
+    if (!this.currentParticipantMetadata || this.currentParticipantMetadata.deviceRole !== 'desktop-main') {
+      return;
+    }
+
+    let changed = false;
+    if (!this.hasAvailableCompanionTrack(this.selectedVideoSource$.value, 'video')) {
+      this.selectedVideoSource$.next('desktop-local');
+      changed = true;
+    }
+    if (!this.hasAvailableCompanionTrack(this.selectedAudioSource$.value, 'audio')) {
+      this.selectedAudioSource$.next('desktop-local');
+      changed = true;
+    }
+
+    if (changed) {
+      await this.updateSelectedSourcesMetadata();
+    }
+  }
+
+  private hasAvailableCompanionTrack(sourceId: CompanionSourceId, kind: 'audio' | 'video'): boolean {
+    if (sourceId === 'desktop-local') {
+      return true;
+    }
+
+    const getter = kind === 'video' ? 'getVideoTracks' : 'getAudioTracks';
+    return !!this.participantStreams.get(sourceId)?.[getter]().length;
+  }
+
+  private async publishLocalMetadata() {
+    if (this.room.state !== 'connected' || !this.currentParticipantMetadata) {
+      return;
+    }
+
+    await this.room.localParticipant.setMetadata(JSON.stringify(this.currentParticipantMetadata));
   }
 
   private selectIceServers(iceServers?: RTCIceServer[]): RTCIceServer[] | undefined {
