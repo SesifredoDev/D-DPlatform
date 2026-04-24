@@ -37,8 +37,14 @@ export interface CompanionDeviceOption {
   hasAudio: boolean;
 }
 
+interface LiveKitConnectionInfo {
+  token: string;
+  iceServers?: RTCIceServer[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class Video {
+  private static readonly maxIceServers = 4;
   private static readonly cameraPublishOptions: TrackPublishOptions = {
     audioPreset: AudioPresets.speech,
     dtx: true,
@@ -220,7 +226,7 @@ export class Video {
       const data = await this.getLiveKitConnectionInfo(channelId, identity);
       const connectOptions: RoomConnectOptions = {
         autoSubscribe: deviceRole !== 'phone-camera',
-        rtcConfig: { iceServers: data.iceServers }
+        rtcConfig: { iceServers: this.selectIceServers(data.iceServers) }
       };
 
       await this.room.connect(environment.livekitUrl, data.token, connectOptions);
@@ -668,7 +674,44 @@ export class Video {
     };
   }
 
-  private async getLiveKitConnectionInfo(room: string, identity: string) {
+  private selectIceServers(iceServers?: RTCIceServer[]): RTCIceServer[] | undefined {
+    if (!iceServers?.length) {
+      return undefined;
+    }
+
+    const normalizedServers = iceServers
+      .map(server => this.normalizeIceServer(server))
+      .filter((server): server is RTCIceServer => !!server);
+
+    if (!normalizedServers.length) {
+      return undefined;
+    }
+
+    const turnServers = normalizedServers.filter(server => this.isTurnServer(server));
+    const stunServers = normalizedServers.filter(server => !this.isTurnServer(server));
+
+    return [...turnServers, ...stunServers].slice(0, Video.maxIceServers);
+  }
+
+  private normalizeIceServer(server: RTCIceServer): RTCIceServer | null {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    const uniqueUrls = Array.from(new Set(urls.filter((url): url is string => !!url?.trim())));
+    if (!uniqueUrls.length) {
+      return null;
+    }
+
+    return {
+      ...server,
+      urls: uniqueUrls.length === 1 ? uniqueUrls[0] : uniqueUrls
+    };
+  }
+
+  private isTurnServer(server: RTCIceServer): boolean {
+    const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+    return urls.some(url => /^turns?:/i.test(url));
+  }
+
+  private async getLiveKitConnectionInfo(room: string, identity: string): Promise<LiveKitConnectionInfo> {
     const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch LiveKit connection info');
