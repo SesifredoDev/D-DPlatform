@@ -52,16 +52,26 @@
           <div class="settings-grid">
             <div class="device-select">
               <mat-icon>videocam</mat-icon>
-              <select [(ngModel)]="selectedVideoId" (change)="onDeviceChange()">
+              <select [(ngModel)]="selectedVideoId" (change)="onDeviceChange()" [disabled]="isMobileBrowser && !mobileMediaReady">
+                <option *ngIf="isMobileBrowser && !videoDevices.length" value="">Camera will appear after access is granted</option>
                 <option *ngFor="let d of videoDevices" [value]="d.deviceId">{{ d.label }}</option>
               </select>
             </div>
             <div class="device-select">
               <mat-icon>mic</mat-icon>
-              <select [(ngModel)]="selectedAudioId" (change)="onDeviceChange()">
+              <select [(ngModel)]="selectedAudioId" (change)="onDeviceChange()" [disabled]="isMobileBrowser && !mobileMediaReady">
+                <option *ngIf="isMobileBrowser && !audioDevices.length" value="">Microphone will appear after access is granted</option>
                 <option *ngFor="let d of audioDevices" [value]="d.deviceId">{{ d.label }}</option>
               </select>
             </div>
+          </div>
+
+          <div *ngIf="isMobileBrowser && !mobileMediaReady" class="mobile-permission-prompt">
+            <p>{{ mobileMediaMessage || 'Enable camera and microphone first to see preview and device options.' }}</p>
+            <button class="btn-primary-join" (click)="prepareMobileMedia()" [disabled]="isPreparingMobileMedia">
+              <mat-icon>{{ isPreparingMobileMedia ? 'hourglass_top' : 'videocam' }}</mat-icon>
+              <span>{{ isPreparingMobileMedia ? 'Preparing...' : 'Enable Camera & Mic' }}</span>
+            </button>
           </div>
 
           <button class="btn-primary-join" (click)="joinCall()">
@@ -255,13 +265,17 @@
             <mat-icon>dvr</mat-icon>
           </button>
 
-          <button *ngIf="vttSession.active && vttSession.hostId !== (isDmMode ? dmCharacter : character).name" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
+          <button *ngIf="canJoinVttSession()" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
             <mat-icon>group_add</mat-icon>
           </button>
 
           <!-- Custom Theme Picker Toggle -->
           <button (click)="showThemePicker = !showThemePicker" class="btn-action" [class.active]="showThemePicker" matTooltip="Atmosphere Settings">
             <mat-icon>palette</mat-icon>
+          </button>
+
+          <button *ngIf="!isMobileBrowser" (click)="showDeviceRouting = !showDeviceRouting" class="btn-action" [class.active]="showDeviceRouting" matTooltip="Call Devices">
+            <mat-icon>settings_input_component</mat-icon>
           </button>
 
           <button (click)="leaveCall()" class="btn-action btn-danger" matTooltip="Leave Call">
@@ -335,6 +349,70 @@
             <div [style.background]="activeColors.background"></div>
           </div>
         </div>
+    </div>
+
+    <div class="device-routing-overlay glass" *ngIf="showDeviceRouting && !isMobileBrowser">
+      <div class="overlay-header">
+        <h3>Call Devices</h3>
+        <div class="header-actions">
+          <button class="btn-close" (click)="showDeviceRouting = false">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="color-scroll-area" (click)="$event.stopPropagation()">
+        <div class="device-routing-section">
+          <div class="section-title">Desktop Hardware</div>
+          <div class="settings-grid compact">
+            <div class="device-select">
+              <mat-icon>videocam</mat-icon>
+              <select [(ngModel)]="selectedVideoId" (change)="onDeviceChange()">
+                <option *ngFor="let d of videoDevices" [value]="d.deviceId">{{ d.label }}</option>
+              </select>
+            </div>
+            <div class="device-select">
+              <mat-icon>mic</mat-icon>
+              <select [(ngModel)]="selectedAudioId" (change)="onDeviceChange()">
+                <option *ngFor="let d of audioDevices" [value]="d.deviceId">{{ d.label }}</option>
+              </select>
+            </div>
+            <div class="device-select" *ngIf="supportsAudioOutputSelection">
+              <mat-icon>speaker</mat-icon>
+              <select [(ngModel)]="selectedOutputId" (change)="changeAudioOutput()">
+                <option *ngFor="let d of audioOutputDevices" [value]="d.deviceId">{{ d.label || 'Default Output' }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="device-routing-section">
+          <div class="section-title">Published Sources</div>
+          <div class="settings-grid compact">
+            <div class="device-select">
+              <mat-icon>switch_video</mat-icon>
+              <select [(ngModel)]="selectedPcVideoSource" (change)="changePcVideoSource(selectedPcVideoSource)">
+                <option value="desktop-local">Desktop camera</option>
+                <option *ngFor="let device of companionDevices" [value]="device.identity" [disabled]="!device.hasVideo">
+                  {{ device.label }} camera{{ device.hasVideo ? '' : ' unavailable' }}
+                </option>
+              </select>
+            </div>
+            <div class="device-select">
+              <mat-icon>mic_external_on</mat-icon>
+              <select [(ngModel)]="selectedPcAudioSource" (change)="changePcAudioSource(selectedPcAudioSource)">
+                <option value="desktop-local">Desktop microphone</option>
+                <option *ngFor="let device of companionDevices" [value]="device.identity" [disabled]="!device.hasAudio">
+                  {{ device.label }} microphone{{ device.hasAudio ? '' : ' unavailable' }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <p class="device-routing-note" *ngIf="!companionDevices.length">
+            Connected phone companions will appear here so the PC can use them as its camera or microphone source.
+          </p>
+        </div>
+      </div>
     </div>
   }
 

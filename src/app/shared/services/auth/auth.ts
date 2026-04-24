@@ -58,4 +58,22 @@ export class AuthService {
 
     this.router.navigate(['auth']);
   }
+
+  getCurrentUserId(): string | null {
+    const token = this.tokenService.getAccessToken();
+    if (!token) return null;
+
+    try {
+      const payload = token.split('.')[1];
+      if (!payload) return null;
+
+      const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const decodedPayload = atob(normalizedPayload);
+      const parsed = JSON.parse(decodedPayload);
+
+      return parsed.userId || parsed._id || parsed.sub || parsed.id || null;
+    } catch {
+      return null;
+    }
+  }
 }
