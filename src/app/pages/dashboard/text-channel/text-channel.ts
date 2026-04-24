@@ -248,9 +248,11 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
         .subscribe({
           next: (res) => {
             this.attachments.push({
-              url: `${environment.apiURL}files/${res.id}`,
+              url: res.url,
+              id: res.id,
+              key: res.key,
               name: res.filename,
-              filename: res.filename, // Added missing filename property
+              filename: res.filename,
               contentType: res.contentType
             });
             this.isUploading = false;

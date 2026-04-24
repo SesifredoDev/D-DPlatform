@@ -10,6 +10,8 @@ export interface Attachment {
   url: string;
   name: string;
   contentType: string;
+  id?: string;
+  key?: string;
   filename?: string;
 }
 
@@ -164,12 +166,61 @@ export class Message {
 
   private normalizeAttachment(attachment: Attachment): Attachment {
     const filename = attachment.filename || attachment.name;
+    const key = this.buildAttachmentKey({ ...attachment, filename });
 
     return {
       ...attachment,
+      id: attachment.id,
+      key,
+      url: this.buildAttachmentUrl({ ...attachment, filename, key }),
       name: attachment.name || filename,
       filename
     };
+  }
+
+  private buildAttachmentKey(attachment: Partial<Attachment>): string | undefined {
+    if (attachment.key) {
+      return attachment.key;
+    }
+
+    if (attachment.id && attachment.filename) {
+      return `${attachment.id}-${attachment.filename}`;
+    }
+
+    if (attachment.id && attachment.name) {
+      return `${attachment.id}-${attachment.name}`;
+    }
+
+    return attachment.id;
+  }
+
+  private buildAttachmentUrl(attachment: Partial<Attachment> & { key?: string; filename?: string }): string {
+    const key = attachment.key || this.buildAttachmentKey(attachment);
+    const currentUrl = attachment.url || '';
+
+    if (key) {
+      if (currentUrl) {
+        try {
+          const parsedUrl = new URL(currentUrl, environment.apiURL);
+          const segments = (parsedUrl.pathname || '').split('/').filter(Boolean);
+          if (segments.includes('files')) {
+            segments[segments.length - 1] = key;
+            parsedUrl.pathname = `/${segments.join('/')}`;
+            return parsedUrl.origin === new URL(environment.apiURL).origin
+              ? parsedUrl.toString()
+              : parsedUrl.toString();
+          }
+        } catch {
+          if (/\/files\/[^/]+$/i.test(currentUrl)) {
+            return currentUrl.replace(/\/files\/[^/]+$/i, `/files/${key}`);
+          }
+        }
+      }
+
+      return `${environment.apiURL}files/${key}`;
+    }
+
+    return currentUrl;
   }
 
   private normalizeMessage(message: MessageData): MessageData {
