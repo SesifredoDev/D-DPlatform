@@ -4,6 +4,49 @@
   width: 100%;
   overflow: hidden;
   background: var(--background-gradient);
+  position: relative;
+}
+
+.mobile-toggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2000;
+  background: rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(10px);
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.sidebar {
+  width: 20vw;
+  min-width: 300px;
+  max-width: 400px;
+  flex-shrink: 0;
+  z-index: 1000;
+  transition: transform 0.3s ease-in-out, width 0.3s ease;
+
+  &.mobile-hidden {
+    display: none;
+  }
+
+  &.mobile-open {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    z-index: 1500;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar:not(.mobile-open) {
+    width: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
 }
 
 .editor-area {
@@ -11,6 +54,11 @@
   flex: 1;
   height: 100%;
   position: relative;
+  min-width: 0;
+
+  &.mobile-hidden {
+    display: none;
+  }
 
   &::before {
     content: '';
@@ -34,8 +82,8 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    flex-grow: 0;
-    flex-shrink: 0;
+    flex-grow: 1;
+    flex-shrink: 1;
     background: transparent;
     z-index: 1;
     position: relative;
@@ -65,9 +113,7 @@
     }
 
     &#left-pane {
-      &:only-child, &:has(+ .right-pane.empty) {
-        flex: 1 1 auto !important;
-      }
+      flex: 1 1 auto;
     }
 
     &.right-pane {
@@ -108,14 +154,19 @@
     padding: 0 10px;
     gap: 6px;
     border-bottom: 1px solid var(--outline);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
 
     .tab {
       display: flex;
       align-items: center;
       padding: 0 14px;
       height: 34px;
-      min-width: 140px;
+      min-width: 120px;
       max-width: 220px;
+      flex-shrink: 0;
       border-radius: var(--radius-m);
       background: transparent;
       color: var(--on-surface-variant);
@@ -192,39 +243,6 @@
   }
 
   /* =================================
-     DROP ZONE PLACEHOLDER
-  ================================= */
-  .drop-zone-placeholder {
-    height: 100%;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--on-surface-muted);
-    transition: all var(--transition-standard);
-
-    .hint-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      mat-icon { font-size: 32px; width: 32px; height: 32px; }
-      span { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; text-align: center; }
-    }
-  }
-
-  /* Active dragging visual feedback */
-  .cdk-drop-list-dragging .drop-zone-placeholder {
-    background: var(--brand-blue-alpha);
-    border: 2px dashed var(--brand-blue);
-    margin: 10px;
-    border-radius: var(--radius-xl);
-    opacity: 1 !important;
-    color: white;
-    .hint-content span { display: block !important; }
-  }
-
-  /* =================================
      RESIZER
   ================================= */
   .resizer-handle {
@@ -250,24 +268,20 @@
   }
 }
 
-/* =================================
-   DRAG AND DROP PREVIEWS
-================================= */
-.cdk-drag-preview {
-  background: rgba(30, 31, 34, 0.9) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  padding: 10px 20px;
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-4);
-  color: white;
-  border: 1px solid var(--outline);
-  display: flex;
-  align-items: center;
-  font-family: var(--font-family-main);
-  font-size: 14px;
-  z-index: 1000;
-  .close-btn { display: none; }
+@media (max-width: 768px) {
+  .editor-area {
+    .tab-bar {
+      padding-left: 60px;
+    }
+    .pane {
+      flex: 1 1 100% !important;
+      width: 100%;
+    }
+    .right-pane {
+      display: none !important;
+    }
+    .resizer-handle {
+      display: none !important;
+    }
+  }
 }
-
-.cdk-drag-placeholder { opacity: 0.1; }

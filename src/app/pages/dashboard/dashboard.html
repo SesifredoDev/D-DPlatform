@@ -1,12 +1,21 @@
-<app-side-panel class="sidebar"></app-side-panel>
+<button mat-icon-button class="mobile-toggle" (click)="toggleSidePanel()" *ngIf="isMobile">
+  <mat-icon>{{ showSidePanel ? 'close' : 'menu' }}</mat-icon>
+</button>
 
-<main class="editor-area" [class.resizing-active]="isResizing" cdkDropListGroup>
+<app-side-panel
+  class="sidebar"
+  [class.mobile-open]="isMobile && showSidePanel"
+  [class.mobile-hidden]="isMobile && !showSidePanel"
+  (actionPerformed)="onSidePanelAction()">
+</app-side-panel>
+
+<main class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" cdkDropListGroup>
 
   <!-- LEFT PANE -->
   <div class="pane"
        id="left-pane"
        cdkDropList
-       [style.flex-basis.px]="leftWidth"
+       [style.flex-basis.px]="isMobile ? '100%' : leftWidth"
        [cdkDropListData]="'left'"
        (cdkDropListDropped)="onDrop($event)">
 
@@ -49,13 +58,14 @@
   </div>
 
   <!-- RESIZER -->
-  @if (rightTabs.length > 0) {
+  @if (rightTabs.length > 0 && !isMobile) {
     <div class="resizer-handle" (mousedown)="startResizing($event)"></div>
   }
 
   <!-- RIGHT PANE -->
   <div class="pane right-pane"
        [class.empty]="rightTabs.length === 0"
+       *ngIf="!isMobile || rightTabs.length > 0"
        cdkDropList
        [cdkDropListData]="'right'"
        (cdkDropListDropped)="onDrop($event)">

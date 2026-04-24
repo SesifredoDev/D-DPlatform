@@ -45,6 +45,7 @@ export class Dashboard implements OnInit {
 
   leftTabs: Tab[] = [];
   rightTabs: Tab[] = [];
+  allTabs: Tab[] = [];
   leftWidth: number = window.innerWidth / 2;
   isResizing = false;
 
@@ -54,6 +55,9 @@ export class Dashboard implements OnInit {
 
   vttHostSessionId: string | null = null;
   vttJoinSessionId: string | null = null;
+
+  isMobile: boolean = window.innerWidth <= 768;
+  showSidePanel: boolean = !this.isMobile;
 
   constructor(
     private tabService: TabService,
@@ -67,9 +71,8 @@ export class Dashboard implements OnInit {
 
   ngOnInit() {
     this.tabService.tabs$.subscribe(tabs => {
-      this.leftTabs = tabs.filter(t => t.pane === 'left');
-      this.rightTabs = tabs.filter(t => t.pane === 'right');
-      this.cdr.detectChanges();
+      this.allTabs = tabs;
+      this.updatePaneTabs();
     });
 
     this.userService.getMe().subscribe(user => {
@@ -93,6 +96,17 @@ export class Dashboard implements OnInit {
         this.vttJoinSessionId = null;
       }
     });
+  }
+
+  private updatePaneTabs() {
+    if (this.isMobile) {
+      this.leftTabs = this.allTabs;
+      this.rightTabs = [];
+    } else {
+      this.leftTabs = this.allTabs.filter(t => t.pane === 'left');
+      this.rightTabs = this.allTabs.filter(t => t.pane === 'right');
+    }
+    this.cdr.detectChanges();
   }
 
   private setupActiveCharacterListener() {
@@ -119,7 +133,7 @@ export class Dashboard implements OnInit {
 
   @HostListener('window:mousemove', ['$event'])
   onMouseMove(event: MouseEvent) {
-    if (!this.isResizing) return;
+    if (!this.isResizing || this.isMobile) return;
     const sidebarWidth = 260;
     const newWidth = event.clientX - sidebarWidth;
     if (newWidth > 200 && (window.innerWidth - event.clientX) > 200) {
@@ -132,6 +146,26 @@ export class Dashboard implements OnInit {
     this.isResizing = false;
   }
 
+  @HostListener('window:resize', ['$event'])
+  onResize(event: any) {
+    const wasMobile = this.isMobile;
+    this.isMobile = window.innerWidth <= 768;
+    if (wasMobile !== this.isMobile) {
+      this.showSidePanel = !this.isMobile;
+      this.updatePaneTabs();
+    }
+  }
+
+  toggleSidePanel() {
+    this.showSidePanel = !this.showSidePanel;
+  }
+
+  onSidePanelAction() {
+    if (this.isMobile) {
+      this.showSidePanel = false;
+    }
+  }
+
   closeTab(event: Event, id: string) {
     event.stopPropagation();
     this.tabService.closeTab(id);
@@ -142,6 +176,7 @@ export class Dashboard implements OnInit {
   }
 
   onDrop(event: CdkDragDrop<any>) {
+    if (this.isMobile) return;
     const tab = event.item.data as Tab;
     const targetPane = event.container.data as 'left' | 'right';
     if (tab.pane !== targetPane) {
@@ -165,13 +200,13 @@ export class Dashboard implements OnInit {
   onHostVtt(channelId: string) {
     this.vttHostSessionId = channelId;
     this.vttJoinSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', 'right');
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? 'left' : 'right');
   }
 
   onJoinVtt(channelId: string) {
     this.vttJoinSessionId = channelId;
     this.vttHostSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', 'right');
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? 'left' : 'right');
   }
 
   onStopVtt(channelId: string) {

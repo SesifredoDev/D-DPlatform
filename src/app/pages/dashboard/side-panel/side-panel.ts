@@ -34,6 +34,8 @@ import {Subscription} from 'rxjs';
 
   selector: 'app-side-panel',
 
+  standalone: true,
+
   imports: [CommonModule,
     MatSelectModule,
     MatFormFieldModule,
@@ -53,6 +55,7 @@ import {Subscription} from 'rxjs';
 export class SidePanel implements AfterViewInit, OnDestroy {
 
   @Output() whisperInitiated = new EventEmitter<any>();
+  @Output() actionPerformed = new EventEmitter<void>();
 
   characters: ICharacter[] = [];
   selectedCharacter: ICharacter | null = null;
@@ -215,11 +218,12 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   goToManageCharacters() {
     this.router.navigate(['characters']);
-
+    this.actionPerformed.emit();
   }
 
   selectChannel(channel: IChannel) {
     this.channelService.setChannelObservable(channel);
+    this.actionPerformed.emit();
   }
 
   openObsidian(){
@@ -233,11 +237,12 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
 
   selectServer(server: any) {
-
     this.tabService.closeAllTabs()
     this.serverService.getServerDetails(server._id);
-
     this.cdr.markForCheck();
+    // Usually selecting a server doesn't close side panel as you might want to select a channel next,
+    // but on mobile it's often better to close it if you've already auto-selected a channel.
+    // However, let's keep it open for now to allow channel selection.
   }
   get isServerOwner(){
     if (!this.selectedServer || !this.currentUserId) return false;
@@ -256,6 +261,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       height: '80vh',
       panelClass: 'server-settings-dialog'
     });
+    this.actionPerformed.emit();
   }
 
   openAddServerDialog() {
@@ -266,6 +272,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       minHeight: '500px',
       panelClass: 'custom-dialog-container'
     });
+    this.actionPerformed.emit();
   }
 
   async linkObsidian() {
@@ -335,12 +342,14 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   openCharacter(character: ICharacter) {
     if (character?._id) {
       this.tabService.openTab(character._id, character.name, 'character', 'right', character);
+      this.actionPerformed.emit();
     }
   }
 
   openVTT() {
     if (!this.selectedServer?._id) return;
     this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
+    this.actionPerformed.emit();
   }
 
   openCall() {
@@ -380,6 +389,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
         if (channel._id) {
           this.channelService.setChannelObservable(channel);
           this.tabService.openTab(channel._id, channel.name, 'whisper');
+          this.actionPerformed.emit();
         }
     });
   }
@@ -394,6 +404,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       if (channel._id) {
         this.channelService.setChannelObservable(channel);
         this.tabService.openTab(channel._id, channel.name, 'whisper');
+        this.actionPerformed.emit();
       }
     });
   }
