@@ -450,6 +450,50 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
   }
 
+  private buildVideoConstraints(): MediaTrackConstraints {
+    const baseConstraints: MediaTrackConstraints = {
+      width: { ideal: 1280, max: 1280 },
+      height: { ideal: 720, max: 720 },
+      frameRate: { ideal: 30, max: 30 },
+      aspectRatio: { ideal: 16 / 9 }
+    };
+
+    if (this.selectedVideoId) {
+      return {
+        ...baseConstraints,
+        deviceId: { exact: this.selectedVideoId }
+      };
+    }
+
+    return baseConstraints;
+  }
+
+  private buildAudioConstraints(): MediaTrackConstraints {
+    const baseConstraints: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      channelCount: { ideal: 1 },
+      sampleRate: { ideal: 48000 }
+    };
+
+    if (this.selectedAudioId) {
+      return {
+        ...baseConstraints,
+        deviceId: { exact: this.selectedAudioId }
+      };
+    }
+
+    return baseConstraints;
+  }
+
+  private buildMediaConstraints(): MediaStreamConstraints {
+    return {
+      video: this.buildVideoConstraints(),
+      audio: this.buildAudioConstraints()
+    };
+  }
+
   async loadDevices() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
@@ -478,12 +522,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     try {
-      const constraints = {
-        video: this.selectedVideoId ? { deviceId: { exact: this.selectedVideoId } } : true,
-        audio: this.selectedAudioId ? { deviceId: { exact: this.selectedAudioId } } : true
-      };
-
-      this.previewStream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.previewStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
 
       if (this.previewVideo) {
         this.previewVideo.nativeElement.srcObject = this.previewStream;
@@ -542,11 +581,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           await this.prepareMobileMedia();
         }
 
-        const constraints = {
-          video: this.selectedVideoId ? { deviceId: { exact: this.selectedVideoId } } : true,
-          audio: this.selectedAudioId ? { deviceId: { exact: this.selectedAudioId } } : true
-        };
-        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        this.localStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
       }
 
       if (!this.localStream || !this.localStream.active) {
@@ -893,10 +928,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private async replaceDesktopMediaStream() {
-    const nextStream = await navigator.mediaDevices.getUserMedia({
-      video: this.selectedVideoId ? { deviceId: { exact: this.selectedVideoId } } : true,
-      audio: this.selectedAudioId ? { deviceId: { exact: this.selectedAudioId } } : true
-    });
+    const nextStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
 
     nextStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
     nextStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));

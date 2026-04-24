@@ -27,6 +27,7 @@ export class Edit implements OnInit {
   charForm: FormGroup;
   selectedIcon: File | null = null;
   selectedPdf: File | null = null;
+  isSaving = false;
 
   constructor(
     private fb: FormBuilder,
@@ -90,16 +91,30 @@ export class Edit implements OnInit {
     }
   }
 
-  submitForm() {
-    if (this.charForm.valid) {
+  async submitForm() {
+    if (!this.charForm.valid || this.isSaving) {
+      return;
+    }
+
+    this.isSaving = true;
+
+    try {
       const formVal = this.charForm.value;
+      const uploadedIcon = this.selectedIcon
+        ? await this.charService.uploadCharacterAsset(this.selectedIcon)
+        : null;
+      const uploadedPdf = this.selectedPdf
+        ? await this.charService.uploadCharacterAsset(this.selectedPdf)
+        : null;
+
       const characterUpdate: Partial<ICharacter> = {
         _id: formVal._id,
         name: formVal.name,
         race: formVal.race,
         ac: formVal.ac,
         ddbId: formVal.ddbId,
-        icon: formVal.iconUrl,
+        icon: uploadedIcon?.url || formVal.iconUrl,
+        pdfLink: uploadedPdf?.url || this.data.pdfLink || null,
         baseStats: {
           strength: formVal.strength,
           dexterity: formVal.dexterity,
@@ -111,11 +126,27 @@ export class Edit implements OnInit {
         classes: formVal.classes
       };
 
-      if (!characterUpdate._id) return;
-      this.charService.updateCharacter(characterUpdate._id, characterUpdate, this.selectedIcon!, this.selectedPdf!)
-        .subscribe(res => {
-          this.dialogRef.close(res);
+      if (!characterUpdate._id) {
+        this.isSaving = false;
+        return;
+      }
+
+      this.charService.updateCharacter(characterUpdate._id, characterUpdate)
+        .subscribe({
+          next: (res) => {
+            this.dialogRef.close(res);
+          },
+          error: (error) => {
+            console.error('Failed to update character', error);
+            this.isSaving = false;
+          },
+          complete: () => {
+            this.isSaving = false;
+          }
         });
+    } catch (error) {
+      console.error('Failed to upload character assets', error);
+      this.isSaving = false;
     }
   }
 

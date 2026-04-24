@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import {
+  AudioPresets,
   Room,
   RoomEvent,
   RemoteParticipant,
@@ -7,7 +8,9 @@ import {
   setLogLevel,
   RemoteTrackPublication,
   RemoteTrack,
-  ParticipantTrackPermission
+  ParticipantTrackPermission,
+  TrackPublishOptions,
+  VideoPresets
 } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
@@ -36,6 +39,17 @@ export interface CompanionDeviceOption {
 
 @Injectable({ providedIn: 'root' })
 export class Video {
+  private static readonly cameraPublishOptions: TrackPublishOptions = {
+    audioPreset: AudioPresets.speech,
+    dtx: true,
+    red: true,
+    simulcast: true,
+    videoCodec: 'vp8',
+    videoEncoding: VideoPresets.h720.encoding,
+    videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+    degradationPreference: 'maintain-resolution',
+  };
+
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
   public spotifySync$ = new Subject<any>();
@@ -68,7 +82,7 @@ export class Video {
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
 
   constructor(private deviceService: DeviceService) {
-    setLogLevel('debug');
+    setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
     this.room = new Room({
       adaptiveStream: true,
@@ -585,7 +599,11 @@ export class Video {
     this.currentVideoPublicationTrack = nextSource.track;
 
     if (nextSource.track) {
-      await this.room.localParticipant.publishTrack(nextSource.track, { name: 'video' });
+      nextSource.track.contentHint = 'motion';
+      await this.room.localParticipant.publishTrack(nextSource.track, {
+        ...Video.cameraPublishOptions,
+        name: 'video',
+      });
     }
   }
 
@@ -605,7 +623,12 @@ export class Video {
     this.currentAudioPublicationTrack = nextSource.track;
 
     if (nextSource.track && this.currentParticipantMetadata?.deviceRole !== 'phone-camera') {
-      await this.room.localParticipant.publishTrack(nextSource.track, { name: 'audio' });
+      await this.room.localParticipant.publishTrack(nextSource.track, {
+        audioPreset: AudioPresets.speech,
+        dtx: true,
+        red: true,
+        name: 'audio',
+      });
     }
   }
 

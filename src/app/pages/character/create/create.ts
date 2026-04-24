@@ -39,6 +39,7 @@ export class CreateCharacterComponent implements OnInit {
   selectedIcon: File | null = null;
   selectedPdf: File | null = null;
   isImporting = false;
+  isSaving = false;
 
   constructor(
     private fb: FormBuilder,
@@ -133,16 +134,30 @@ export class CreateCharacterComponent implements OnInit {
     if (type === 'pdf') this.selectedPdf = file;
   }
 
-  submitForm() {
-    if (this.charForm.valid) {
+  async submitForm() {
+    if (!this.charForm.valid || this.isSaving) {
+      return;
+    }
+
+    this.isSaving = true;
+
+    try {
       const formVal = this.charForm.value;
+      const uploadedIcon = this.selectedIcon
+        ? await this.charService.uploadCharacterAsset(this.selectedIcon)
+        : null;
+      const uploadedPdf = this.selectedPdf
+        ? await this.charService.uploadCharacterAsset(this.selectedPdf)
+        : null;
+
       const characterData = {
         name: formVal.name,
         race: formVal.race,
         ac: formVal.ac,
         ddbId: formVal.ddbId,
         ddbUsername: formVal.ddbUsername,
-        icon: formVal.iconUrl,
+        icon: uploadedIcon?.url || formVal.iconUrl,
+        pdfLink: uploadedPdf?.url || null,
         baseStats: {
           strength: formVal.strength,
           dexterity: formVal.dexterity,
@@ -154,13 +169,25 @@ export class CreateCharacterComponent implements OnInit {
         classes: formVal.classes
       };
 
-      this.charService.saveCharacter(characterData, this.selectedIcon!, this.selectedPdf!)
-        .subscribe(res =>{
-          this.charForm.reset();
-          this.selectedIcon = null;
-          this.selectedPdf = null;
-          this.dialogRef.close(res);
+      this.charService.saveCharacter(characterData)
+        .subscribe({
+          next: (res) => {
+            this.charForm.reset();
+            this.selectedIcon = null;
+            this.selectedPdf = null;
+            this.dialogRef.close(res);
+          },
+          error: (error) => {
+            console.error('Failed to save character', error);
+            this.isSaving = false;
+          },
+          complete: () => {
+            this.isSaving = false;
+          }
         });
+    } catch (error) {
+      console.error('Failed to upload character assets', error);
+      this.isSaving = false;
     }
   }
 

@@ -10,7 +10,7 @@ export interface Attachment {
   url: string;
   name: string;
   contentType: string;
-  filename: string; // Added filename property
+  filename?: string;
 }
 
 export interface Reaction {
@@ -21,6 +21,7 @@ export interface Reaction {
 export interface MessageData {
   _id: string;
   channel: string;
+  channelId?: string;
   server: string;
   author: any;
   character?: any;
@@ -55,15 +56,17 @@ export class Message {
     });
 
     this.socket.on('new_message', (message: MessageData) => {
-      const channelId = message.channel;
+      const normalizedMessage = this.normalizeMessage(message);
+      const channelId = normalizedMessage.channel;
       const subject = this.channelMessages.get(channelId);
       if (subject) {
-        subject.next([...subject.value, message]);
+        subject.next([...subject.value, normalizedMessage]);
       }
     });
 
     this.socket.on('reaction_update', (data: { messageId: string, reactions: Reaction[], channelId: string }) => {
-      const subject = this.channelMessages.get(data.channelId);
+      const channelId = String(data.channelId);
+      const subject = this.channelMessages.get(channelId);
       if (subject) {
         const messages = subject.value.map(m => {
           if (m._id === data.messageId) {
@@ -111,7 +114,11 @@ export class Message {
     }
 
     this.getHistory(channelId).subscribe(history => {
-      this.channelMessages.get(channelId)!.next(history.reverse());
+      this.channelMessages.get(channelId)!.next(
+        history
+          .map(message => this.normalizeMessage(message))
+          .reverse()
+      );
     });
 
     return this.channelMessages.get(channelId)!.asObservable();
@@ -133,18 +140,47 @@ export class Message {
     return this.http.post<MessageData>(`${environment.apiURL}message/${channelId}`, {
       content,
       characterId,
-      attachments,
+      attachments: attachments?.map(attachment => this.normalizeAttachment(attachment)),
       replyTo,
       isWhisper,
       recipientId
+    }, {
+      withCredentials: true
     });
   }
 
   addReaction(messageId: string, emoji: string) {
-    return this.http.post(`${environment.apiURL}message/reaction/${messageId}`, { emoji });
+    return this.http.post(`${environment.apiURL}message/reaction/${messageId}`, { emoji }, {
+      withCredentials: true
+    });
   }
 
   removeReaction(messageId: string, emoji: string) {
-    return this.http.delete(`${environment.apiURL}message/reaction/${messageId}`, { body: { emoji } });
+    return this.http.delete(`${environment.apiURL}message/reaction/${messageId}`, {
+      body: { emoji },
+      withCredentials: true
+    });
+  }
+
+  private normalizeAttachment(attachment: Attachment): Attachment {
+    const filename = attachment.filename || attachment.name;
+
+    return {
+      ...attachment,
+      name: attachment.name || filename,
+      filename
+    };
+  }
+
+  private normalizeMessage(message: MessageData): MessageData {
+    const channelId = String(message.channelId || message.channel);
+
+    return {
+      ...message,
+      channel: channelId,
+      channelId,
+      attachments: (message.attachments || []).map(attachment => this.normalizeAttachment(attachment)),
+      reactions: message.reactions || []
+    };
   }
 }
