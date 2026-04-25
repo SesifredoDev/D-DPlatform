@@ -66,6 +66,14 @@
             </div>
           </div>
 
+          <div *ngIf="isMobileBrowser" class="mobile-permission-prompt">
+            <p>Mobile video now targets 1080p by default. 1440p can be enabled experimentally.</p>
+            <button class="btn-primary-join" (click)="toggleExperimentalMobile1080p()" [disabled]="isPreparingMobileMedia">
+              <mat-icon>{{ experimentalMobile1080pEnabled ? 'high_quality' : 'hd' }}</mat-icon>
+              <span>{{ experimentalMobile1080pEnabled ? 'Experimental 1440p On' : 'Enable Experimental 1440p' }}</span>
+            </button>
+          </div>
+
           <div *ngIf="isMobileBrowser && !mobileMediaReady" class="mobile-permission-prompt">
             <p>{{ mobileMediaMessage || 'Enable camera and microphone first to see preview and device options.' }}</p>
             <button class="btn-primary-join" (click)="prepareMobileMedia()" [disabled]="isPreparingMobileMedia">

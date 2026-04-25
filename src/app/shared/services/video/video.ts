@@ -10,6 +10,8 @@ import {
   RemoteTrack,
   ParticipantTrackPermission,
   TrackPublishOptions,
+  VideoEncoding,
+  VideoPreset,
   VideoPresets
 } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
@@ -47,16 +49,47 @@ interface LiveKitConnectionInfo {
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly maxIceServers = 4;
-  private static readonly cameraPublishOptions: TrackPublishOptions = {
+  private static readonly fullHdVideoEncoding: VideoEncoding = {
+    ...VideoPresets.h1080.encoding,
+    maxBitrate: 4_500_000,
+    maxFramerate: 30,
+  };
+  private static readonly qhdVideoEncoding: VideoEncoding = {
+    ...VideoPresets.h1440.encoding,
+    maxBitrate: 8_000_000,
+    maxFramerate: 30,
+  };
+  private static readonly baseCameraPublishOptions: TrackPublishOptions = {
     audioPreset: AudioPresets.speech,
     dtx: true,
     red: true,
     simulcast: true,
     videoCodec: 'vp8',
-    videoEncoding: VideoPresets.h720.encoding,
-    videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
     degradationPreference: 'maintain-resolution',
   };
+  private static readonly fullHdSimulcastLayers = [
+    VideoPresets.h216,
+    new VideoPreset({
+      width: 640,
+      height: 360,
+      maxBitrate: 900_000,
+      maxFramerate: 30,
+    })
+  ];
+  private static readonly qhdSimulcastLayers = [
+    new VideoPreset({
+      width: 640,
+      height: 360,
+      maxBitrate: 900_000,
+      maxFramerate: 30,
+    }),
+    new VideoPreset({
+      width: 1280,
+      height: 720,
+      maxBitrate: 2_200_000,
+      maxFramerate: 30,
+    })
+  ];
 
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
@@ -90,7 +123,7 @@ export class Video {
     setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
     this.room = new Room({
-      adaptiveStream: true,
+      adaptiveStream: false,
       dynacast: true,
     });
     this.setupRoomListeners();
@@ -595,12 +628,29 @@ export class Video {
     this.currentVideoPublicationTrack = nextSource;
 
     if (nextSource) {
-      nextSource.contentHint = 'motion';
+      nextSource.contentHint = 'detail';
       await this.room.localParticipant.publishTrack(nextSource, {
-        ...Video.cameraPublishOptions,
+        ...this.getCameraPublishOptions(nextSource),
         name: 'video',
       });
     }
+  }
+
+  private getCameraPublishOptions(track: MediaStreamTrack): TrackPublishOptions {
+    const settings = track.getSettings();
+    const width = settings.width ?? 0;
+    const height = settings.height ?? 0;
+    const useQhdProfile = width >= 2200 || height >= 1200;
+    const videoEncoding = useQhdProfile ? Video.qhdVideoEncoding : Video.fullHdVideoEncoding;
+    const simulcastLayers = useQhdProfile
+      ? Video.qhdSimulcastLayers
+      : Video.fullHdSimulcastLayers;
+
+    return {
+      ...Video.baseCameraPublishOptions,
+      videoEncoding,
+      videoSimulcastLayers: simulcastLayers,
+    };
   }
 
   private async applyAudioSource() {

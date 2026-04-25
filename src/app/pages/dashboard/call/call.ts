@@ -50,6 +50,25 @@ interface ParticipantStream {
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
+  private static readonly desktopVideoConstraints: MediaTrackConstraints = {
+    width: { ideal: 2560, max: 2560 },
+    height: { ideal: 1440, max: 1440 },
+    frameRate: { ideal: 30, max: 30 },
+    aspectRatio: { ideal: 16 / 9 }
+  };
+  private static readonly standardMobileVideoConstraints: MediaTrackConstraints = {
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
+    frameRate: { ideal: 30, max: 30 },
+    aspectRatio: { ideal: 16 / 9 }
+  };
+  private static readonly experimentalMobileVideoConstraints: MediaTrackConstraints = {
+    width: { ideal: 2560, max: 2560 },
+    height: { ideal: 1440, max: 1440 },
+    frameRate: { ideal: 30, max: 30 },
+    aspectRatio: { ideal: 16 / 9 }
+  };
+
   @Input() channelId!: string;
   @Input() character!: ICharacter;
 
@@ -86,6 +105,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isPreparingMobileMedia = false;
   mobileMediaReady = false;
   mobileMediaMessage = '';
+  experimentalMobile1080pEnabled = false;
   private hasRequestedMobileMedia = false;
 
   // UI States
@@ -451,12 +471,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private buildVideoConstraints(): MediaTrackConstraints {
-    const baseConstraints: MediaTrackConstraints = {
-      width: { ideal: 1280, max: 1280 },
-      height: { ideal: 720, max: 720 },
-      frameRate: { ideal: 30, max: 30 },
-      aspectRatio: { ideal: 16 / 9 }
-    };
+    const baseConstraints = this.getPreferredVideoConstraints();
 
     if (this.selectedVideoId) {
       return {
@@ -466,6 +481,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     return baseConstraints;
+  }
+
+  private getPreferredVideoConstraints(): MediaTrackConstraints {
+    if (this.isMobileBrowser) {
+      return this.experimentalMobile1080pEnabled
+        ? Call.experimentalMobileVideoConstraints
+        : Call.standardMobileVideoConstraints;
+    }
+
+    return Call.desktopVideoConstraints;
   }
 
   private buildAudioConstraints(): MediaTrackConstraints {
@@ -543,11 +568,28 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   async onDeviceChange() {
     if (this.localStream) {
-      await this.replaceDesktopMediaStream();
+      await this.replaceActiveMediaStream();
       return;
     }
 
     await this.startPreview();
+  }
+
+  async toggleExperimentalMobile1080p() {
+    if (!this.isMobileBrowser) {
+      return;
+    }
+
+    this.experimentalMobile1080pEnabled = !this.experimentalMobile1080pEnabled;
+
+    if (this.localStream) {
+      await this.replaceActiveMediaStream();
+      return;
+    }
+
+    if (this.previewStream || this.mobileMediaReady) {
+      await this.startPreview();
+    }
   }
 
   async changePcVideoSource(sourceId: CompanionSourceId) {
@@ -927,7 +969,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return null;
   }
 
-  private async replaceDesktopMediaStream() {
+  private async replaceActiveMediaStream() {
     const nextStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
 
     nextStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
