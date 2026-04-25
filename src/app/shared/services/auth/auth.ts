@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { tap } from 'rxjs/operators';
-import { Observable } from 'rxjs';
+import { catchError, finalize, map, shareReplay, tap } from 'rxjs/operators';
+import { Observable, of } from 'rxjs';
 import { TokenService } from './token';
 import {environment} from '../../../../environments/environment';
 import {Router} from '@angular/router';
@@ -11,6 +11,8 @@ import {Router} from '@angular/router';
 })
 export class AuthService {
   private readonly API = environment.apiURL + 'auth';
+  private restoreSessionRequest$?: Observable<boolean>;
+  private hasAttemptedSessionRestore = false;
 
   constructor(
     private http: HttpClient,
@@ -26,7 +28,9 @@ export class AuthService {
         { withCredentials: true }
       )
       .pipe(
-        tap(res => {this.tokenService.setAccessToken(res.accessToken)
+        tap(res => {
+          this.tokenService.setAccessToken(res.accessToken);
+          this.hasAttemptedSessionRestore = true;
           this.router.navigate(['']);
         })
       );
@@ -44,19 +48,59 @@ export class AuthService {
         { withCredentials: true }
       )
       .pipe(
-        tap(res => this.tokenService.setAccessToken(res.accessToken))
+        tap(res => {
+          this.tokenService.setAccessToken(res.accessToken);
+          this.hasAttemptedSessionRestore = true;
+        })
       );
   }
 
   logout(): void {
     this.tokenService.clear();
+    this.hasAttemptedSessionRestore = false;
+    this.restoreSessionRequest$ = undefined;
+
     this.http.post<void>(
       `${this.API}/logout`,
       {},
       { withCredentials: true }
-    );
+    ).subscribe({
+      error: () => {
+        // Local logout should still complete even if the backend request fails.
+      }
+    });
 
     this.router.navigate(['auth']);
+  }
+
+  restoreSession(): Observable<boolean> {
+    if (this.tokenService.getAccessToken()) {
+      this.hasAttemptedSessionRestore = true;
+      return of(true);
+    }
+
+    if (this.restoreSessionRequest$) {
+      return this.restoreSessionRequest$;
+    }
+
+    if (this.hasAttemptedSessionRestore) {
+      return of(false);
+    }
+
+    this.hasAttemptedSessionRestore = true;
+    this.restoreSessionRequest$ = this.refresh().pipe(
+      map(() => true),
+      catchError(() => {
+        this.tokenService.clear();
+        return of(false);
+      }),
+      finalize(() => {
+        this.restoreSessionRequest$ = undefined;
+      }),
+      shareReplay(1)
+    );
+
+    return this.restoreSessionRequest$;
   }
 
   getCurrentUserId(): string | null {

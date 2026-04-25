@@ -1,6 +1,9 @@
 import { Injectable } from '@angular/core';
-import { CanActivate, Router } from '@angular/router';
-import {TokenService} from '../services/auth/token';
+import { CanActivate, Router, UrlTree } from '@angular/router';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { TokenService } from '../services/auth/token';
+import { AuthService } from '../services/auth/auth';
 
 @Injectable({
   providedIn: 'root',
@@ -8,19 +11,17 @@ import {TokenService} from '../services/auth/token';
 export class AuthGuard implements CanActivate {
   constructor(
     private tokenService: TokenService,
+    private authService: AuthService,
     private router: Router
   ) {}
 
-  canActivate(): boolean {
-    const token = this.tokenService.getAccessToken();
-
-    if (!token) {
-      console.warn('AUTH GUARD → NO TOKEN, REDIRECTING');
-      this.router.navigate(['auth']);
-      return false;
+  canActivate(): boolean | UrlTree | Observable<boolean | UrlTree> {
+    if (this.tokenService.getAccessToken()) {
+      return true;
     }
 
-    console.log('AUTH GUARD → TOKEN FOUND');
-    return true;
+    return this.authService.restoreSession().pipe(
+      map((isAuthenticated) => isAuthenticated ? true : this.router.createUrlTree(['auth']))
+    );
   }
 }
