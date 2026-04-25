@@ -145,6 +145,10 @@
     transition: flex-basis 0.14s ease-out;
   }
 
+  &.split-active #left-pane {
+    flex: 0 0 auto;
+  }
+
   &.resizing-active .pane {
     transition: none !important;
   }

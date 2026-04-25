@@ -43,6 +43,7 @@ import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 })
 export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('editorArea') private editorAreaRef?: ElementRef<HTMLElement>;
+  @ViewChild('leftPane') private leftPaneRef?: ElementRef<HTMLElement>;
 
   leftTabs: Tab[] = [];
   rightTabs: Tab[] = [];
@@ -152,6 +153,11 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   startResizing(event: MouseEvent) {
     if (this.isMobile || this.rightTabs.length === 0) return;
+    const renderedLeftWidth = this.leftPaneRef?.nativeElement.getBoundingClientRect().width;
+    if (renderedLeftWidth) {
+      const editorWidth = this.editorAreaRef?.nativeElement.getBoundingClientRect().width ?? renderedLeftWidth;
+      this.leftWidth = this.clampLeftWidth(renderedLeftWidth, editorWidth);
+    }
     this.isResizing = true;
     event.preventDefault();
   }
