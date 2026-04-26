@@ -8,6 +8,7 @@ import { PdfViewerModule } from 'ng2-pdf-viewer';
 import {MatIconButton} from '@angular/material/button';
 import {MatIconModule} from '@angular/material/icon';
 import {MatTooltipModule} from '@angular/material/tooltip';
+import { FileService } from '../../../shared/services/file/file';
 
 @Component({
   selector: 'app-character-viewer',
@@ -34,7 +35,10 @@ export class CharacterViewer implements OnInit, OnChanges {
   ddbUrl: SafeResourceUrl = "";
   pdfUrl: string | null | undefined = "";
 
-  constructor(private sanitizer: DomSanitizer) {}
+  constructor(
+    private sanitizer: DomSanitizer,
+    private fileService: FileService,
+  ) {}
 
   ngOnInit() {
     if (!this.character) return;
@@ -45,7 +49,9 @@ export class CharacterViewer implements OnInit, OnChanges {
       );
     }
 
-    this.pdfUrl = this.character.pdfLink;
+    this.pdfUrl = this.character.pdfLink
+      ? this.fileService.resolveFileUrl(this.character.pdfLink)
+      : null;
   }
 
   ngOnChanges(changes: SimpleChanges) {
