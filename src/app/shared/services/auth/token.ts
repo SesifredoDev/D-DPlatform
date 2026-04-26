@@ -30,7 +30,7 @@ export class TokenService {
   isTokenExpired(token: string): boolean {
     try {
       const payload = this.parseJwtPayload(token);
-      const exp = payload?.exp;
+      const exp = payload?.['exp'];
 
       if (typeof exp !== 'number') {
         return true;
