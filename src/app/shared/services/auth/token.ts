@@ -19,6 +19,41 @@ export class TokenService {
   }
 
   isLoggedIn(): boolean {
-    return !!this.getAccessToken();
+    return this.hasValidAccessToken();
+  }
+
+  hasValidAccessToken(): boolean {
+    const token = this.getAccessToken();
+    return !!token && !this.isTokenExpired(token);
+  }
+
+  isTokenExpired(token: string): boolean {
+    try {
+      const payload = this.parseJwtPayload(token);
+      const exp = payload?.exp;
+
+      if (typeof exp !== 'number') {
+        return true;
+      }
+
+      return exp * 1000 <= Date.now();
+    } catch {
+      return true;
+    }
+  }
+
+  private parseJwtPayload(token: string): Record<string, unknown> | null {
+    const payload = token.split('.')[1];
+    if (!payload) {
+      return null;
+    }
+
+    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = normalizedPayload.padEnd(
+      normalizedPayload.length + ((4 - normalizedPayload.length % 4) % 4),
+      '='
+    );
+
+    return JSON.parse(atob(paddedPayload)) as Record<string, unknown>;
   }
 }

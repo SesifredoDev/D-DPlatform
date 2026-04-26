@@ -74,9 +74,13 @@ export class AuthService {
   }
 
   restoreSession(): Observable<boolean> {
-    if (this.tokenService.getAccessToken()) {
+    if (this.tokenService.hasValidAccessToken()) {
       this.hasAttemptedSessionRestore = true;
       return of(true);
+    }
+
+    if (this.tokenService.getAccessToken()) {
+      this.tokenService.clear();
     }
 
     if (this.restoreSessionRequest$) {
@@ -112,7 +116,11 @@ export class AuthService {
       if (!payload) return null;
 
       const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
-      const decodedPayload = atob(normalizedPayload);
+      const paddedPayload = normalizedPayload.padEnd(
+        normalizedPayload.length + ((4 - normalizedPayload.length % 4) % 4),
+        '='
+      );
+      const decodedPayload = atob(paddedPayload);
       const parsed = JSON.parse(decodedPayload);
 
       return parsed.userId || parsed._id || parsed.sub || parsed.id || null;

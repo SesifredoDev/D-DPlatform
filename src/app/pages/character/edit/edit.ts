@@ -91,63 +91,53 @@ export class Edit implements OnInit {
     }
   }
 
-  async submitForm() {
+  submitForm() {
     if (!this.charForm.valid || this.isSaving) {
       return;
     }
 
     this.isSaving = true;
 
-    try {
-      const formVal = this.charForm.value;
-      const uploadedIcon = this.selectedIcon
-        ? await this.charService.uploadCharacterAsset(this.selectedIcon)
-        : null;
-      const uploadedPdf = this.selectedPdf
-        ? await this.charService.uploadCharacterAsset(this.selectedPdf)
-        : null;
+    const formVal = this.charForm.value;
+    const characterUpdate: Partial<ICharacter> = {
+      _id: formVal._id,
+      name: formVal.name,
+      race: formVal.race,
+      ac: formVal.ac,
+      ddbId: formVal.ddbId,
+      icon: this.selectedIcon ? null : formVal.iconUrl,
+      pdfLink: this.selectedPdf ? null : this.data.pdfLink || null,
+      baseStats: {
+        strength: formVal.strength,
+        dexterity: formVal.dexterity,
+        constitution: formVal.constitution,
+        intelligence: formVal.intelligence,
+        wisdom: formVal.wisdom,
+        charisma: formVal.charisma
+      },
+      classes: formVal.classes
+    };
 
-      const characterUpdate: Partial<ICharacter> = {
-        _id: formVal._id,
-        name: formVal.name,
-        race: formVal.race,
-        ac: formVal.ac,
-        ddbId: formVal.ddbId,
-        icon: uploadedIcon?.url || formVal.iconUrl,
-        pdfLink: uploadedPdf?.url || this.data.pdfLink || null,
-        baseStats: {
-          strength: formVal.strength,
-          dexterity: formVal.dexterity,
-          constitution: formVal.constitution,
-          intelligence: formVal.intelligence,
-          wisdom: formVal.wisdom,
-          charisma: formVal.charisma
-        },
-        classes: formVal.classes
-      };
-
-      if (!characterUpdate._id) {
-        this.isSaving = false;
-        return;
-      }
-
-      this.charService.updateCharacter(characterUpdate._id, characterUpdate)
-        .subscribe({
-          next: (res) => {
-            this.dialogRef.close(res);
-          },
-          error: (error) => {
-            console.error('Failed to update character', error);
-            this.isSaving = false;
-          },
-          complete: () => {
-            this.isSaving = false;
-          }
-        });
-    } catch (error) {
-      console.error('Failed to upload character assets', error);
+    if (!characterUpdate._id) {
       this.isSaving = false;
+      return;
     }
+
+    this.charService.updateCharacter(characterUpdate._id, characterUpdate, {
+      icon: this.selectedIcon,
+      pdf: this.selectedPdf
+    }).subscribe({
+      next: (res) => {
+        this.dialogRef.close(res);
+      },
+      error: (error) => {
+        console.error('Failed to update character', error);
+        this.isSaving = false;
+      },
+      complete: () => {
+        this.isSaving = false;
+      }
+    });
   }
 
   close() { this.dialogRef.close(); }

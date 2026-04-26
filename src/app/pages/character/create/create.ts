@@ -134,61 +134,50 @@ export class CreateCharacterComponent implements OnInit {
     if (type === 'pdf') this.selectedPdf = file;
   }
 
-  async submitForm() {
+  submitForm() {
     if (!this.charForm.valid || this.isSaving) {
       return;
     }
 
     this.isSaving = true;
+    const formVal = this.charForm.value;
+    const characterData = {
+      name: formVal.name,
+      race: formVal.race,
+      ac: formVal.ac,
+      ddbId: formVal.ddbId,
+      ddbUsername: formVal.ddbUsername,
+      icon: this.selectedIcon ? null : formVal.iconUrl,
+      pdfLink: this.selectedPdf ? null : null,
+      baseStats: {
+        strength: formVal.strength,
+        dexterity: formVal.dexterity,
+        constitution: formVal.constitution,
+        intelligence: formVal.intelligence,
+        wisdom: formVal.wisdom,
+        charisma: formVal.charisma
+      },
+      classes: formVal.classes
+    };
 
-    try {
-      const formVal = this.charForm.value;
-      const uploadedIcon = this.selectedIcon
-        ? await this.charService.uploadCharacterAsset(this.selectedIcon)
-        : null;
-      const uploadedPdf = this.selectedPdf
-        ? await this.charService.uploadCharacterAsset(this.selectedPdf)
-        : null;
-
-      const characterData = {
-        name: formVal.name,
-        race: formVal.race,
-        ac: formVal.ac,
-        ddbId: formVal.ddbId,
-        ddbUsername: formVal.ddbUsername,
-        icon: uploadedIcon?.url || formVal.iconUrl,
-        pdfLink: uploadedPdf?.url || null,
-        baseStats: {
-          strength: formVal.strength,
-          dexterity: formVal.dexterity,
-          constitution: formVal.constitution,
-          intelligence: formVal.intelligence,
-          wisdom: formVal.wisdom,
-          charisma: formVal.charisma
-        },
-        classes: formVal.classes
-      };
-
-      this.charService.saveCharacter(characterData)
-        .subscribe({
-          next: (res) => {
-            this.charForm.reset();
-            this.selectedIcon = null;
-            this.selectedPdf = null;
-            this.dialogRef.close(res);
-          },
-          error: (error) => {
-            console.error('Failed to save character', error);
-            this.isSaving = false;
-          },
-          complete: () => {
-            this.isSaving = false;
-          }
-        });
-    } catch (error) {
-      console.error('Failed to upload character assets', error);
-      this.isSaving = false;
-    }
+    this.charService.saveCharacter(characterData, {
+      icon: this.selectedIcon,
+      pdf: this.selectedPdf
+    }).subscribe({
+      next: (res) => {
+        this.charForm.reset();
+        this.selectedIcon = null;
+        this.selectedPdf = null;
+        this.dialogRef.close(res);
+      },
+      error: (error) => {
+        console.error('Failed to save character', error);
+        this.isSaving = false;
+      },
+      complete: () => {
+        this.isSaving = false;
+      }
+    });
   }
 
   close = () => {

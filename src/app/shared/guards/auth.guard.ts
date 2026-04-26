@@ -16,7 +16,7 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   canActivate(): boolean | UrlTree | Observable<boolean | UrlTree> {
-    if (this.tokenService.getAccessToken()) {
+    if (this.tokenService.hasValidAccessToken()) {
       return true;
     }
 
