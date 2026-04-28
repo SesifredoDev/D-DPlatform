@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import {
   AudioPresets,
+  ConnectionQuality,
   Room,
   RoomEvent,
   RemoteParticipant,
@@ -39,6 +40,26 @@ export interface CompanionDeviceOption {
   label: string;
   hasVideo: boolean;
   hasAudio: boolean;
+}
+
+export interface MediaTrackDiagnostics {
+  kind: 'audio' | 'video';
+  bitrateKbps: number | null;
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  width?: number | null;
+  height?: number | null;
+  frameRate?: number | null;
+  enabled: boolean;
+  muted: boolean;
+}
+
+export interface ParticipantMediaDiagnostics {
+  connectionQuality: ConnectionQuality;
+  connectionState: string;
+  rttMs: number | null;
+  audio?: MediaTrackDiagnostics;
+  video?: MediaTrackDiagnostics;
 }
 
 interface LiveKitConnectionInfo {
@@ -134,24 +155,24 @@ export class Video {
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
       })
       .on(RoomEvent.TrackMuted, () => {
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
       })
       .on(RoomEvent.TrackUnmuted, () => {
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
       })
       .on(RoomEvent.ParticipantConnected, () => {
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
         if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
           this.sendVttCommand('start', this.vttSession$.value.roomId!);
         }
@@ -159,14 +180,14 @@ export class Video {
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         this.participantStreams.delete(participant.identity);
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
         if (this.vttSession$.value.hostId === participant.identity) {
           this.vttSession$.next({ active: false, roomId: null, hostId: null });
         }
       })
       .on(RoomEvent.ParticipantMetadataChanged, () => {
         void this.syncCompanionState();
-        this.emitParticipants();
+        void this.emitParticipants();
       })
       .on(RoomEvent.Disconnected, (reason?: unknown) => {
         this.stopPingMonitor();
@@ -222,7 +243,7 @@ export class Video {
 
   private startPingMonitor() {
     this.stopPingMonitor();
-    this.pingInterval = setInterval(() => this.emitParticipants(), 3000);
+    this.pingInterval = setInterval(() => void this.emitParticipants(), 3000);
   }
 
   private stopPingMonitor() {
@@ -281,7 +302,7 @@ export class Video {
       }
 
       await this.syncCompanionState();
-      this.emitParticipants();
+      await this.emitParticipants();
     } catch (error) {
       throw error;
     }
@@ -297,7 +318,7 @@ export class Video {
         character
       );
       await this.publishLocalMetadata();
-      this.emitParticipants();
+      await this.emitParticipants();
     }
   }
 
@@ -419,9 +440,9 @@ export class Video {
     this.overlayText$.next(text);
   }
 
-  private emitParticipants() {
+  private async emitParticipants() {
     const timestamp = new Date().toLocaleTimeString();
-    const participants = Array.from(this.room.remoteParticipants.values()).map(p => {
+    const participants = await Promise.all(Array.from(this.room.remoteParticipants.values()).map(async p => {
       if (!this.participantStreams.has(p.identity)) {
         this.updateParticipantStream(p);
       }
@@ -437,9 +458,10 @@ export class Video {
         userData: participantMeta?.character || {},
         participantMeta,
         stream: this.buildEffectiveParticipantStream(p.identity, participantMeta),
-        ping: rtt
+        ping: rtt,
+        diagnostics: await this.collectParticipantDiagnostics(p, rtt)
       };
-    });
+    }));
 
     this.companionDevices$.next(this.buildCompanionDeviceOptions(participants));
 
@@ -452,7 +474,8 @@ export class Video {
       id: 'local',
       ping: localRTT,
       isLocal: true,
-      participantMeta: this.currentParticipantMetadata
+      participantMeta: this.currentParticipantMetadata,
+      diagnostics: await this.collectParticipantDiagnostics(this.room.localParticipant, localRTT)
     }, ...participants]);
   }
 
@@ -733,7 +756,7 @@ export class Video {
     };
 
     await this.publishLocalMetadata();
-    this.emitParticipants();
+    await this.emitParticipants();
   }
 
   private async normalizeSelectedSources() {
@@ -815,5 +838,120 @@ export class Video {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Failed to fetch LiveKit connection info');
     return await res.json();
+  }
+
+  private async collectParticipantDiagnostics(participant: any, rtt: unknown): Promise<ParticipantMediaDiagnostics> {
+    const publications = participant.getTrackPublications?.() ?? [];
+    const audioPublication = publications.find((publication: any) => publication.kind === 'audio');
+    const videoPublication = publications.find((publication: any) => publication.kind === 'video');
+
+    return {
+      connectionQuality: participant.connectionQuality ?? ConnectionQuality.Unknown,
+      connectionState: this.room.state,
+      rttMs: typeof rtt === 'number' ? Math.round(rtt) : null,
+      audio: await this.buildTrackDiagnostics(audioPublication),
+      video: await this.buildTrackDiagnostics(videoPublication),
+    };
+  }
+
+  private async buildTrackDiagnostics(publication: any): Promise<MediaTrackDiagnostics | undefined> {
+    const track = publication?.track;
+    const mediaStreamTrack = track?.mediaStreamTrack as MediaStreamTrack | undefined;
+    if (!track || !mediaStreamTrack) {
+      return undefined;
+    }
+
+    const settings = mediaStreamTrack.getSettings?.() ?? {};
+    const statsReport = typeof track.getRTCStatsReport === 'function'
+      ? await track.getRTCStatsReport() as RTCStatsReport | undefined
+      : undefined;
+
+    const kind = mediaStreamTrack.kind as 'audio' | 'video';
+    const baseDiagnostics: MediaTrackDiagnostics = {
+      kind,
+      bitrateKbps: this.normalizeBitrateKbps(track.currentBitrate),
+      packetLossPct: null,
+      jitterMs: null,
+      width: kind === 'video' ? settings.width ?? null : undefined,
+      height: kind === 'video' ? settings.height ?? null : undefined,
+      frameRate: kind === 'video' ? this.normalizeFrameRate(settings.frameRate) : undefined,
+      enabled: mediaStreamTrack.enabled,
+      muted: !!track.isMuted,
+    };
+
+    const stats = this.extractTrackStats(statsReport, kind, !!track.isLocal);
+    if (stats) {
+      baseDiagnostics.packetLossPct = stats.packetLossPct;
+      baseDiagnostics.jitterMs = stats.jitterMs;
+    }
+
+    return baseDiagnostics;
+  }
+
+  private extractTrackStats(
+    report: RTCStatsReport | undefined,
+    kind: 'audio' | 'video',
+    isLocalTrack: boolean
+  ): { packetLossPct: number | null; jitterMs: number | null } | null {
+    if (!report) {
+      return null;
+    }
+
+    let jitterMs: number | null = null;
+    let packetLossPct: number | null = null;
+
+    report.forEach((entry: any) => {
+      if (entry.kind !== kind) {
+        return;
+      }
+
+      if (!isLocalTrack && entry.type === 'inbound-rtp') {
+        jitterMs ??= this.toJitterMs(entry.jitter);
+        packetLossPct ??= this.toPacketLossPct(entry.packetsLost, entry.packetsReceived);
+      }
+
+      if (isLocalTrack && entry.type === 'remote-inbound-rtp') {
+        jitterMs ??= this.toJitterMs(entry.jitter);
+        packetLossPct ??= this.toPacketLossPct(entry.packetsLost, entry.packetsReceived);
+      }
+    });
+
+    return { packetLossPct, jitterMs };
+  }
+
+  private normalizeBitrateKbps(currentBitrate: unknown): number | null {
+    return typeof currentBitrate === 'number' && Number.isFinite(currentBitrate)
+      ? Math.round(currentBitrate / 1000)
+      : null;
+  }
+
+  private normalizeFrameRate(frameRate: unknown): number | null {
+    return typeof frameRate === 'number' && Number.isFinite(frameRate)
+      ? Math.round(frameRate)
+      : null;
+  }
+
+  private toJitterMs(jitterSeconds: unknown): number | null {
+    return typeof jitterSeconds === 'number' && Number.isFinite(jitterSeconds)
+      ? Math.round(jitterSeconds * 1000)
+      : null;
+  }
+
+  private toPacketLossPct(packetsLost: unknown, packetsReceived: unknown): number | null {
+    if (
+      typeof packetsLost !== 'number' ||
+      !Number.isFinite(packetsLost) ||
+      typeof packetsReceived !== 'number' ||
+      !Number.isFinite(packetsReceived)
+    ) {
+      return null;
+    }
+
+    const totalPackets = packetsLost + packetsReceived;
+    if (totalPackets <= 0) {
+      return null;
+    }
+
+    return Math.round((packetsLost / totalPackets) * 1000) / 10;
   }
 }

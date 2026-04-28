@@ -153,6 +153,9 @@
                 @if (isAudioMuted) {
                   <mat-icon class="mute-icon">mic_off</mat-icon>
                 }
+                <div *ngIf="localParticipantDiagnostics" [class]="'quality-badge ' + getConnectionQualityClass(localParticipantDiagnostics)">
+                  {{ getConnectionQualityLabel(localParticipantDiagnostics) }}
+                </div>
                 <!-- Local Ping Badge -->
                 <div class="ping-badge" *ngIf="localParticipantPing" [class.laggy]="localParticipantPing > 200">
                     <mat-icon>sensors</mat-icon>
@@ -226,6 +229,9 @@
               <div class="unit-info">
                 <div class="name-row">
                   <span class="char-name">{{ remote.userData.name || 'Unnamed' }}</span>
+                  <div *ngIf="remote.diagnostics" [class]="'quality-badge ' + getConnectionQualityClass(remote.diagnostics)">
+                    {{ getConnectionQualityLabel(remote.diagnostics) }}
+                  </div>
                    <!-- Remote Ping Badge -->
                   <div class="ping-badge" *ngIf="remote.ping" [class.laggy]="remote.ping > 200">
                       <mat-icon>sensors</mat-icon>
@@ -284,6 +290,10 @@
 
           <button *ngIf="!isMobileBrowser" (click)="showDeviceRouting = !showDeviceRouting" class="btn-action" [class.active]="showDeviceRouting" matTooltip="Call Devices">
             <mat-icon>settings_input_component</mat-icon>
+          </button>
+
+          <button (click)="showDiagnosticsPanel = !showDiagnosticsPanel" class="btn-action" [class.active]="showDiagnosticsPanel" matTooltip="Call Diagnostics">
+            <mat-icon>analytics</mat-icon>
           </button>
 
           <button (click)="leaveCall()" class="btn-action btn-danger" matTooltip="Leave Call">
@@ -419,6 +429,69 @@
           <p class="device-routing-note" *ngIf="!companionDevices.length">
             Connected phone companions will appear here so the PC can use them as its camera or microphone source.
           </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="diagnostics-overlay glass" *ngIf="showDiagnosticsPanel">
+      <div class="overlay-header">
+        <h3>Call Diagnostics</h3>
+        <div class="header-actions">
+          <button class="btn-close" (click)="showDiagnosticsPanel = false">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="diagnostics-list">
+        <div class="diagnostics-card local-diagnostics">
+          <div class="diagnostics-card-header">
+            <div>
+              <strong>{{ (isDmMode ? dmCharacter : character).name || 'You' }}</strong>
+              <span>Local publish</span>
+            </div>
+            <div *ngIf="localParticipantDiagnostics" [class]="'quality-badge ' + getConnectionQualityClass(localParticipantDiagnostics)">
+              {{ getConnectionQualityLabel(localParticipantDiagnostics) }}
+            </div>
+          </div>
+
+          <div class="diagnostics-grid" *ngIf="localParticipantDiagnostics">
+            <div><label>RTT</label><span>{{ localParticipantDiagnostics.rttMs ?? '--' }} ms</span></div>
+            <div><label>State</label><span>{{ localParticipantDiagnostics.connectionState }}</span></div>
+            <div><label>Video</label><span>{{ formatBitrateKbps(localParticipantDiagnostics.video?.bitrateKbps) }}</span></div>
+            <div><label>Video Loss</label><span>{{ formatPacketLoss(localParticipantDiagnostics.video?.packetLossPct) }}</span></div>
+            <div><label>Video Jitter</label><span>{{ formatJitter(localParticipantDiagnostics.video?.jitterMs) }}</span></div>
+            <div><label>Resolution</label><span>{{ formatResolution(localParticipantDiagnostics) }}</span></div>
+            <div><label>FPS</label><span>{{ formatFrameRate(localParticipantDiagnostics) }}</span></div>
+            <div><label>Audio</label><span>{{ formatBitrateKbps(localParticipantDiagnostics.audio?.bitrateKbps) }}</span></div>
+            <div><label>Audio Loss</label><span>{{ formatPacketLoss(localParticipantDiagnostics.audio?.packetLossPct) }}</span></div>
+            <div><label>Audio Jitter</label><span>{{ formatJitter(localParticipantDiagnostics.audio?.jitterMs) }}</span></div>
+          </div>
+        </div>
+
+        <div class="diagnostics-card" *ngFor="let remote of remoteStreams">
+          <div class="diagnostics-card-header">
+            <div>
+              <strong>{{ remote.userData?.name || 'Remote User' }}</strong>
+              <span>{{ remote.id }}</span>
+            </div>
+            <div *ngIf="remote.diagnostics" [class]="'quality-badge ' + getConnectionQualityClass(remote.diagnostics)">
+              {{ getConnectionQualityLabel(remote.diagnostics) }}
+            </div>
+          </div>
+
+          <div class="diagnostics-grid" *ngIf="remote.diagnostics">
+            <div><label>RTT</label><span>{{ remote.diagnostics.rttMs ?? '--' }} ms</span></div>
+            <div><label>State</label><span>{{ remote.diagnostics.connectionState }}</span></div>
+            <div><label>Video</label><span>{{ formatBitrateKbps(remote.diagnostics.video?.bitrateKbps) }}</span></div>
+            <div><label>Video Loss</label><span>{{ formatPacketLoss(remote.diagnostics.video?.packetLossPct) }}</span></div>
+            <div><label>Video Jitter</label><span>{{ formatJitter(remote.diagnostics.video?.jitterMs) }}</span></div>
+            <div><label>Resolution</label><span>{{ formatResolution(remote.diagnostics) }}</span></div>
+            <div><label>FPS</label><span>{{ formatFrameRate(remote.diagnostics) }}</span></div>
+            <div><label>Audio</label><span>{{ formatBitrateKbps(remote.diagnostics.audio?.bitrateKbps) }}</span></div>
+            <div><label>Audio Loss</label><span>{{ formatPacketLoss(remote.diagnostics.audio?.packetLossPct) }}</span></div>
+            <div><label>Audio Jitter</label><span>{{ formatJitter(remote.diagnostics.audio?.jitterMs) }}</span></div>
+          </div>
         </div>
       </div>
     </div>

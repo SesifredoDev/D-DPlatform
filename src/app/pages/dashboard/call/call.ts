@@ -13,7 +13,7 @@ import {
   EventEmitter,
   ChangeDetectorRef,
 } from '@angular/core';
-import { CallParticipantMetadata, CompanionDeviceOption, CompanionSourceId, Video } from '../../../shared/services/video/video';
+import { CallParticipantMetadata, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
@@ -40,6 +40,7 @@ interface ParticipantStream {
   participantMeta?: CallParticipantMetadata | null;
   ping?: number;
   isLocal?: boolean;
+  diagnostics?: ParticipantMediaDiagnostics;
 }
 
 @Component({
@@ -94,6 +95,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   previewStream: MediaStream | null = null;
   remoteStreams: ParticipantStream[] = [];
   localParticipantPing: number | undefined;
+  localParticipantDiagnostics?: ParticipantMediaDiagnostics;
 
 
   isAudioMuted = false;
@@ -112,6 +114,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   showSpotify: boolean = false;
   showThemePicker: boolean = false;
   showDeviceRouting: boolean = false;
+  showDiagnosticsPanel: boolean = false;
   showPinNaming: boolean = false;
   newThemeName: string = '';
 
@@ -232,6 +235,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const localParticipantData = streams.find(p => p.isLocal);
       if (localParticipantData) {
         this.localParticipantPing = localParticipantData.ping;
+        this.localParticipantDiagnostics = localParticipantData.diagnostics;
       }
 
       const visibleRemoteParticipants = streams.filter(p => !p.isLocal && this.shouldDisplayRemoteParticipant(p));
@@ -240,7 +244,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         stream: r.stream,
         userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
         participantMeta: r.participantMeta,
-        ping: r.ping
+        ping: r.ping,
+        diagnostics: r.diagnostics
       }));
 
       this.updateLocalVideoDisplay(streams);
@@ -1043,5 +1048,66 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         console.warn('Failed to switch audio output device', error);
       }
     }
+  }
+
+  getConnectionQualityLabel(diagnostics?: ParticipantMediaDiagnostics): string {
+    if (!diagnostics) {
+      return 'Unknown';
+    }
+
+    switch (diagnostics.connectionQuality) {
+      case 'excellent':
+        return 'Excellent';
+      case 'good':
+        return 'Good';
+      case 'poor':
+        return 'Poor';
+      case 'lost':
+        return 'Lost';
+      default:
+        return 'Unknown';
+    }
+  }
+
+  getConnectionQualityClass(diagnostics?: ParticipantMediaDiagnostics): string {
+    switch (diagnostics?.connectionQuality) {
+      case 'excellent':
+        return 'quality-excellent';
+      case 'good':
+        return 'quality-good';
+      case 'poor':
+        return 'quality-poor';
+      case 'lost':
+        return 'quality-lost';
+      default:
+        return 'quality-unknown';
+    }
+  }
+
+  formatBitrateKbps(value: number | null | undefined): string {
+    return value == null ? '--' : `${value} kbps`;
+  }
+
+  formatPacketLoss(value: number | null | undefined): string {
+    return value == null ? '--' : `${value}%`;
+  }
+
+  formatJitter(value: number | null | undefined): string {
+    return value == null ? '--' : `${value} ms`;
+  }
+
+  formatResolution(diagnostics?: ParticipantMediaDiagnostics): string {
+    const width = diagnostics?.video?.width;
+    const height = diagnostics?.video?.height;
+    if (!width || !height) {
+      return '--';
+    }
+
+    return `${width}x${height}`;
+  }
+
+  formatFrameRate(diagnostics?: ParticipantMediaDiagnostics): string {
+    const frameRate = diagnostics?.video?.frameRate;
+    return frameRate == null ? '--' : `${frameRate} fps`;
   }
 }
