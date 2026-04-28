@@ -51,20 +51,20 @@ interface ParticipantStream {
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   private static readonly desktopVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 2560, max: 2560 },
-    height: { ideal: 1440, max: 1440 },
-    frameRate: { ideal: 30, max: 30 },
-    aspectRatio: { ideal: 16 / 9 }
-  };
-  private static readonly standardMobileVideoConstraints: MediaTrackConstraints = {
     width: { ideal: 1920, max: 1920 },
     height: { ideal: 1080, max: 1080 },
     frameRate: { ideal: 30, max: 30 },
     aspectRatio: { ideal: 16 / 9 }
   };
+  private static readonly standardMobileVideoConstraints: MediaTrackConstraints = {
+    width: { ideal: 1280, max: 1280 },
+    height: { ideal: 720, max: 720 },
+    frameRate: { ideal: 30, max: 30 },
+    aspectRatio: { ideal: 16 / 9 }
+  };
   private static readonly experimentalMobileVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 2560, max: 2560 },
-    height: { ideal: 1440, max: 1440 },
+    width: { ideal: 1920, max: 1920 },
+    height: { ideal: 1080, max: 1080 },
     frameRate: { ideal: 30, max: 30 },
     aspectRatio: { ideal: 16 / 9 }
   };
@@ -497,7 +497,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const baseConstraints: MediaTrackConstraints = {
       echoCancellation: true,
       noiseSuppression: true,
-      autoGainControl: true,
+      autoGainControl: false,
       channelCount: { ideal: 1 },
       sampleRate: { ideal: 48000 }
     };

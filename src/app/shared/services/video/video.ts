@@ -51,12 +51,12 @@ export class Video {
   private static readonly maxIceServers = 4;
   private static readonly fullHdVideoEncoding: VideoEncoding = {
     ...VideoPresets.h1080.encoding,
-    maxBitrate: 4_500_000,
+    maxBitrate: 2_500_000,
     maxFramerate: 30,
   };
   private static readonly qhdVideoEncoding: VideoEncoding = {
     ...VideoPresets.h1440.encoding,
-    maxBitrate: 8_000_000,
+    maxBitrate: 4_000_000,
     maxFramerate: 30,
   };
   private static readonly baseCameraPublishOptions: TrackPublishOptions = {
@@ -65,7 +65,7 @@ export class Video {
     red: true,
     simulcast: true,
     videoCodec: 'vp8',
-    degradationPreference: 'maintain-resolution',
+    degradationPreference: 'balanced',
   };
   private static readonly fullHdSimulcastLayers = [
     VideoPresets.h216,
@@ -123,7 +123,7 @@ export class Video {
     setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
     this.room = new Room({
-      adaptiveStream: false,
+      adaptiveStream: true,
       dynacast: true,
     });
     this.setupRoomListeners();
