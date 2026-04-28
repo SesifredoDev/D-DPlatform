@@ -621,17 +621,40 @@ export class Video {
     return deviceInfo.deviceType === 'mobile' ? 'phone-camera' : 'desktop-main';
   }
 
-  private findDesktopMainIdentityForUser(userId: string): string | null {
-    const desktopParticipant = Array.from(this.room.remoteParticipants.values()).find(p => {
+  private getDesktopMainParticipantForUser(userId: string): RemoteParticipant | null {
+    return Array.from(this.room.remoteParticipants.values()).find(p => {
       const metadata = this.parseMetadata(p.metadata);
       return metadata?.userId === userId && metadata?.deviceRole === 'desktop-main';
-    });
+    }) || null;
+  }
 
+  private findDesktopMainIdentityForUser(userId: string): string | null {
+    const desktopParticipant = this.getDesktopMainParticipantForUser(userId);
     return desktopParticipant?.identity || null;
+  }
+
+  private shouldPhoneCompanionBeSharedToRoom(): boolean {
+    if (
+      !this.currentParticipantIdentity ||
+      !this.currentParticipantMetadata ||
+      this.currentParticipantMetadata.deviceRole !== 'phone-camera'
+    ) {
+      return false;
+    }
+
+    const desktopParticipant = this.getDesktopMainParticipantForUser(this.currentParticipantMetadata.userId);
+    const desktopMetadata = this.parseMetadata(desktopParticipant?.metadata);
+    return desktopMetadata?.selectedVideoSource === this.currentParticipantIdentity
+      || desktopMetadata?.selectedAudioSource === this.currentParticipantIdentity;
   }
 
   private updatePhoneTrackPermissions() {
     if (!this.phoneCompanionTargetIdentity) return;
+
+    if (this.shouldPhoneCompanionBeSharedToRoom()) {
+      this.room.localParticipant.setTrackSubscriptionPermissions(true);
+      return;
+    }
 
     const permissions: ParticipantTrackPermission[] = [{
       participantIdentity: this.phoneCompanionTargetIdentity,
