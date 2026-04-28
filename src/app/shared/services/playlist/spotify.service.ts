@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject, Observable } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject, Observable, throwError } from 'rxjs';
 import { startWith, switchMap, catchError, map, tap } from 'rxjs/operators';
 
 import {environment} from '../../../../environments/environment';
@@ -36,6 +36,13 @@ export interface SpotifySyncEvent {
   command: string;
   data: any;
   source: 'manual' | 'auto';
+}
+
+interface SpotifyRefreshResponse {
+  accessToken?: string;
+  access_token?: string;
+  refreshToken?: string;
+  refresh_token?: string;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -75,7 +82,7 @@ export class SpotifyService {
   private readonly BACKEND_API = `${environment.apiURL}`;
 
   constructor(private http: HttpClient) {
-    this.accessToken = localStorage.getItem('spotify_access_token');
+    this.accessToken = this.getStoredToken('spotify_access_token');
     this.loadPinned();
     if (this.accessToken) {
       this.isAuthorized$.next(true);
@@ -90,25 +97,55 @@ export class SpotifyService {
   }
 
   refreshSpotifyToken(): Observable<string> {
-    const refreshToken = localStorage.getItem('spotify_refresh_token');
-    return this.http.post<{ accessToken: string }>(`${this.BACKEND_API}spotify/refresh`, { refresh_token: refreshToken }).pipe(
-      map(res => res.accessToken),
-      tap(token => {
-        this.accessToken = token;
-        localStorage.setItem('spotify_access_token', token);
-      })
+    const refreshToken = this.getStoredToken('spotify_refresh_token');
+    if (!refreshToken) {
+      return throwError(() => new Error('Missing Spotify refresh token'));
+    }
+
+    return this.http.post<SpotifyRefreshResponse>(`${this.BACKEND_API}spotify/refresh`, { refresh_token: refreshToken }).pipe(
+      map(res => {
+        const accessToken = res.accessToken ?? res.access_token;
+        if (!accessToken) {
+          throw new Error('Spotify refresh response missing access token');
+        }
+
+        return {
+          accessToken,
+          refreshToken: res.refreshToken ?? res.refresh_token
+        };
+      }),
+      tap(({ accessToken, refreshToken: nextRefreshToken }) => {
+        this.storeTokens(accessToken, nextRefreshToken);
+        this.isAuthorized$.next(true);
+        this.error$.next(null);
+      }),
+      map(({ accessToken }) => accessToken)
     );
   }
 
-  setTokens(access: string, refresh: string) {
-    this.accessToken = access;
-    localStorage.setItem('spotify_access_token', access);
-    localStorage.setItem('spotify_refresh_token', refresh);
+  setTokens(access: string, refresh?: string | null) {
+    this.storeTokens(access, refresh);
     this.isAuthorized$.next(true);
     this.error$.next(null);
     this.initSDK();
     this.startPolling();
     this.loadUserData();
+  }
+
+  private storeTokens(accessToken: string, refreshToken?: string | null) {
+    this.accessToken = accessToken;
+    localStorage.setItem('spotify_access_token', accessToken);
+    if (refreshToken) {
+      localStorage.setItem('spotify_refresh_token', refreshToken);
+    }
+  }
+
+  private getStoredToken(key: string): string | null {
+    const value = localStorage.getItem(key);
+    if (!value || value === 'undefined' || value === 'null') {
+      return null;
+    }
+    return value;
   }
 
   private loadUserData() {

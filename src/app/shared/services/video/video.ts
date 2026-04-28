@@ -152,12 +152,50 @@ export class Video {
 
   private setupRoomListeners() {
     this.room
+      .on(RoomEvent.Reconnecting, () => {
+        void this.emitParticipants();
+      })
+      .on(RoomEvent.Reconnected, () => {
+        this.rebuildAllParticipantStreams();
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
+      .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        this.updateParticipantStream(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
         void this.syncCompanionState();
         void this.emitParticipants();
       })
+      .on(RoomEvent.TrackSubscriptionFailed, (trackSid: string, participant: RemoteParticipant, reason) => {
+        console.warn('LiveKit track subscription failed', {
+          participantIdentity: participant.identity,
+          trackSid,
+          reason: String(reason ?? '')
+        });
+        this.updateParticipantStream(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        this.updateParticipantStream(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
+      .on(RoomEvent.TrackSubscriptionStatusChanged, (publication: RemoteTrackPublication, status: unknown, participant: RemoteParticipant) => {
+        this.updateParticipantStream(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
+      .on(RoomEvent.TrackSubscriptionPermissionChanged, (publication: RemoteTrackPublication, status: unknown, participant: RemoteParticipant) => {
+        this.updateParticipantStream(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
+      .on(RoomEvent.TrackStreamStateChanged, (publication: RemoteTrackPublication, streamState: unknown, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
         void this.syncCompanionState();
         void this.emitParticipants();
@@ -265,6 +303,12 @@ export class Video {
       if (pub.track && pub.track.mediaStreamTrack) {
         stream!.addTrack(pub.track.mediaStreamTrack);
       }
+    });
+  }
+
+  private rebuildAllParticipantStreams() {
+    this.room.remoteParticipants.forEach(participant => {
+      this.updateParticipantStream(participant);
     });
   }
 
@@ -712,20 +756,36 @@ export class Video {
     }
 
     const effectiveStream = this.effectiveParticipantStreams.get(participantIdentity) || new MediaStream();
-    effectiveStream.getTracks().forEach(track => effectiveStream.removeTrack(track));
-
     const selectedVideoTrack = this.resolveEffectiveTrack(metadata.selectedVideoSource, 'video', sourceStream);
     const selectedAudioTrack = this.resolveEffectiveTrack(metadata.selectedAudioSource, 'audio', sourceStream);
 
-    if (selectedVideoTrack) {
-      effectiveStream.addTrack(selectedVideoTrack);
-    }
-    if (selectedAudioTrack) {
-      effectiveStream.addTrack(selectedAudioTrack);
-    }
+    this.syncEffectiveStreamTrack(effectiveStream, 'video', selectedVideoTrack);
+    this.syncEffectiveStreamTrack(effectiveStream, 'audio', selectedAudioTrack);
 
     this.effectiveParticipantStreams.set(participantIdentity, effectiveStream);
     return effectiveStream;
+  }
+
+  private syncEffectiveStreamTrack(
+    effectiveStream: MediaStream,
+    kind: 'audio' | 'video',
+    nextTrack: MediaStreamTrack | null
+  ) {
+    const currentTrack = kind === 'video'
+      ? effectiveStream.getVideoTracks()[0] || null
+      : effectiveStream.getAudioTracks()[0] || null;
+
+    if (currentTrack === nextTrack) {
+      return;
+    }
+
+    if (currentTrack) {
+      effectiveStream.removeTrack(currentTrack);
+    }
+
+    if (nextTrack) {
+      effectiveStream.addTrack(nextTrack);
+    }
   }
 
   private resolveEffectiveTrack(
