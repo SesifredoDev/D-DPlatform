@@ -177,7 +177,7 @@
       </div>
 
       <!-- Remote Videos -->
-      <div class="video-box remote" *ngFor="let remote of remoteStreams" (click)="openCharacter(remote.userData)">
+      <div class="video-box remote" *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream" (click)="openCharacter(remote.userData)">
         <video #remoteVideo autoplay playsinline></video>
 
         @if (remote.userData){
@@ -469,7 +469,7 @@
           </div>
         </div>
 
-        <div class="diagnostics-card" *ngFor="let remote of remoteStreams">
+        <div class="diagnostics-card" *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream">
           <div class="diagnostics-card-header">
             <div>
               <strong>{{ remote.userData?.name || 'Remote User' }}</strong>

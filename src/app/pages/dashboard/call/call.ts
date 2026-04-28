@@ -1050,6 +1050,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  trackRemoteStream(_: number, remote: ParticipantStream): string {
+    return remote.id;
+  }
+
   getConnectionQualityLabel(diagnostics?: ParticipantMediaDiagnostics): string {
     if (!diagnostics) {
       return 'Unknown';
