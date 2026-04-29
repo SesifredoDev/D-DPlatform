@@ -80,8 +80,9 @@ export class Video {
     maxBitrate: 4_000_000,
     maxFramerate: 30,
   };
+  private static readonly highQualityMonoAudioPreset = AudioPresets.musicHighQuality;
+  private static readonly highQualityStereoAudioPreset = AudioPresets.musicHighQualityStereo;
   private static readonly baseCameraPublishOptions: TrackPublishOptions = {
-    audioPreset: AudioPresets.speech,
     dtx: true,
     red: true,
     simulcast: true,
@@ -754,13 +755,22 @@ export class Video {
     this.currentAudioPublicationTrack = nextSource;
 
     if (nextSource && this.currentParticipantMetadata?.deviceRole !== 'phone-camera') {
-      await this.room.localParticipant.publishTrack(nextSource, {
-        audioPreset: AudioPresets.speech,
-        dtx: true,
-        red: true,
-        name: 'audio',
-      });
+      await this.room.localParticipant.publishTrack(nextSource, this.getAudioPublishOptions(nextSource));
     }
+  }
+
+  private getAudioPublishOptions(track: MediaStreamTrack): TrackPublishOptions {
+    const settings = track.getSettings();
+    const channelCount = settings.channelCount ?? 1;
+
+    return {
+      audioPreset: channelCount > 1
+        ? Video.highQualityStereoAudioPreset
+        : Video.highQualityMonoAudioPreset,
+      dtx: true,
+      red: true,
+      name: 'audio',
+    };
   }
 
   private buildEffectiveParticipantStream(

@@ -64,6 +64,12 @@
                 <option *ngFor="let d of audioDevices" [value]="d.deviceId">{{ d.label }}</option>
               </select>
             </div>
+            <div class="device-select">
+              <mat-icon>graphic_eq</mat-icon>
+              <select [(ngModel)]="microphoneProcessingMode" (change)="onMicrophoneProcessingChange()" [disabled]="isMobileBrowser && !mobileMediaReady">
+                <option *ngFor="let option of microphoneProcessingOptions" [value]="option.value">{{ option.label }}</option>
+              </select>
+            </div>
           </div>
 
           <div *ngIf="isMobileBrowser" class="mobile-permission-prompt">
@@ -393,6 +399,12 @@
               <mat-icon>mic</mat-icon>
               <select [(ngModel)]="selectedAudioId" (change)="onDeviceChange()">
                 <option *ngFor="let d of audioDevices" [value]="d.deviceId">{{ d.label }}</option>
+              </select>
+            </div>
+            <div class="device-select">
+              <mat-icon>graphic_eq</mat-icon>
+              <select [(ngModel)]="microphoneProcessingMode" (change)="onMicrophoneProcessingChange()">
+                <option *ngFor="let option of microphoneProcessingOptions" [value]="option.value">{{ option.label }}</option>
               </select>
             </div>
             <div class="device-select" *ngIf="supportsAudioOutputSelection">

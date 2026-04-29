@@ -43,6 +43,8 @@ interface ParticipantStream {
   diagnostics?: ParticipantMediaDiagnostics;
 }
 
+type MicrophoneProcessingMode = 'studio' | 'processed';
+
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
@@ -56,6 +58,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     height: { ideal: 1080, max: 1080 },
     frameRate: { ideal: 30, max: 30 },
     aspectRatio: { ideal: 16 / 9 }
+  };
+  private static readonly studioAudioConstraints: MediaTrackConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    channelCount: { ideal: 2 },
+    sampleRate: { ideal: 48000 }
+  };
+  private static readonly processedAudioConstraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: false,
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: 48000 }
   };
   private static readonly standardMobileVideoConstraints: MediaTrackConstraints = {
     width: { ideal: 1280, max: 1280 },
@@ -87,9 +103,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   selectedVideoId: string = '';
   selectedAudioId: string = '';
   selectedOutputId: string = '';
+  microphoneProcessingMode: MicrophoneProcessingMode = 'studio';
   selectedPcVideoSource: CompanionSourceId = 'desktop-local';
   selectedPcAudioSource: CompanionSourceId = 'desktop-local';
   companionDevices: CompanionDeviceOption[] = [];
+  readonly microphoneProcessingOptions: ReadonlyArray<{ value: MicrophoneProcessingMode; label: string }> = [
+    { value: 'studio', label: 'Studio mic' },
+    { value: 'processed', label: 'Voice processed' }
+  ];
 
   localStream: MediaStream | null = null;
   previewStream: MediaStream | null = null;
@@ -207,6 +228,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
 
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
+    this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
 
     if (!this.isMobileBrowser) {
       await this.loadDevices();
@@ -499,13 +521,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private buildAudioConstraints(): MediaTrackConstraints {
-    const baseConstraints: MediaTrackConstraints = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: false,
-      channelCount: { ideal: 1 },
-      sampleRate: { ideal: 48000 }
-    };
+    const baseConstraints = this.microphoneProcessingMode === 'studio'
+      ? Call.studioAudioConstraints
+      : Call.processedAudioConstraints;
 
     if (this.selectedAudioId) {
       return {
@@ -578,6 +596,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     await this.startPreview();
+  }
+
+  async onMicrophoneProcessingChange() {
+    if (!this.localStream && !this.previewStream && this.isMobileBrowser && !this.mobileMediaReady) {
+      return;
+    }
+
+    await this.onDeviceChange();
   }
 
   async toggleExperimentalMobile1080p() {
