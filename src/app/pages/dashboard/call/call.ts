@@ -53,6 +53,7 @@ type MicrophoneProcessingMode = 'studio' | 'processed';
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
+  private static readonly micTestMaxDurationMs = 8000;
   private static readonly desktopVideoConstraints: MediaTrackConstraints = {
     width: { ideal: 1920, max: 1920 },
     height: { ideal: 1080, max: 1080 },
@@ -95,6 +96,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
+  @ViewChild('micTestAudio') micTestAudio?: ElementRef<HTMLAudioElement>;
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
 
   videoDevices: MediaDeviceInfo[] = [];
@@ -111,12 +113,18 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     { value: 'studio', label: 'Studio mic' },
     { value: 'processed', label: 'Voice processed' }
   ];
+  readonly supportsMicTestRecording = typeof MediaRecorder !== 'undefined';
 
   localStream: MediaStream | null = null;
   previewStream: MediaStream | null = null;
   remoteStreams: ParticipantStream[] = [];
   localParticipantPing: number | undefined;
   localParticipantDiagnostics?: ParticipantMediaDiagnostics;
+  micInputLevel = 0;
+  isMicTestRecording = false;
+  micTestDurationSeconds = 0;
+  micTestPlaybackUrl: string | null = null;
+  micTestError = '';
 
 
   isAudioMuted = false;
@@ -193,6 +201,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private isComponentDestroying = false;
   private lastAutoSelectedCompanionVideoId: string | null = null;
+  private micTestRecorder: MediaRecorder | null = null;
+  private micTestRecorderStream: MediaStream | null = null;
+  private micTestChunks: Blob[] = [];
+  private micTestDurationInterval: any;
+  private micTestAutoStopTimeout: any;
+  private micTestDiscardOnStop = false;
+  private micLevelAudioContext: AudioContext | null = null;
+  private micLevelAnalyser: AnalyserNode | null = null;
+  private micLevelSource: MediaStreamAudioSourceNode | null = null;
+  private micLevelStream: MediaStream | null = null;
+  private micLevelData: Uint8Array | null = null;
+  private micLevelInterval: any;
+  private monitoredMicTrack: MediaStreamTrack | null = null;
   private readonly handleDeviceChangeBound = () => {
     void this.loadDevices();
   };
@@ -241,6 +262,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.localStream = existingStream;
       this.isAudioMuted = !this.localStream.getAudioTracks().every(t => t.enabled);
       this.isVideoOff = !this.localStream.getVideoTracks().every(t => t.enabled);
+      this.syncMicInputMonitor();
 
       setTimeout(() => {
         if (this.localVideo) {
@@ -564,6 +586,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async startPreview() {
+    this.resetMicTestForCaptureChange();
     if (this.previewStream) {
       this.previewStream.getTracks().forEach(t => t.stop());
       this.previewStream = null;
@@ -576,12 +599,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.previewVideo.nativeElement.srcObject = this.previewStream;
       }
       this.mobileMediaReady = true;
+      this.syncMicInputMonitor();
       await this.applyAudioOutputToAllMedia();
       this.cdr.detectChanges();
     } catch (err) {
       console.error('Preview failed, trying fallback', err);
       try {
         this.previewStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        this.syncMicInputMonitor();
+        await this.applyAudioOutputToAllMedia();
         this.cdr.detectChanges();
       } catch (fallbackErr) {
         console.error('All media access failed', fallbackErr);
@@ -604,6 +630,306 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     await this.onDeviceChange();
+  }
+
+  get hasMicTestSource(): boolean {
+    const track = this.getActiveMicTrack();
+    return !!track && track.readyState === 'live';
+  }
+
+  get canRunMicTest(): boolean {
+    const track = this.getActiveMicTrack();
+    return this.supportsMicTestRecording && !!track && track.readyState === 'live' && track.enabled;
+  }
+
+  get micInputLevelPercent(): number {
+    return Math.round(this.micInputLevel * 100);
+  }
+
+  get micTestStatusText(): string {
+    if (this.micTestError) {
+      return this.micTestError;
+    }
+
+    if (!this.hasMicTestSource) {
+      return 'Microphone unavailable';
+    }
+
+    if (this.isMicTestRecording) {
+      return `Recording ${this.micTestDurationSeconds}s`;
+    }
+
+    if (!this.canRunMicTest) {
+      return 'Unmute microphone to test';
+    }
+
+    if (this.micTestPlaybackUrl) {
+      return 'Sample ready';
+    }
+
+    return 'Ready';
+  }
+
+  startMicTestRecording() {
+    if (this.isMicTestRecording) {
+      return;
+    }
+
+    this.micTestError = '';
+    if (!this.supportsMicTestRecording) {
+      this.micTestError = 'Mic test unsupported here';
+      return;
+    }
+
+    const track = this.getActiveMicTrack();
+    if (!track || track.readyState !== 'live') {
+      this.micTestError = 'Microphone unavailable';
+      return;
+    }
+
+    if (!track.enabled) {
+      this.micTestError = 'Unmute microphone to test';
+      return;
+    }
+
+    this.clearMicTestSample();
+    this.stopMicTestRecording(true);
+    this.micTestDiscardOnStop = false;
+    this.micTestChunks = [];
+    this.micTestRecorderStream = new MediaStream([track]);
+
+    try {
+      const mimeType = this.getSupportedMicTestMimeType();
+      this.micTestRecorder = mimeType
+        ? new MediaRecorder(this.micTestRecorderStream, { mimeType })
+        : new MediaRecorder(this.micTestRecorderStream);
+    } catch (error) {
+      console.error('Failed to start mic test recorder', error);
+      this.micTestError = 'Mic test unavailable';
+      this.cleanupMicTestRecorder();
+      return;
+    }
+
+    this.micTestRecorder.ondataavailable = event => {
+      if (event.data.size > 0) {
+        this.micTestChunks.push(event.data);
+      }
+    };
+
+    this.micTestRecorder.onerror = event => {
+      console.error('Mic test recorder error', event);
+      this.micTestError = 'Mic test failed';
+      this.cleanupMicTestRecorder();
+      this.cdr.detectChanges();
+    };
+
+    this.micTestRecorder.onstop = () => {
+      const discardSample = this.micTestDiscardOnStop;
+      const chunks = [...this.micTestChunks];
+      const mimeType = this.micTestRecorder?.mimeType || this.getSupportedMicTestMimeType() || 'audio/webm';
+
+      this.cleanupMicTestRecorder();
+
+      if (!discardSample) {
+        if (chunks.length > 0) {
+          this.micTestPlaybackUrl = URL.createObjectURL(new Blob(chunks, { type: mimeType }));
+          setTimeout(() => {
+            void this.applyAudioOutputToAllMedia();
+            const audioElement = this.micTestAudio?.nativeElement;
+            if (audioElement) {
+              audioElement.load();
+              void audioElement.play().catch(() => undefined);
+            }
+          });
+        } else {
+          this.micTestError = 'No audio captured';
+        }
+      }
+
+      this.cdr.detectChanges();
+    };
+
+    try {
+      this.micTestRecorder.start(250);
+    } catch (error) {
+      console.error('Failed to run mic test recorder', error);
+      this.micTestError = 'Mic test failed';
+      this.cleanupMicTestRecorder();
+      return;
+    }
+
+    this.isMicTestRecording = true;
+    this.micTestDurationSeconds = 0;
+    const startedAt = Date.now();
+    this.micTestDurationInterval = setInterval(() => {
+      this.micTestDurationSeconds = Math.min(
+        Math.ceil((Date.now() - startedAt) / 1000),
+        Math.ceil(Call.micTestMaxDurationMs / 1000)
+      );
+      this.cdr.detectChanges();
+    }, 200);
+    this.micTestAutoStopTimeout = setTimeout(() => {
+      this.stopMicTestRecording();
+    }, Call.micTestMaxDurationMs);
+  }
+
+  stopMicTestRecording(discardSample: boolean = false) {
+    if (!this.micTestRecorder) {
+      return;
+    }
+
+    this.micTestDiscardOnStop = this.micTestDiscardOnStop || discardSample;
+    this.clearMicTestTimers();
+    if (this.micTestRecorder.state !== 'inactive') {
+      this.micTestRecorder.stop();
+    } else {
+      this.cleanupMicTestRecorder();
+    }
+  }
+
+  clearMicTestSample() {
+    const audioElement = this.micTestAudio?.nativeElement;
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.removeAttribute('src');
+      audioElement.load();
+    }
+
+    if (this.micTestPlaybackUrl) {
+      URL.revokeObjectURL(this.micTestPlaybackUrl);
+      this.micTestPlaybackUrl = null;
+    }
+  }
+
+  private getActiveMicTrack(): MediaStreamTrack | null {
+    return this.localStream?.getAudioTracks()[0]
+      || this.previewStream?.getAudioTracks()[0]
+      || null;
+  }
+
+  private getSupportedMicTestMimeType(): string | null {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+      return null;
+    }
+
+    const supportedMimeType = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus'
+    ].find(type => MediaRecorder.isTypeSupported(type));
+
+    return supportedMimeType || null;
+  }
+
+  private resetMicTestForCaptureChange() {
+    this.micTestError = '';
+    this.stopMicTestRecording(true);
+    this.clearMicTestSample();
+    this.stopMicInputMonitor();
+  }
+
+  private clearMicTestTimers() {
+    if (this.micTestDurationInterval) {
+      clearInterval(this.micTestDurationInterval);
+      this.micTestDurationInterval = null;
+    }
+
+    if (this.micTestAutoStopTimeout) {
+      clearTimeout(this.micTestAutoStopTimeout);
+      this.micTestAutoStopTimeout = null;
+    }
+  }
+
+  private cleanupMicTestRecorder() {
+    this.clearMicTestTimers();
+    this.isMicTestRecording = false;
+    this.micTestDurationSeconds = 0;
+    this.micTestChunks = [];
+    this.micTestRecorder = null;
+    this.micTestRecorderStream = null;
+    this.micTestDiscardOnStop = false;
+  }
+
+  private syncMicInputMonitor() {
+    const track = this.getActiveMicTrack();
+    if (!track || track.readyState !== 'live') {
+      this.stopMicInputMonitor();
+      return;
+    }
+
+    if (this.monitoredMicTrack === track && this.micLevelAnalyser) {
+      return;
+    }
+
+    this.stopMicInputMonitor();
+    const AudioContextConstructor = this.getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      return;
+    }
+
+    this.monitoredMicTrack = track;
+    this.micLevelStream = new MediaStream([track]);
+    this.micLevelAudioContext = new AudioContextConstructor();
+    this.micLevelSource = this.micLevelAudioContext.createMediaStreamSource(this.micLevelStream);
+    this.micLevelAnalyser = this.micLevelAudioContext.createAnalyser();
+    this.micLevelAnalyser.fftSize = 1024;
+    this.micLevelAnalyser.smoothingTimeConstant = 0.8;
+    this.micLevelData = new Uint8Array(this.micLevelAnalyser.fftSize);
+    this.micLevelSource.connect(this.micLevelAnalyser);
+    void this.micLevelAudioContext.resume().catch(() => undefined);
+    this.micLevelInterval = setInterval(() => {
+      this.updateMicInputLevel();
+    }, 100);
+  }
+
+  private stopMicInputMonitor() {
+    if (this.micLevelInterval) {
+      clearInterval(this.micLevelInterval);
+      this.micLevelInterval = null;
+    }
+
+    this.micLevelSource?.disconnect();
+    this.micLevelSource = null;
+    this.micLevelAnalyser = null;
+    this.micLevelData = null;
+    this.micLevelStream = null;
+    this.monitoredMicTrack = null;
+    this.micInputLevel = 0;
+
+    if (this.micLevelAudioContext) {
+      void this.micLevelAudioContext.close().catch(() => undefined);
+      this.micLevelAudioContext = null;
+    }
+  }
+
+  private updateMicInputLevel() {
+    if (!this.micLevelAnalyser || !this.micLevelData || !this.monitoredMicTrack) {
+      this.micInputLevel = 0;
+      return;
+    }
+
+    if (this.monitoredMicTrack.readyState !== 'live' || !this.monitoredMicTrack.enabled) {
+      this.micInputLevel = 0;
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.micLevelAnalyser.getByteTimeDomainData(this.micLevelData as Uint8Array<ArrayBuffer>);
+    let totalSquare = 0;
+    for (const value of this.micLevelData) {
+      const normalized = (value - 128) / 128;
+      totalSquare += normalized * normalized;
+    }
+
+    const rms = Math.sqrt(totalSquare / this.micLevelData.length);
+    this.micInputLevel = Math.min(1, rms * 5);
+    this.cdr.detectChanges();
+  }
+
+  private getAudioContextConstructor(): typeof AudioContext | null {
+    const audioWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
+    return audioWindow.AudioContext || audioWindow.webkitAudioContext || null;
   }
 
   async toggleExperimentalMobile1080p() {
@@ -661,6 +987,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         throw new Error('Acquired stream is not active');
       }
 
+      this.syncMicInputMonitor();
+
       // SYNC: Transfer preview settings to live state
       this.isAudioMuted = this.isPreviewMuted;
       this.isVideoOff = this.isPreviewVideoOff;
@@ -700,6 +1028,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async leaveCall() {
+    this.resetMicTestForCaptureChange();
     await this.videoService.leaveCall(this.channelId);
     this.themeService.resetToDefault();
     this.localStream = null;
@@ -829,6 +1158,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy() {
+    this.resetMicTestForCaptureChange();
+    this.stopMicInputMonitor();
     if (this.streamSub) this.streamSub.unsubscribe();
     if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
     if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
@@ -1001,6 +1332,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private async replaceActiveMediaStream() {
+    this.resetMicTestForCaptureChange();
     const nextStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
 
     nextStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
@@ -1021,6 +1353,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
     }
 
+    this.syncMicInputMonitor();
     await this.applyAudioOutputToAllMedia();
     this.cdr.detectChanges();
   }
@@ -1062,6 +1395,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
     if (this.localVideo?.nativeElement) {
       mediaElements.push(this.localVideo.nativeElement);
+    }
+    if (this.micTestAudio?.nativeElement) {
+      mediaElements.push(this.micTestAudio.nativeElement);
     }
     this.remoteVideos?.forEach(videoRef => {
       mediaElements.push(videoRef.nativeElement);

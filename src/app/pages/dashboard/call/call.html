@@ -72,6 +72,34 @@
             </div>
           </div>
 
+          <div class="mic-test-panel" [class.disabled]="!hasMicTestSource">
+            <div class="mic-test-header">
+              <div class="mic-test-title">
+                <strong>Mic Test</strong>
+                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>
+              </div>
+              <button
+                class="btn-mic-test"
+                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"
+                [disabled]="!canRunMicTest && !isMicTestRecording"
+              >
+                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>
+                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>
+              </button>
+            </div>
+            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">
+              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>
+            </div>
+            <audio
+              #micTestAudio
+              *ngIf="micTestPlaybackUrl"
+              class="mic-test-playback"
+              controls
+              preload="auto"
+              [src]="micTestPlaybackUrl"
+            ></audio>
+          </div>
+
           <div *ngIf="isMobileBrowser" class="mobile-permission-prompt">
             <p>Mobile video now targets 1080p by default. 1440p can be enabled experimentally.</p>
             <button class="btn-primary-join" (click)="toggleExperimentalMobile1080p()" [disabled]="isPreparingMobileMedia">
@@ -441,6 +469,37 @@
           <p class="device-routing-note" *ngIf="!companionDevices.length">
             Connected phone companions will appear here so the PC can use them as its camera or microphone source.
           </p>
+        </div>
+
+        <div class="device-routing-section">
+          <div class="section-title">Mic Test</div>
+          <div class="mic-test-panel compact" [class.disabled]="!hasMicTestSource">
+            <div class="mic-test-header">
+              <div class="mic-test-title">
+                <strong>Local Sample</strong>
+                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>
+              </div>
+              <button
+                class="btn-mic-test"
+                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"
+                [disabled]="!canRunMicTest && !isMicTestRecording"
+              >
+                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>
+                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>
+              </button>
+            </div>
+            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">
+              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>
+            </div>
+            <audio
+              #micTestAudio
+              *ngIf="micTestPlaybackUrl"
+              class="mic-test-playback"
+              controls
+              preload="auto"
+              [src]="micTestPlaybackUrl"
+            ></audio>
+          </div>
         </div>
       </div>
     </div>
