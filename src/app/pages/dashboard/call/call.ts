@@ -13,7 +13,7 @@ import {
   EventEmitter,
   ChangeDetectorRef,
 } from '@angular/core';
-import { CallParticipantMetadata, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, Video } from '../../../shared/services/video/video';
+import { CallParticipantMetadata, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, RemoteVideoQualityPreference, Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
@@ -44,6 +44,7 @@ interface ParticipantStream {
 }
 
 type MicrophoneProcessingMode = 'studio' | 'processed';
+type RemoteVideoQualityLevel = 0 | 1 | 2;
 
 @Component({
   selector: 'app-video-call',
@@ -106,12 +107,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   selectedAudioId: string = '';
   selectedOutputId: string = '';
   microphoneProcessingMode: MicrophoneProcessingMode = 'studio';
+  remoteVideoQualityLevel: RemoteVideoQualityLevel = 1;
   selectedPcVideoSource: CompanionSourceId = 'desktop-local';
   selectedPcAudioSource: CompanionSourceId = 'desktop-local';
   companionDevices: CompanionDeviceOption[] = [];
   readonly microphoneProcessingOptions: ReadonlyArray<{ value: MicrophoneProcessingMode; label: string }> = [
     { value: 'studio', label: 'Studio mic' },
     { value: 'processed', label: 'Voice processed' }
+  ];
+  readonly remoteVideoQualityOptions: ReadonlyArray<{
+    level: RemoteVideoQualityLevel;
+    value: RemoteVideoQualityPreference;
+    label: string;
+  }> = [
+    { level: 0, value: 'low', label: 'Data saver' },
+    { level: 1, value: 'medium', label: 'Balanced' },
+    { level: 2, value: 'high', label: 'Max detail' }
   ];
   readonly supportsMicTestRecording = typeof MediaRecorder !== 'undefined';
 
@@ -197,6 +208,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private companionDevicesSub!: Subscription;
   private selectedVideoSourceSub!: Subscription;
   private selectedAudioSourceSub!: Subscription;
+  private remoteVideoQualitySub!: Subscription;
   readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
 
   private isComponentDestroying = false;
@@ -250,6 +262,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
     this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
+    this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(
+      this.videoService.getRemoteVideoQualityPreference()
+    );
 
     if (!this.isMobileBrowser) {
       await this.loadDevices();
@@ -493,6 +508,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
     this.selectedAudioSourceSub = this.videoService.selectedAudioSource$.subscribe(sourceId => {
       this.selectedPcAudioSource = sourceId;
+      this.cdr.detectChanges();
+    });
+    this.remoteVideoQualitySub = this.videoService.remoteVideoQualityPreference$.subscribe(preference => {
+      this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(preference);
       this.cdr.detectChanges();
     });
 
@@ -962,6 +981,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.applyAudioOutputToAllMedia();
   }
 
+  onRemoteVideoQualityChange() {
+    this.videoService.setRemoteVideoQualityPreference(
+      this.remoteVideoQualityOptions[this.remoteVideoQualityLevel]?.value ?? 'medium'
+    );
+  }
+
+  get remoteVideoQualityLabel(): string {
+    return this.remoteVideoQualityOptions[this.remoteVideoQualityLevel]?.label ?? 'Balanced';
+  }
+
   async joinCall() {
     if (!this.channelId || !this.character || this.isJoining) return;
     this.isJoining = true;
@@ -1175,6 +1204,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.companionDevicesSub) this.companionDevicesSub.unsubscribe();
     if (this.selectedVideoSourceSub) this.selectedVideoSourceSub.unsubscribe();
     if (this.selectedAudioSourceSub) this.selectedAudioSourceSub.unsubscribe();
+    if (this.remoteVideoQualitySub) this.remoteVideoQualitySub.unsubscribe();
 
     // Just clean up local hardware previews.
     // The actual call room disconnection is now handled by TabService.closeTab()
@@ -1329,6 +1359,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     return null;
+  }
+
+  private preferenceToRemoteVideoQualityLevel(preference: RemoteVideoQualityPreference): RemoteVideoQualityLevel {
+    switch (preference) {
+      case 'low':
+        return 0;
+      case 'high':
+        return 2;
+      default:
+        return 1;
+    }
   }
 
   private async replaceActiveMediaStream() {

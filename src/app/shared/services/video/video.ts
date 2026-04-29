@@ -12,6 +12,7 @@ import {
   ParticipantTrackPermission,
   TrackPublishOptions,
   VideoEncoding,
+  VideoQuality,
   VideoPreset,
   VideoPresets
 } from 'livekit-client';
@@ -22,6 +23,7 @@ import { DeviceInfo, DeviceService } from '../device/device';
 
 export type CallDeviceRole = 'desktop-main' | 'phone-camera';
 export type CompanionSourceId = 'desktop-local' | string;
+export type RemoteVideoQualityPreference = 'low' | 'medium' | 'high';
 
 export interface CallParticipantMetadata {
   userId: string;
@@ -70,6 +72,23 @@ interface LiveKitConnectionInfo {
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly maxIceServers = 4;
+  private static readonly remoteVideoPreferenceProfiles: Record<RemoteVideoQualityPreference, {
+    quality: VideoQuality;
+    dimensions: { width: number; height: number };
+  }> = {
+    low: {
+      quality: VideoQuality.LOW,
+      dimensions: { width: 384, height: 216 }
+    },
+    medium: {
+      quality: VideoQuality.MEDIUM,
+      dimensions: { width: 640, height: 360 }
+    },
+    high: {
+      quality: VideoQuality.HIGH,
+      dimensions: { width: 1920, height: 1080 }
+    }
+  };
   private static readonly fullHdVideoEncoding: VideoEncoding = {
     ...VideoPresets.h1080.encoding,
     maxBitrate: 2_500_000,
@@ -127,6 +146,7 @@ export class Video {
   public readonly companionDevices$ = new BehaviorSubject<CompanionDeviceOption[]>([]);
   public readonly selectedVideoSource$ = new BehaviorSubject<CompanionSourceId>('desktop-local');
   public readonly selectedAudioSource$ = new BehaviorSubject<CompanionSourceId>('desktop-local');
+  public readonly remoteVideoQualityPreference$ = new BehaviorSubject<RemoteVideoQualityPreference>('medium');
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
@@ -158,16 +178,19 @@ export class Video {
       })
       .on(RoomEvent.Reconnected, () => {
         this.rebuildAllParticipantStreams();
+        this.applyRemoteVideoSubscriptionPreferences();
         void this.syncCompanionState();
         void this.emitParticipants();
       })
       .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
+        this.applyRemoteVideoSubscriptionPreferences(participant);
         void this.syncCompanionState();
         void this.emitParticipants();
       })
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
+        this.applyRemoteVideoSubscriptionPreferences(participant);
         void this.syncCompanionState();
         void this.emitParticipants();
       })
@@ -183,6 +206,7 @@ export class Video {
       })
       .on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
+        this.applyRemoteVideoSubscriptionPreferences(participant);
         void this.syncCompanionState();
         void this.emitParticipants();
       })
@@ -210,6 +234,7 @@ export class Video {
         void this.emitParticipants();
       })
       .on(RoomEvent.ParticipantConnected, () => {
+        this.applyRemoteVideoSubscriptionPreferences();
         void this.syncCompanionState();
         void this.emitParticipants();
         if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
@@ -332,6 +357,7 @@ export class Video {
       this.currentParticipantIdentity = identity;
       this.currentParticipantMetadata = metadata;
       await this.room.localParticipant.setMetadata(JSON.stringify(metadata));
+      this.applyRemoteVideoSubscriptionPreferences();
 
       if (deviceRole === 'phone-camera') {
         const desktopIdentity = this.findDesktopMainIdentityForUser(userId);
@@ -418,6 +444,20 @@ export class Video {
 
   getSelectedAudioSource(): CompanionSourceId {
     return this.selectedAudioSource$.value;
+  }
+
+  getRemoteVideoQualityPreference(): RemoteVideoQualityPreference {
+    return this.remoteVideoQualityPreference$.value;
+  }
+
+  setRemoteVideoQualityPreference(preference: RemoteVideoQualityPreference) {
+    if (this.remoteVideoQualityPreference$.value === preference) {
+      return;
+    }
+
+    this.remoteVideoQualityPreference$.next(preference);
+    this.applyRemoteVideoSubscriptionPreferences();
+    void this.emitParticipants();
   }
 
   getSelectedCompanionVideoStream(): MediaStream | null {
@@ -706,6 +746,21 @@ export class Video {
 
     await this.applyVideoSource();
     await this.applyAudioSource();
+  }
+
+  private applyRemoteVideoSubscriptionPreferences(participant?: RemoteParticipant) {
+    const targets = participant
+      ? [participant]
+      : Array.from(this.room.remoteParticipants.values());
+    const profile = Video.remoteVideoPreferenceProfiles[this.remoteVideoQualityPreference$.value];
+
+    targets.forEach(remoteParticipant => {
+      remoteParticipant.videoTrackPublications.forEach(publication => {
+        publication.setEnabled(true);
+        publication.setVideoQuality(profile.quality);
+        publication.setVideoDimensions(profile.dimensions);
+      });
+    });
   }
 
   private async applyVideoSource() {

@@ -445,6 +445,36 @@
         </div>
 
         <div class="device-routing-section">
+          <div class="section-title">Remote Video Quality</div>
+          <div class="quality-slider-panel">
+            <div class="quality-slider-header">
+              <div class="quality-slider-title">
+                <strong>{{ remoteVideoQualityLabel }}</strong>
+                <span>Requests larger incoming video layers when available. Network can still scale down.</span>
+              </div>
+              <span class="quality-slider-value">{{ remoteVideoQualityLevel + 1 }}/3</span>
+            </div>
+            <input
+              class="quality-slider-input"
+              type="range"
+              min="0"
+              max="2"
+              step="1"
+              [(ngModel)]="remoteVideoQualityLevel"
+              (input)="onRemoteVideoQualityChange()"
+            />
+            <div class="quality-slider-labels">
+              <span
+                *ngFor="let option of remoteVideoQualityOptions"
+                [class.active]="option.level === remoteVideoQualityLevel"
+              >
+                {{ option.label }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="device-routing-section">
           <div class="section-title">Published Sources</div>
           <div class="settings-grid compact">
             <div class="device-select">
