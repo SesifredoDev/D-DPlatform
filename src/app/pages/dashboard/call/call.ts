@@ -41,6 +41,7 @@ interface ParticipantStream {
   ping?: number;
   isLocal?: boolean;
   diagnostics?: ParticipantMediaDiagnostics;
+  volumePercent: number;
 }
 
 export interface VttStopEvent {
@@ -50,6 +51,21 @@ export interface VttStopEvent {
 
 type MicrophoneProcessingMode = 'studio' | 'processed';
 type RemoteVideoQualityLevel = 0 | 1 | 2;
+
+interface RemoteAudioOutput {
+  stream: MediaStream;
+  audioTrackId: string;
+  source: MediaStreamAudioSourceNode;
+  gain: GainNode;
+  destination: MediaStreamAudioDestinationNode;
+  audioElement: HTMLAudioElement;
+}
+
+interface RemoteContextMenuState {
+  remoteId: string;
+  x: number;
+  y: number;
+}
 
 @Component({
   selector: 'app-video-call',
@@ -162,6 +178,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   showDiagnosticsPanel: boolean = false;
   showPinNaming: boolean = false;
   newThemeName: string = '';
+  remoteContextMenu: RemoteContextMenuState | null = null;
 
   // Theme state
   activeColors: ThemeColors;
@@ -214,7 +231,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private selectedVideoSourceSub!: Subscription;
   private selectedAudioSourceSub!: Subscription;
   private remoteVideoQualitySub!: Subscription;
+  private participantVolumesSub!: Subscription;
   readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+  readonly supportsRemoteAudioGain = typeof window !== 'undefined' && !!this.getAudioContextConstructor();
 
   private isComponentDestroying = false;
   private lastAutoSelectedCompanionVideoId: string | null = null;
@@ -231,6 +250,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private micLevelData: Uint8Array | null = null;
   private micLevelInterval: any;
   private monitoredMicTrack: MediaStreamTrack | null = null;
+  private remoteAudioContext: AudioContext | null = null;
+  private remoteAudioOutputs = new Map<string, RemoteAudioOutput>();
   private readonly handleDeviceChangeBound = () => {
     void this.loadDevices();
   };
@@ -309,19 +330,31 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
         participantMeta: r.participantMeta,
         ping: r.ping,
-        diagnostics: r.diagnostics
+        diagnostics: r.diagnostics,
+        volumePercent: this.videoService.getParticipantVolume(r.id)
       }));
+      if (
+        this.remoteContextMenu &&
+        !this.remoteStreams.some(remote => remote.id === this.remoteContextMenu?.remoteId)
+      ) {
+        this.closeRemoteContextMenu();
+      }
 
       this.updateLocalVideoDisplay(streams);
 
       setTimeout(() => {
         this.remoteVideos.forEach((videoRef, i) => {
           const video = videoRef.nativeElement;
-          const stream = this.remoteStreams[i]?.stream;
+          const remote = this.remoteStreams[i];
+          const stream = remote?.stream;
           if (video && stream && video.srcObject !== stream) {
             video.srcObject = stream;
           }
+          if (video && remote) {
+            this.configureRemoteAudio(remote, video);
+          }
         });
+        this.teardownMissingRemoteAudioOutputs(new Set(this.remoteStreams.map(remote => remote.id)));
         void this.applyAudioOutputToAllMedia();
       });
     });
@@ -517,6 +550,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
     this.remoteVideoQualitySub = this.videoService.remoteVideoQualityPreference$.subscribe(preference => {
       this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(preference);
+      this.cdr.detectChanges();
+    });
+    this.participantVolumesSub = this.videoService.participantVolumes$.subscribe(() => {
+      this.remoteStreams = this.remoteStreams.map(remote => ({
+        ...remote,
+        volumePercent: this.videoService.getParticipantVolume(remote.id)
+      }));
+      this.applyRemoteVolumes();
       this.cdr.detectChanges();
     });
 
@@ -986,6 +1027,60 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.applyAudioOutputToAllMedia();
   }
 
+  changeRemoteVolume(participantId: string, value: number | string) {
+    const volumePercent = this.normalizeRemoteVolume(value);
+    this.videoService.setParticipantVolume(participantId, volumePercent);
+    this.remoteStreams = this.remoteStreams.map(remote => remote.id === participantId
+      ? { ...remote, volumePercent }
+      : remote
+    );
+    this.applyRemoteVolume(participantId, volumePercent);
+  }
+
+  getRemoteVolumeIcon(remote: ParticipantStream): string {
+    if (remote.volumePercent <= 0) return 'volume_off';
+    if (remote.volumePercent > 100) return 'volume_up';
+    return 'volume_down';
+  }
+
+  openRemoteContextMenu(event: MouseEvent, remote: ParticipantStream) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const padding = 12;
+    const menuWidth = 260;
+    const menuHeight = 220;
+    const viewportWidth = typeof window !== 'undefined'
+      ? window.innerWidth
+      : event.clientX + menuWidth + padding;
+    const viewportHeight = typeof window !== 'undefined'
+      ? window.innerHeight
+      : event.clientY + menuHeight + padding;
+
+    this.remoteContextMenu = {
+      remoteId: remote.id,
+      x: Math.max(padding, Math.min(event.clientX, viewportWidth - menuWidth - padding)),
+      y: Math.max(padding, Math.min(event.clientY, viewportHeight - menuHeight - padding))
+    };
+  }
+
+  closeRemoteContextMenu() {
+    this.remoteContextMenu = null;
+  }
+
+  openRemoteCharacterFromMenu(remote: ParticipantStream) {
+    this.closeRemoteContextMenu();
+    this.openCharacter(remote.userData);
+  }
+
+  get activeRemoteContextMenuParticipant(): ParticipantStream | undefined {
+    if (!this.remoteContextMenu) {
+      return undefined;
+    }
+
+    return this.remoteStreams.find(remote => remote.id === this.remoteContextMenu?.remoteId);
+  }
+
   onRemoteVideoQualityChange() {
     this.videoService.setRemoteVideoQualityPreference(
       this.remoteVideoQualityOptions[this.remoteVideoQualityLevel]?.value ?? 'medium'
@@ -1067,6 +1162,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.themeService.resetToDefault();
     this.localStream = null;
     this.remoteStreams = [];
+    this.closeRemoteContextMenu();
+    this.teardownAllRemoteAudioOutputs();
     this.showSpotify = false;
     this.stopVtt.emit({ roomId: this.getVttRoomId(), endSession: false });
     this.isDmMode = false;
@@ -1191,6 +1288,26 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.leaveCall();
   }
 
+  @HostListener('document:click')
+  handleDocumentClick() {
+    this.closeRemoteContextMenu();
+  }
+
+  @HostListener('document:contextmenu')
+  handleDocumentContextMenu() {
+    this.closeRemoteContextMenu();
+  }
+
+  @HostListener('document:keydown.escape')
+  handleDocumentEscape() {
+    this.closeRemoteContextMenu();
+  }
+
+  @HostListener('window:resize')
+  handleWindowResize() {
+    this.closeRemoteContextMenu();
+  }
+
   ngOnDestroy() {
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
@@ -1210,6 +1327,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.selectedVideoSourceSub) this.selectedVideoSourceSub.unsubscribe();
     if (this.selectedAudioSourceSub) this.selectedAudioSourceSub.unsubscribe();
     if (this.remoteVideoQualitySub) this.remoteVideoQualitySub.unsubscribe();
+    if (this.participantVolumesSub) this.participantVolumesSub.unsubscribe();
+    this.teardownAllRemoteAudioOutputs();
 
     // Just clean up local hardware previews.
     // The actual call room disconnection is now handled by TabService.closeTab()
@@ -1309,6 +1428,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.themeService.resetToDefault();
     this.localStream = null;
     this.remoteStreams = [];
+    this.closeRemoteContextMenu();
+    this.teardownAllRemoteAudioOutputs();
     this.showSpotify = false;
     this.stopVtt.emit({ roomId: this.getVttRoomId(), endSession: false });
     this.isDmMode = false;
@@ -1436,6 +1557,186 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.changePcVideoSource(newestVideoCompanion.identity);
   }
 
+  private configureRemoteAudio(remote: ParticipantStream, video: HTMLVideoElement) {
+    const stream = remote.stream;
+    const volumePercent = remote.volumePercent ?? this.videoService.getParticipantVolume(remote.id);
+
+    if (!this.supportsRemoteAudioGain || !stream) {
+      video.muted = false;
+      video.volume = Math.min(1, volumePercent / 100);
+      this.teardownRemoteAudioOutput(remote.id);
+      return;
+    }
+
+    video.muted = true;
+
+    const audioTrack = stream.getAudioTracks()[0] || null;
+    if (!audioTrack) {
+      this.teardownRemoteAudioOutput(remote.id);
+      return;
+    }
+
+    const existingOutput = this.remoteAudioOutputs.get(remote.id);
+    if (existingOutput && existingOutput.stream === stream && existingOutput.audioTrackId === audioTrack.id) {
+      existingOutput.gain.gain.value = volumePercent / 100;
+      void this.playRemoteAudioElement(existingOutput.audioElement).then(played => {
+        if (!played) {
+          video.muted = false;
+          video.volume = Math.min(1, volumePercent / 100);
+        }
+      });
+      return;
+    }
+
+    this.teardownRemoteAudioOutput(remote.id);
+
+    const audioContext = this.getRemoteAudioContext();
+    if (!audioContext) {
+      video.muted = false;
+      video.volume = Math.min(1, volumePercent / 100);
+      return;
+    }
+
+    try {
+      const source = audioContext.createMediaStreamSource(stream);
+      const gain = audioContext.createGain();
+      const destination = audioContext.createMediaStreamDestination();
+      const audioElement = new Audio();
+
+      gain.gain.value = volumePercent / 100;
+      source.connect(gain);
+      gain.connect(destination);
+
+      audioElement.autoplay = true;
+      audioElement.srcObject = destination.stream;
+      audioElement.volume = 1;
+
+      this.remoteAudioOutputs.set(remote.id, {
+        stream,
+        audioTrackId: audioTrack.id,
+        source,
+        gain,
+        destination,
+        audioElement
+      });
+
+      void this.applyAudioOutputToMediaElement(audioElement);
+      void this.playRemoteAudioElement(audioElement).then(played => {
+        const currentOutput = this.remoteAudioOutputs.get(remote.id);
+        if (!played && currentOutput?.audioElement === audioElement) {
+          video.muted = false;
+          video.volume = Math.min(1, volumePercent / 100);
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to create amplified remote audio output', error);
+      this.teardownRemoteAudioOutput(remote.id);
+      video.muted = false;
+      video.volume = Math.min(1, volumePercent / 100);
+    }
+  }
+
+  private getRemoteAudioContext(): AudioContext | null {
+    if (this.remoteAudioContext?.state === 'closed') {
+      this.remoteAudioContext = null;
+    }
+
+    if (!this.remoteAudioContext) {
+      const AudioContextConstructor = this.getAudioContextConstructor();
+      if (!AudioContextConstructor) {
+        return null;
+      }
+
+      this.remoteAudioContext = new AudioContextConstructor();
+    }
+
+    if (this.remoteAudioContext.state === 'suspended') {
+      void this.remoteAudioContext.resume().catch(() => undefined);
+    }
+
+    return this.remoteAudioContext;
+  }
+
+  private async playRemoteAudioElement(audioElement: HTMLAudioElement): Promise<boolean> {
+    try {
+      if (this.remoteAudioContext?.state === 'suspended') {
+        await this.remoteAudioContext.resume();
+      }
+
+      await audioElement.play();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private applyRemoteVolumes() {
+    this.remoteStreams.forEach(remote => this.applyRemoteVolume(remote.id, remote.volumePercent));
+  }
+
+  private applyRemoteVolume(participantId: string, volumePercent: number) {
+    const output = this.remoteAudioOutputs.get(participantId);
+    if (output) {
+      output.gain.gain.value = volumePercent / 100;
+      output.audioElement.volume = 1;
+      void this.playRemoteAudioElement(output.audioElement).then(played => {
+        const remoteIndex = this.remoteStreams.findIndex(remote => remote.id === participantId);
+        const video = remoteIndex >= 0 ? this.remoteVideos?.get(remoteIndex)?.nativeElement : null;
+        if (!played && video) {
+          video.muted = false;
+          video.volume = Math.min(1, volumePercent / 100);
+        }
+      });
+    }
+
+    const remoteIndex = this.remoteStreams.findIndex(remote => remote.id === participantId);
+    const video = remoteIndex >= 0 ? this.remoteVideos?.get(remoteIndex)?.nativeElement : null;
+    if (video) {
+      video.volume = Math.min(1, volumePercent / 100);
+      video.muted = this.supportsRemoteAudioGain;
+    }
+  }
+
+  private normalizeRemoteVolume(value: number | string): number {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return 100;
+    }
+
+    return Math.min(200, Math.max(0, Math.round(numericValue)));
+  }
+
+  private teardownMissingRemoteAudioOutputs(activeParticipantIds: Set<string>) {
+    Array.from(this.remoteAudioOutputs.keys()).forEach(participantId => {
+      if (!activeParticipantIds.has(participantId)) {
+        this.teardownRemoteAudioOutput(participantId);
+      }
+    });
+  }
+
+  private teardownRemoteAudioOutput(participantId: string) {
+    const output = this.remoteAudioOutputs.get(participantId);
+    if (!output) {
+      return;
+    }
+
+    output.source.disconnect();
+    output.gain.disconnect();
+    output.audioElement.pause();
+    output.audioElement.srcObject = null;
+    output.destination.stream.getTracks().forEach(track => track.stop());
+    this.remoteAudioOutputs.delete(participantId);
+  }
+
+  private teardownAllRemoteAudioOutputs() {
+    Array.from(this.remoteAudioOutputs.keys()).forEach(participantId => this.teardownRemoteAudioOutput(participantId));
+
+    if (this.remoteAudioContext && this.remoteAudioContext.state !== 'closed') {
+      void this.remoteAudioContext.close().catch(() => undefined);
+    }
+    this.remoteAudioContext = null;
+  }
+
   private async applyAudioOutputToAllMedia() {
     if (!this.supportsAudioOutputSelection || !this.selectedOutputId) {
       return;
@@ -1454,13 +1755,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.remoteVideos?.forEach(videoRef => {
       mediaElements.push(videoRef.nativeElement);
     });
+    this.remoteAudioOutputs.forEach(output => {
+      mediaElements.push(output.audioElement);
+    });
 
     for (const element of mediaElements) {
-      try {
-        await element.setSinkId(this.selectedOutputId);
-      } catch (error) {
-        console.warn('Failed to switch audio output device', error);
-      }
+      await this.applyAudioOutputToMediaElement(element);
+    }
+  }
+
+  private async applyAudioOutputToMediaElement(element: HTMLMediaElement) {
+    if (!this.supportsAudioOutputSelection || !this.selectedOutputId) {
+      return;
+    }
+
+    try {
+      await element.setSinkId(this.selectedOutputId);
+    } catch (error) {
+      console.warn('Failed to switch audio output device', error);
     }
   }
 

@@ -24,6 +24,7 @@ import { DeviceInfo, DeviceService } from '../device/device';
 export type CallDeviceRole = 'desktop-main' | 'phone-camera';
 export type CompanionSourceId = 'desktop-local' | string;
 export type RemoteVideoQualityPreference = 'low' | 'medium' | 'high';
+export type ParticipantVolumeMap = Record<string, number>;
 
 export interface CallParticipantMetadata {
   userId: string;
@@ -72,6 +73,9 @@ interface LiveKitConnectionInfo {
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly maxIceServers = 4;
+  private static readonly defaultParticipantVolumePercent = 100;
+  private static readonly minParticipantVolumePercent = 0;
+  private static readonly maxParticipantVolumePercent = 200;
   private static readonly remoteVideoPreferenceProfiles: Record<RemoteVideoQualityPreference, {
     quality: VideoQuality;
     dimensions: { width: number; height: number };
@@ -147,6 +151,7 @@ export class Video {
   public readonly selectedVideoSource$ = new BehaviorSubject<CompanionSourceId>('desktop-local');
   public readonly selectedAudioSource$ = new BehaviorSubject<CompanionSourceId>('desktop-local');
   public readonly remoteVideoQualityPreference$ = new BehaviorSubject<RemoteVideoQualityPreference>('medium');
+  public readonly participantVolumes$ = new BehaviorSubject<ParticipantVolumeMap>({});
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
@@ -450,6 +455,23 @@ export class Video {
     return this.remoteVideoQualityPreference$.value;
   }
 
+  getParticipantVolume(participantIdentity: string): number {
+    return this.participantVolumes$.value[participantIdentity] ?? Video.defaultParticipantVolumePercent;
+  }
+
+  setParticipantVolume(participantIdentity: string, volumePercent: number) {
+    const nextVolume = this.normalizeParticipantVolume(volumePercent);
+    const currentVolume = this.getParticipantVolume(participantIdentity);
+    if (currentVolume === nextVolume) {
+      return;
+    }
+
+    this.participantVolumes$.next({
+      ...this.participantVolumes$.value,
+      [participantIdentity]: nextVolume
+    });
+  }
+
   setRemoteVideoQualityPreference(preference: RemoteVideoQualityPreference) {
     if (this.remoteVideoQualityPreference$.value === preference) {
       return;
@@ -625,6 +647,7 @@ export class Video {
     this.companionDevices$.next([]);
     this.selectedVideoSource$.next('desktop-local');
     this.selectedAudioSource$.next('desktop-local');
+    this.participantVolumes$.next({});
     this.participantStreams.clear();
     this.effectiveParticipantStreams.clear();
     this.vttSession$.next({ active: false, roomId: null, hostId: null });
@@ -942,6 +965,17 @@ export class Video {
     }
 
     await this.room.localParticipant.setMetadata(JSON.stringify(this.currentParticipantMetadata));
+  }
+
+  private normalizeParticipantVolume(volumePercent: number): number {
+    if (!Number.isFinite(volumePercent)) {
+      return Video.defaultParticipantVolumePercent;
+    }
+
+    return Math.min(
+      Video.maxParticipantVolumePercent,
+      Math.max(Video.minParticipantVolumePercent, Math.round(volumePercent))
+    );
   }
 
   private selectIceServers(iceServers?: RTCIceServer[]): RTCIceServer[] | undefined {

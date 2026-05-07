@@ -211,8 +211,14 @@
       </div>
 
       <!-- Remote Videos -->
-      <div class="video-box remote" *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream" (click)="openCharacter(remote.userData)">
-        <video #remoteVideo autoplay playsinline></video>
+      <div
+        class="video-box remote"
+        *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream"
+        [class.context-menu-open]="remoteContextMenu?.remoteId === remote.id"
+        (click)="openCharacter(remote.userData)"
+        (contextmenu)="openRemoteContextMenu($event, remote)"
+      >
+        <video #remoteVideo autoplay playsinline [muted]="supportsRemoteAudioGain"></video>
 
         @if (remote.userData){
           <div class="character-overlay">
@@ -287,6 +293,53 @@
       </div>
 
     </div>
+
+    @if (remoteContextMenu) {
+      @if (activeRemoteContextMenuParticipant; as activeRemote) {
+        <div
+          class="remote-context-menu glass"
+          [style.left.px]="remoteContextMenu.x"
+          [style.top.px]="remoteContextMenu.y"
+          role="menu"
+          [attr.aria-label]="'Options for ' + (activeRemote.userData?.name || 'remote user')"
+          (click)="$event.stopPropagation()"
+          (pointerdown)="$event.stopPropagation()"
+          (contextmenu)="$event.preventDefault(); $event.stopPropagation()"
+        >
+          <div class="remote-menu-header">
+            <span>{{ activeRemote.userData?.name || 'Remote User' }}</span>
+            <button type="button" class="remote-menu-close" (click)="closeRemoteContextMenu()" aria-label="Close menu">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+
+          <div class="remote-menu-section">
+            <button type="button" class="remote-menu-action" role="menuitem" (click)="openRemoteCharacterFromMenu(activeRemote)">
+              <mat-icon>person</mat-icon>
+              <span>Open Character</span>
+            </button>
+          </div>
+
+          <div class="remote-menu-section remote-volume-menu-item">
+            <div class="remote-menu-label">
+              <mat-icon>{{ getRemoteVolumeIcon(activeRemote) }}</mat-icon>
+              <span>Volume</span>
+              <strong>{{ activeRemote.volumePercent }}%</strong>
+            </div>
+            <input
+              class="remote-volume-slider"
+              type="range"
+              min="0"
+              max="200"
+              step="1"
+              [ngModel]="activeRemote.volumePercent"
+              (ngModelChange)="changeRemoteVolume(activeRemote.id, $event)"
+              [attr.aria-label]="'Volume for ' + (activeRemote.userData?.name || 'remote user')"
+            />
+          </div>
+        </div>
+      }
+    }
 
     <!-- Bottom Toolbar -->
     <div class="bottom-toolbar">
