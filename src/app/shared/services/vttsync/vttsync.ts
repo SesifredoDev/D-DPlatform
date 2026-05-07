@@ -5,7 +5,7 @@ import {ICharacter} from '../../models/user/character.model';
 import {VttEngine} from '../../modules/vttEngine/VttEngine';
 import {Video} from '../video/video';
 import {environment} from '../../../../environments/environment';
-import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, Subject } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { FileService } from '../file/file';
 
@@ -38,6 +38,10 @@ export interface MapLoadingState {
     message: string;
 }
 
+export interface StartHostingOptions {
+  preserveExistingState?: boolean;
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttSync {
   private socket: Socket | null = null;
@@ -48,8 +52,10 @@ export class VttSync {
 
   private localVersion = 0;
   private resyncing = false;
+  private hostClaimedAt = 0;
 
   public hostDisconnected$ = new BehaviorSubject<boolean>(false);
+  public sessionEnded$ = new Subject<void>();
   public turnOrder$ = new BehaviorSubject<TurnOrderState>({
     isActive: false,
     isConfirmed: false,
@@ -98,7 +104,22 @@ export class VttSync {
         this.hostDisconnected$.next(true);
       });
 
+      this.socket.on('session-ended', () => {
+        console.warn('The DM has ended the VTT session.');
+        this.sessionEnded$.next();
+        this.stopSyncing(true);
+      });
+
       this.socket.on('host-changed', (payload: any) => {
+        if (payload.hostId === this.socket?.id) {
+          this.hostDisconnected$.next(false);
+          return;
+        }
+
+        if (this.isHosting && Date.now() - this.hostClaimedAt < 2000) {
+          return;
+        }
+
         if (payload.hostId !== this.socket?.id) {
             this.hostDisconnected$.next(false);
             if (this.isHosting) {
@@ -129,18 +150,15 @@ export class VttSync {
       this.getSocket().emit('request-resync', this.currentRoomId);
   }
 
-  startHosting(engine: VttEngine, roomId: string) {
+  startHosting(engine: VttEngine, roomId: string, options: StartHostingOptions = {}) {
+    const wasInRoom = this.currentRoomId === roomId;
     this.currentRoomId = roomId;
     this.isHosting = true;
     this.engine = engine;
 
     const socket = this.getSocket();
-    const isReattaching = socket.connected && this.currentRoomId === roomId;
-
-    socket.emit('host-session', {
-      roomId,
-      initialState: isReattaching ? null : { ...engine.getRawConfig(), turnOrder: this.turnOrder$.value }
-    });
+    const isReattaching = options.preserveExistingState || (socket.connected && wasInRoom);
+    this.hostClaimedAt = Date.now();
 
     socket.off('remote-action');
     socket.on('remote-action', (payload: any) => {
@@ -161,11 +179,18 @@ export class VttSync {
     });
 
     this.attachEngineListeners(engine);
+
+    socket.emit('host-session', {
+      roomId,
+      initialState: isReattaching ? null : { ...engine.getRawConfig(), turnOrder: this.turnOrder$.value }
+    });
+
     this.callService.sendVttCommand("start", roomId);
     this.hostDisconnected$.next(false);
   }
 
-  joinSession(engine: VttEngine, roomId: string, character: ICharacter) {
+  joinSession(engine: VttEngine, roomId: string, character: ICharacter): Promise<boolean> {
+    const wasInRoom = this.currentRoomId === roomId;
     this.currentRoomId = roomId;
     this.isHosting = false;
     this.engine = engine;
@@ -173,56 +198,101 @@ export class VttSync {
     engine.setLocalCharacter(character);
 
     const socket = this.getSocket();
-    const isReattaching = socket.connected && this.currentRoomId === roomId;
-
-    socket.emit('join-session', { roomId, character });
+    const isReattaching = socket.connected && wasInRoom;
 
     socket.off('map-update');
     socket.off('remote-action');
     socket.off('error');
-    socket.off('session-ended');
 
-    socket.on('map-update', (config: any) => {
-      this.resyncing = false;
-      if (config.version !== undefined) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let receivedMapUpdate = false;
+      let receivedHostState = false;
+      let hostStateTimeout: number | null = null;
+      const hostChangedHandler = () => {
+        receivedHostState = true;
+        resolveWhenReady();
+      };
+      const sessionEndedHandler = () => settle(false);
+      const settle = (joined: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(joinTimeout);
+        if (hostStateTimeout !== null) {
+          window.clearTimeout(hostStateTimeout);
+        }
+        socket.off('host-changed', hostChangedHandler);
+        socket.off('session-ended', sessionEndedHandler);
+        resolve(joined);
+      };
+
+      const resolveWhenReady = () => {
+        if (!receivedMapUpdate) return;
+        if (receivedHostState) {
+          settle(true);
+          return;
+        }
+
+        hostStateTimeout ??= window.setTimeout(() => settle(true), 1000);
+      };
+
+      const joinTimeout = window.setTimeout(() => {
+        console.warn('VTT Sync Error: Timed out while joining room:', roomId);
+        settle(false);
+      }, 5000);
+
+      socket.once('host-changed', hostChangedHandler);
+      socket.once('session-ended', sessionEndedHandler);
+
+      socket.on('map-update', (config: any) => {
+        this.resyncing = false;
+        if (config.version !== undefined) {
           this.localVersion = config.version;
-      }
-      if (config.turnOrder) {
+        }
+        if (config.turnOrder) {
           this.turnOrder$.next(config.turnOrder);
-      }
-      if (!isReattaching || !engine.currentMapUrl) {
+        }
+        if (!isReattaching || !engine.currentMapUrl) {
           engine.loadConfigFromObject(config);
-      }
-    });
+        }
+        receivedMapUpdate = true;
+        resolveWhenReady();
+      });
 
-    socket.on('remote-action', (payload: any) => {
-      this.handleRemoteAction(engine, payload);
-    });
+      socket.on('remote-action', (payload: any) => {
+        this.handleRemoteAction(engine, payload);
+      });
 
-    socket.on('error', (msg: string) => {
-      console.warn('VTT Sync Error:', msg);
-    });
+      socket.on('error', (msg: string) => {
+        console.warn('VTT Sync Error:', msg);
+        settle(false);
+      });
 
-    socket.on('session-ended', () => {
-      alert('The DM has ended the session.');
-      this.stopSyncing(true);
+      this.attachEngineListeners(engine);
+      socket.emit('join-session', { roomId, character });
     });
-
-    this.attachEngineListeners(engine);
   }
 
-  stopSyncing(force: boolean = false) {
+  endSession() {
+    this.stopSyncing(true, true);
+  }
+
+  stopSyncing(force: boolean = false, endHostedSession: boolean = false) {
     if (!force) return;
 
     if (this.socket && this.currentRoomId) {
-      if (this.isHosting) {
-        this.socket.emit('stop-hosting', this.currentRoomId);
+      const socket = this.socket;
+      const roomId = this.currentRoomId;
+
+      if (this.isHosting && endHostedSession) {
+        this.callService.sendVttCommand("stop", roomId);
+        socket.emit('stop-hosting', roomId);
+        window.setTimeout(() => socket.disconnect(), 250);
+      } else {
+        socket.emit('leave-session', roomId);
+        socket.disconnect();
       }
 
-      // Explicitly tell the server we are leaving this room so it can calculate cleanup immediately
-      this.socket.emit('leave-session', this.currentRoomId);
-
-      this.socket.disconnect();
       this.socket = null;
     }
 

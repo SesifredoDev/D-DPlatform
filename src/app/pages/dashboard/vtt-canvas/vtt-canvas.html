@@ -65,9 +65,9 @@
   <div id="toolbar" class="glass">
     <!-- Map Management Tools -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
-      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save to Library">
-        <mat-icon>save</mat-icon>
-      </button>
+<!--      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save to Library">-->
+<!--        <mat-icon>save</mat-icon>-->
+<!--      </button>-->
       <button mat-icon-button (click)="exportMapJson()" matTooltip="Download/Export Map JSON">
         <mat-icon>file_download</mat-icon>
       </button>
@@ -107,9 +107,6 @@
 
     <!-- Token Management & Lighting (DM Only) -->
     <div class="tool-group" *ngIf="syncService.isHosting">
-      <button mat-icon-button (click)="addPlayer()" matTooltip="Add Player Token">
-        <mat-icon>person_add</mat-icon>
-      </button>
       <button mat-icon-button (click)="addToken()" matTooltip="Add Monster Token">
         <mat-icon>person</mat-icon>
       </button>
@@ -118,19 +115,12 @@
       </button>
     </div>
 
-    <!-- Turn Order (DM Only Initial Control) -->
-    <div class="tool-group" *ngIf="syncService.isHosting">
-      <button mat-icon-button (click)="activateTurnOrder()" *ngIf="!(turnOrderState$ | async)?.isActive" matTooltip="Activate Turn Order">
-        <mat-icon>format_list_numbered</mat-icon>
-      </button>
-    </div>
-
     <!-- Session Management -->
     <div class="tool-group">
       <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" matTooltip="Host Session">
         <mat-icon>podcasts</mat-icon>
       </button>
-      <button mat-icon-button *ngIf="syncService.isConnected" (click)="stopSession()" matTooltip="Stop Session" color="warn">
+      <button mat-icon-button *ngIf="syncService.isConnected && syncService.isHosting" (click)="stopSession()" matTooltip="Stop Session" color="warn">
         <mat-icon>stop_circle</mat-icon>
       </button>
       <!-- Host Takeover Button -->
@@ -151,6 +141,13 @@
 </div>
 
 <div #vttContainer id="vtt-container"></div>
+
+<div class="vtt-status-overlay" *ngIf="isCheckingSession">
+  <div class="status-content glass">
+    <div class="status-spinner"></div>
+    <span>Checking game status...</span>
+  </div>
+</div>
 
 <!-- Map Loading Overlay -->
 <div class="map-loading-overlay" *ngIf="(syncService.mapLoading$ | async)?.loading">
@@ -187,7 +184,7 @@
           </div>
       </div>
 
-      <div class="turn-order-entries">
+      <div class="turn-order-entries" >
         <div class="turn-entry" *ngFor="let entry of turnOrder.entries; let i = index" [class.active-entry]="turnOrder.isConfirmed && i === turnOrder.activeIndex">
           <span class="initiative">{{ entry.initiative }}</span>
           <span class="name">{{ entry.name }}</span>

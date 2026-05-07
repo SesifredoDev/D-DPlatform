@@ -133,6 +133,13 @@ export class VttEngine {
 
   setPermissions(isDM) {
     this.isDM = isDM;
+    this.tokenLayer.getChildren().forEach(group => {
+      const token = group.tokenReference;
+      if (token) {
+        group.draggable(token.checkPermissions());
+      }
+    });
+    this.tokenLayer.batchDraw();
   }
 
   clearAll() {

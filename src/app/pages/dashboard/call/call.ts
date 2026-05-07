@@ -43,6 +43,11 @@ interface ParticipantStream {
   diagnostics?: ParticipantMediaDiagnostics;
 }
 
+export interface VttStopEvent {
+  roomId: string;
+  endSession: boolean;
+}
+
 type MicrophoneProcessingMode = 'studio' | 'processed';
 type RemoteVideoQualityLevel = 0 | 1 | 2;
 
@@ -93,7 +98,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @Output() hostVtt = new EventEmitter<string>();
   @Output() joinVtt = new EventEmitter<string>();
-  @Output() stopVtt = new EventEmitter<string>();
+  @Output() stopVtt = new EventEmitter<string | VttStopEvent>();
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
@@ -1063,7 +1068,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.localStream = null;
     this.remoteStreams = [];
     this.showSpotify = false;
-    this.stopVtt.emit(this.channelId);
+    this.stopVtt.emit({ roomId: this.getVttRoomId(), endSession: false });
     this.isDmMode = false;
     if (!this.isComponentDestroying) {
         await this.startPreview();
@@ -1215,18 +1220,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   startVttHosting() {
-    this.videoService.sendVttCommand('start', this.channelId);
-    this.hostVtt.emit(this.channelId);
+    const roomId = this.getVttRoomId();
+    this.videoService.sendVttCommand('start', roomId);
+    this.hostVtt.emit(roomId);
   }
 
   startVttJoining() {
-    this.joinVtt.emit(this.vttSession.roomId || this.channelId);
+    this.joinVtt.emit(this.vttSession.roomId || this.getVttRoomId());
     this.showVttNotification = false;
   }
 
   stopVttSession() {
-    this.videoService.sendVttCommand('stop', this.channelId);
-    this.stopVtt.emit(this.channelId);
+    const roomId = this.vttSession.roomId || this.getVttRoomId();
+    this.videoService.sendVttCommand('stop', roomId);
+    this.stopVtt.emit({ roomId, endSession: true });
   }
 
   dismissOverlay() {
@@ -1245,6 +1252,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   canJoinVttSession(): boolean {
     return this.vttSession.active && this.vttSession.hostId !== this.videoService.getCurrentParticipantIdentity();
+  }
+
+  private getVttRoomId(): string {
+    return this.serverService.getCurrentServer()?._id || this.channelId;
   }
 
   private isHiddenCompanionParticipant(participant: any): boolean {
@@ -1299,7 +1310,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.localStream = null;
     this.remoteStreams = [];
     this.showSpotify = false;
-    this.stopVtt.emit(this.channelId);
+    this.stopVtt.emit({ roomId: this.getVttRoomId(), endSession: false });
     this.isDmMode = false;
     this.vttSession = { active: false, roomId: null, hostId: null };
     this.lastAutoSelectedCompanionVideoId = null;

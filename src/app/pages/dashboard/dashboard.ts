@@ -3,7 +3,7 @@ import {MatButtonModule, MatIconButton} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
 import {CharacterService} from '../../shared/services/character/character';
 import {SidePanel} from './side-panel/side-panel';
-import {Call} from './call/call';
+import {Call, VttStopEvent} from './call/call';
 import {ChannelService} from '../../shared/services/channel/channel';
 import {TextChannel} from './text-channel/text-channel';
 import {MatIcon, MatIconModule} from '@angular/material/icon';
@@ -17,6 +17,7 @@ import {CommonModule} from '@angular/common';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
 import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
+import {VttSync} from '../../shared/services/vttsync/vttsync';
 
 @Component({
   selector: 'app-dashboard',
@@ -71,6 +72,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     private userService: UserService,
     private channelService: ChannelService,
     private videoService: Video,
+    private vttSync: VttSync,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
   ) {
@@ -238,7 +240,14 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? 'left' : 'right');
   }
 
-  onStopVtt(channelId: string) {
+  onStopVtt(event: string | VttStopEvent) {
+    const channelId = typeof event === 'string' ? event : event.roomId;
+    const shouldEndSession = typeof event !== 'string' && event.endSession;
+
+    if (shouldEndSession && this.vttSync.isHosting && this.vttSync.currentRoomId === channelId) {
+      this.vttSync.endSession();
+    }
+
     if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
     if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
   }

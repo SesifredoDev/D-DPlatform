@@ -2,7 +2,7 @@ import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnCh
 import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
-import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry} from '../../../shared/services/vttsync/vttsync';
+import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions} from '../../../shared/services/vttsync/vttsync';
 import {ICharacter} from '../../../shared/models/user/character.model';
 import {MatIconButton, MatButton} from '@angular/material/button';
 import {MatIcon} from '@angular/material/icon';
@@ -13,8 +13,11 @@ import { MatInputModule } from '@angular/material/input';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
 import {Subscription, Observable} from 'rxjs';
+import {TabService} from '../../../shared/services/tab/tab-service';
+import {ServerService} from '../../../shared/services/server/server';
 
 @Component({
   selector: 'app-vtt-canvas',
@@ -24,7 +27,7 @@ import {Subscription, Observable} from 'rxjs';
     NgForOf, NgIf, NgStyle, NgClass, AsyncPipe,
     MatIconButton, MatButton, MatIcon, MatMenuModule,
     FormsModule, MatFormFieldModule, MatInputModule,
-    MatCheckboxModule, MatSelectModule, MatTooltipModule
+    MatCheckboxModule, MatSelectModule, MatTooltipModule, MatSnackBarModule
   ],
   templateUrl: './vtt-canvas.html',
   styleUrl: './vtt-canvas.scss',
@@ -72,8 +75,12 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   ];
 
   public showHostTakeover = false;
+  public isCheckingSession = true;
   private hostDisconnectedSub!: Subscription;
+  private sessionEndedSub!: Subscription;
   private turnOrderStateSub!: Subscription; // Subscription for turn order state
+  private syncStateRun = 0;
+  private noHostedGameClosed = false;
 
   // Turn Order State
   public turnOrderState$: Observable<TurnOrderState>;
@@ -86,7 +93,13 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   get isSyncing() { return this.syncService.isConnected; }
   get isHosting() { return this.syncService.isHosting; }
 
-  constructor(private dialog: MatDialog, public syncService: VttSync  ) {
+  constructor(
+    private dialog: MatDialog,
+    public syncService: VttSync,
+    private tabService: TabService,
+    private serverService: ServerService,
+    private snackBar: MatSnackBar
+  ) {
     this.turnOrderState$ = this.syncService.turnOrder$.asObservable();
   }
 
@@ -117,7 +130,12 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.resizeObserver.observe(this.container.nativeElement);
 
     this.hostDisconnectedSub = this.syncService.hostDisconnected$.subscribe(disconnected => {
-        this.showHostTakeover = disconnected && !this.isHosting;
+        void this.handleHostDisconnected(disconnected);
+    });
+
+    this.sessionEndedSub = this.syncService.sessionEnded$.subscribe(() => {
+      this.showVttMessage('Session Closed', 4000);
+      this.tabService.closeTab(this.serverId);
     });
 
     this.turnOrderStateSub = this.turnOrderState$.subscribe(state => {
@@ -128,55 +146,186 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       }
     });
 
-    this.handleSyncState();
+    void this.handleSyncState();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if ((changes['isHostVttSession'] || changes['isJoiningVttSession']) && this.engine) {
-      this.handleSyncState();
+      void this.handleSyncState();
     }
     if (changes['character'] && this.character) {
         this.newEntryName = this.character.name;
+        if (this.engine && this.isCheckingSession) {
+          void this.handleSyncState();
+        }
     }
   }
 
-  private handleSyncState() {
+  private async handleSyncState() {
+    if (!this.engine || !this.serverId || !this.character) return;
+
+    const runId = ++this.syncStateRun;
+    this.isCheckingSession = true;
+
     if (this.isHostVttSession && !this.syncService.isHosting) {
-      this.syncService.startHosting(this.engine, this.serverId);
-      this.engine.setPermissions(true);
-      this.engine.isDM = true;
-    } else if (this.isJoiningVttSession && !this.syncService.isConnected) {
-      this.joinSession();
-      this.engine.setPermissions(false);
-      this.engine.isDM = false;
-    } else if (!this.isHostVttSession && !this.isJoiningVttSession && this.syncService.isConnected) {
-      if (this.syncService.currentRoomId !== this.serverId) {
-        this.syncService.stopSyncing(true);
-      }
+      const resumed = await this.joinExistingSession();
+      if (runId !== this.syncStateRun) return;
+      this.startHostingSession(resumed ? { preserveExistingState: true } : {});
+      return;
     }
+
+    if (this.syncService.currentRoomId === this.serverId && this.syncService.isConnected) {
+      if (!this.syncService.isHosting && await this.isCurrentUserServerOwner()) {
+        this.startHostingSession({ preserveExistingState: true });
+        return;
+      }
+
+      this.applyPermissions(this.syncService.isHosting);
+      this.isCheckingSession = false;
+      return;
+    }
+
+    if (this.isJoiningVttSession && !this.syncService.isConnected) {
+      const joined = await this.joinExistingSession();
+      if (runId !== this.syncStateRun) return;
+      if (!joined) {
+        this.closeNoHostedGame();
+      } else if (await this.isCurrentUserServerOwner()) {
+        this.startHostingSession({ preserveExistingState: true });
+      } else {
+        this.isCheckingSession = false;
+      }
+      return;
+    }
+
+    if (
+      !this.isHostVttSession &&
+      !this.isJoiningVttSession &&
+      this.syncService.isConnected &&
+      this.syncService.currentRoomId !== this.serverId
+    ) {
+      this.syncService.stopSyncing(true);
+    }
+
+    if (!this.isHostVttSession && !this.isJoiningVttSession) {
+      if (await this.isCurrentUserServerOwner()) {
+        const resumed = await this.joinExistingSession();
+        if (runId !== this.syncStateRun) return;
+
+        if (resumed) {
+          this.startHostingSession({ preserveExistingState: true });
+          return;
+        }
+
+        this.applyPermissions(true);
+        this.isCheckingSession = false;
+        return;
+      }
+
+      const joined = await this.joinExistingSession();
+      if (runId !== this.syncStateRun) return;
+
+      if (!joined) {
+        this.closeNoHostedGame();
+      } else {
+        this.isCheckingSession = false;
+      }
+      return;
+    }
+
+    this.isCheckingSession = false;
   }
 
-  joinSession() {
-    this.syncService.joinSession(this.engine, this.serverId, this.character);
-    this.engine.setPermissions(false);
-    this.engine.isDM = false;
+  async joinSession(): Promise<boolean> {
+    const joined = await this.joinExistingSession();
+    if (!joined) {
+      this.closeNoHostedGame();
+    } else if (await this.isCurrentUserServerOwner()) {
+      this.startHostingSession({ preserveExistingState: true });
+    }
+    return joined;
   }
 
-  startHostingSession() {
-      this.syncService.startHosting(this.engine, this.serverId);
-      this.engine.setPermissions(true);
-      this.engine.isDM = true;
+  startHostingSession(options: StartHostingOptions = {}) {
+      this.syncService.startHosting(this.engine, this.serverId, options);
+      this.applyPermissions(true);
       this.showHostTakeover = false;
+      this.isCheckingSession = false;
   }
 
   stopSession() {
       this.vttSessionStopped.emit(this.serverId);
+      this.syncService.endSession();
+  }
+
+  private async joinExistingSession(): Promise<boolean> {
+    this.applyPermissions(false);
+    const joined = await this.syncService.joinSession(this.engine, this.serverId, this.character);
+
+    if (!joined) {
       this.syncService.stopSyncing(true);
+    }
+
+    return joined;
+  }
+
+  private async handleHostDisconnected(disconnected: boolean) {
+    if (!disconnected || this.isHosting) {
+      this.showHostTakeover = false;
+      return;
+    }
+
+    if (await this.isCurrentUserServerOwner()) {
+      this.startHostingSession({ preserveExistingState: true });
+      return;
+    }
+
+    this.showHostTakeover = true;
+  }
+
+  private applyPermissions(isHost: boolean) {
+    this.engine.setPermissions(isHost);
+    this.engine.isDM = isHost;
+  }
+
+  private async isCurrentUserServerOwner(): Promise<boolean> {
+    let server = this.serverService.getCurrentServer();
+    if ((!server || server._id !== this.serverId) && this.serverId) {
+      await this.serverService.getServerDetails(this.serverId);
+      server = this.serverService.getCurrentServer();
+    }
+
+    if (!server || !this.userId) return false;
+
+    const ownerId = typeof server.owner === 'string'
+      ? server.owner
+      : server.owner?._id;
+
+    return ownerId === this.userId;
+  }
+
+  private closeNoHostedGame() {
+    this.isCheckingSession = false;
+    if (this.noHostedGameClosed) return;
+
+    this.noHostedGameClosed = true;
+    this.syncService.stopSyncing(true);
+    this.showVttMessage('there is no game right now', 4000);
+    this.tabService.closeTab(this.serverId);
+  }
+
+  private showVttMessage(message: string, duration = 3000) {
+    this.snackBar.open(message, 'Close', {
+      duration,
+      horizontalPosition: 'center',
+      verticalPosition: 'bottom'
+    });
   }
 
   ngOnDestroy() {
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.hostDisconnectedSub) this.hostDisconnectedSub.unsubscribe();
+    if (this.sessionEndedSub) this.sessionEndedSub.unsubscribe();
     if (this.turnOrderStateSub) this.turnOrderStateSub.unsubscribe(); // Unsubscribe
     if (this.syncService.currentRoomId !== this.serverId) {
       this.syncService.stopSyncing(true);
@@ -300,7 +449,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       await this.syncService.setMap(file);
     } catch (err) {
       console.error("Failed to upload map", err);
-      alert("Failed to upload map image.");
+      this.showVttMessage("Failed to upload map image.");
     }
   }
 
@@ -361,7 +510,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
         }
       } catch (err) {
         console.error("Failed to parse map JSON", err);
-        alert("Invalid map file format.");
+        this.showVttMessage("Invalid map file format.");
       }
     };
     reader.readAsText(file);
