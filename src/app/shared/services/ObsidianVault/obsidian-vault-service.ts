@@ -12,6 +12,15 @@ export interface VaultEntry {
   children?: VaultEntry[];
 }
 
+export interface VaultSearchResult {
+  serverId: string;
+  name: string;
+  relativePath: string;
+  snippet: string;
+  matchType: 'title' | 'path' | 'content';
+  score: number;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -20,6 +29,7 @@ export class ObsidianVaultService {
   private readonly LOCALHOST_ROUTE_STORAGE_KEY_PREFIX = 'obsidian_localhost_route_';
 
   private vaultCache: Map<string, VaultEntry[]> = new Map();
+  private readonly fileTextCache = new Map<string, string>();
 
   constructor() {}
 
@@ -54,6 +64,18 @@ export class ObsidianVaultService {
   async requestPermission(handle: FileSystemHandle): Promise<boolean> {
     const options = { mode: 'readwrite' };
     return (await (handle as any).requestPermission(options)) === 'granted';
+  }
+
+  async hasPermission(serverId: string): Promise<boolean> {
+    const handle = await this.getVaultHandle(serverId);
+    if (!handle) return false;
+
+    const options = { mode: 'readwrite' };
+    if (typeof (handle as any).queryPermission !== 'function') {
+      return true;
+    }
+
+    return (await (handle as any).queryPermission(options)) === 'granted';
   }
 
   async listVaultFiles(serverId: string, useCache = true): Promise<VaultEntry[]> {
@@ -157,6 +179,7 @@ export class ObsidianVaultService {
     await writable.write(content);
     await writable.close();
     this.vaultCache.delete(serverId);
+    this.fileTextCache.delete(this.fileCacheKey(serverId, relativePath));
   }
 
   async renameFile(serverId: string, oldPath: string, newName: string): Promise<string> {
@@ -180,6 +203,7 @@ export class ObsidianVaultService {
     const pathParts = oldPath.split(/[/\\]/).filter(p => p !== '');
     pathParts.pop();
     this.vaultCache.delete(serverId);
+    this.fileTextCache.delete(this.fileCacheKey(serverId, oldPath));
     return pathParts.length > 0 ? `${pathParts.join('/')}/${newName}` : newName;
   }
 
@@ -214,6 +238,7 @@ export class ObsidianVaultService {
     }
 
     this.vaultCache.delete(serverId);
+    this.fileTextCache.delete(this.fileCacheKey(serverId, entryPath));
     return newRelativePath;
   }
 
@@ -231,6 +256,52 @@ export class ObsidianVaultService {
 
     await currentDir.removeEntry(name, { recursive: true });
     this.vaultCache.delete(serverId);
+    this.fileTextCache.delete(this.fileCacheKey(serverId, relativePath));
+  }
+
+  async searchVault(serverId: string, query: string, limit = 30): Promise<VaultSearchResult[]> {
+    const normalizedQuery = this.normalizeSearchText(query);
+    const terms = normalizedQuery.split(' ').filter(Boolean);
+
+    if (terms.length === 0 || !this.hasVaultAttached(serverId) || !(await this.hasPermission(serverId))) {
+      return [];
+    }
+
+    const entries = await this.listVaultFiles(serverId);
+    const files = this.flattenEntries(entries).filter(entry => entry.kind === 'file');
+    const results: VaultSearchResult[] = [];
+
+    for (const file of files) {
+      const name = this.normalizeSearchText(file.name);
+      const path = this.normalizeSearchText(file.relativePath);
+      const titleMatch = terms.every(term => name.includes(term));
+      const pathMatch = !titleMatch && terms.every(term => path.includes(term));
+
+      let content = '';
+      let contentMatch = false;
+      if (this.isSearchableTextFile(file.name)) {
+        content = await this.readCachedText(serverId, file.relativePath);
+        const normalizedContent = this.normalizeSearchText(content);
+        contentMatch = terms.every(term => normalizedContent.includes(term));
+      }
+
+      if (!titleMatch && !pathMatch && !contentMatch) {
+        continue;
+      }
+
+      results.push({
+        serverId,
+        name: file.name,
+        relativePath: file.relativePath,
+        snippet: contentMatch ? this.buildSnippet(content, terms) : file.relativePath,
+        matchType: titleMatch ? 'title' : pathMatch ? 'path' : 'content',
+        score: this.scoreVaultMatch(file, normalizedQuery, terms, { titleMatch, pathMatch, contentMatch }),
+      });
+    }
+
+    return results
+      .sort((a, b) => b.score - a.score || a.relativePath.localeCompare(b.relativePath))
+      .slice(0, limit);
   }
 
   private async getFileHandleByPath(
@@ -276,5 +347,89 @@ export class ObsidianVaultService {
   hasVaultAttached(serverId: string): boolean {
     return !!localStorage.getItem(`${this.STORAGE_KEY_PREFIX}${serverId}_exists`) ||
            !!localStorage.getItem(`${this.LOCALHOST_ROUTE_STORAGE_KEY_PREFIX}${serverId}`);
+  }
+
+  private flattenEntries(entries: VaultEntry[]): VaultEntry[] {
+    return entries.flatMap(entry => [
+      entry,
+      ...(entry.children ? this.flattenEntries(entry.children) : []),
+    ]);
+  }
+
+  private async readCachedText(serverId: string, relativePath: string): Promise<string> {
+    const cacheKey = this.fileCacheKey(serverId, relativePath);
+    const cached = this.fileTextCache.get(cacheKey);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    try {
+      const text = await this.readFile(serverId, relativePath);
+      this.fileTextCache.set(cacheKey, text);
+      return text;
+    } catch (error) {
+      console.warn('Failed to read vault file for search', relativePath, error);
+      return '';
+    }
+  }
+
+  private scoreVaultMatch(
+    entry: VaultEntry,
+    normalizedQuery: string,
+    terms: string[],
+    matches: { titleMatch: boolean; pathMatch: boolean; contentMatch: boolean }
+  ): number {
+    const name = this.normalizeSearchText(entry.name);
+    const baseName = this.normalizeSearchText(entry.name.replace(/\.[^.]+$/, ''));
+    const path = this.normalizeSearchText(entry.relativePath);
+
+    let score = 0;
+    if (baseName === normalizedQuery || name === normalizedQuery) score += 140;
+    if (baseName.startsWith(normalizedQuery) || name.startsWith(normalizedQuery)) score += 90;
+    if (matches.titleMatch) score += 65;
+    if (matches.pathMatch) score += 35;
+    if (matches.contentMatch) score += 20;
+    score += terms.filter(term => path.includes(term)).length * 3;
+    return score;
+  }
+
+  private buildSnippet(content: string, terms: string[]): string {
+    const compact = content
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/!\[\[[^\]]+]]/g, ' ')
+      .replace(/\[\[([^\]|]+)(?:\|[^\]]+)?]]/g, '$1')
+      .replace(/[#>*_`|[\]()]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!compact) {
+      return '';
+    }
+
+    const lower = compact.toLowerCase();
+    const matchIndex = terms
+      .map(term => lower.indexOf(term))
+      .filter(index => index >= 0)
+      .sort((a, b) => a - b)[0] ?? 0;
+
+    const start = Math.max(0, matchIndex - 80);
+    const snippet = compact.slice(start, start + 220);
+    return `${start > 0 ? '...' : ''}${snippet}${start + 220 < compact.length ? '...' : ''}`;
+  }
+
+  private isSearchableTextFile(name: string): boolean {
+    return /\.(md|markdown|txt|json|yaml|yml|csv)$/i.test(name);
+  }
+
+  private normalizeSearchText(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  }
+
+  private fileCacheKey(serverId: string, relativePath: string): string {
+    return `${serverId}::${relativePath}`;
   }
 }

@@ -3,11 +3,12 @@ import { RouterOutlet } from '@angular/router';
 import { ThemeService } from './shared/services/theme/theme.service';
 import { TabPanel } from './pages/dashboard/tab-panel/tab-panel';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { DndSearchDrawer } from './shared/components/dnd-search-drawer/dnd-search-drawer';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, TabPanel],
+  imports: [RouterOutlet, TabPanel, DndSearchDrawer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

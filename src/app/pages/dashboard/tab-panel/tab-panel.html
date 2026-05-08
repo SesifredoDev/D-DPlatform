@@ -58,7 +58,11 @@
         } @else if (tab.type === 'spotify') {
           <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
         } @else if (tab.type === 'obsidian') {
-          <app-obsidian-view [serverId]="tab.data.serverId"></app-obsidian-view>
+          <app-obsidian-view
+            [serverId]="tab.data.serverId"
+            [openPath]="tab.data?.openPath ?? null"
+            [openRequestId]="tab.data?.openRequestId ?? null">
+          </app-obsidian-view>
         }
       </div>
     }

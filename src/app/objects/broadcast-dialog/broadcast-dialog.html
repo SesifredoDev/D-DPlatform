@@ -7,6 +7,9 @@
     <ng-container *ngIf="hasHtml && !hasFile && !hasImageUrl">
       <div class="html-preview" [innerHTML]="htmlPreview"></div>
     </ng-container>
+    <ng-container *ngIf="hasText && !hasFile && !hasImageUrl && !hasHtml">
+      <pre class="text-preview">{{ textPreview }}</pre>
+    </ng-container>
   </div>
 
   <div class="options-container">

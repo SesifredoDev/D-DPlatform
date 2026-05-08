@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import { ActivatedRoute } from '@angular/router';
@@ -40,8 +40,10 @@ import { MilkdownEditorComponent } from '../../../shared/components/milkdown-edi
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
 })
-export class ObsidianViewComponent implements OnInit, OnDestroy {
+export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   @Input() serverId!: string;
+  @Input() openPath: string | null = null;
+  @Input() openRequestId: number | null = null;
   vaultName: string | null = null;
   localhostRoute: string | null = null;
   vaultEntries: VaultEntry[] = [];
@@ -70,6 +72,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
   private objectUrls: string[] = [];
   private contentChanged = new Subject<void>();
   private autoSaveSubscription?: Subscription;
+  private pendingOpenPath: string | null = null;
 
   constructor(
     private obsidianVaultService: ObsidianVaultService,
@@ -102,6 +105,12 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
     });
 
     document.addEventListener('selectionchange', this.handleSelectionChange);
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if ((changes['openPath'] || changes['openRequestId']) && this.openPath) {
+      void this.openRequestedPath(this.openPath);
+    }
   }
 
   ngOnDestroy(): void {
@@ -174,6 +183,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
 
   async loadVaultEntries(): Promise<void> {
     this.vaultEntries = await this.obsidianVaultService.listVaultFiles(this.serverId);
+    await this.openPendingPath();
   }
 
   async selectFile(entry: VaultEntry): Promise<void> {
@@ -330,6 +340,35 @@ export class ObsidianViewComponent implements OnInit, OnDestroy {
       }
     }
     return null;
+  }
+
+  private async openRequestedPath(relativePath: string): Promise<void> {
+    this.pendingOpenPath = relativePath;
+
+    if (!this.permissionGranted) {
+      return;
+    }
+
+    if (this.vaultEntries.length === 0) {
+      await this.loadVaultEntries();
+      return;
+    }
+
+    await this.openPendingPath();
+  }
+
+  private async openPendingPath(): Promise<void> {
+    if (!this.pendingOpenPath || this.vaultEntries.length === 0) {
+      return;
+    }
+
+    const entry = this.findEntryByPath(this.pendingOpenPath, this.vaultEntries);
+    if (!entry || entry.kind !== 'file') {
+      return;
+    }
+
+    this.pendingOpenPath = null;
+    await this.selectFile(entry);
   }
 
   async saveFile(): Promise<void> {

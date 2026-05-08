@@ -1,0 +1,178 @@
+<div class="top-edge-trigger" (mouseenter)="openFromTopEdge()" aria-hidden="true"></div>
+
+<button
+  class="search-handle"
+  type="button"
+  [class.open]="isOpen()"
+  (click)="openAndFocus()"
+  aria-label="Open D&D 5e search"
+>
+  <span class="material-icons">search</span>
+</button>
+
+<section
+  class="search-drawer"
+  [class.open]="isOpen()"
+  role="dialog"
+  aria-label="D&D 5e search"
+  (mouseenter)="onDrawerMouseEnter()"
+  (mouseleave)="onDrawerMouseLeave()"
+  (focusin)="onFocusIn()"
+  (focusout)="onFocusOut($event)"
+>
+  <div class="drawer-shell">
+    <header class="drawer-header">
+      <div class="drawer-title">
+        <span class="material-icons">travel_explore</span>
+        <div>
+          <h2>5e Search</h2>
+          <span>api.open5e.com</span>
+        </div>
+      </div>
+
+      <label class="search-field">
+        <span class="material-icons">search</span>
+        <input
+          #searchInput
+          type="search"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Search spells, creatures, rules, items..."
+          [ngModel]="query()"
+          (ngModelChange)="onQueryChange($event)"
+        />
+      </label>
+
+      <button class="icon-button" type="button" (click)="close()" aria-label="Close search">
+        <span class="material-icons">close</span>
+      </button>
+    </header>
+
+    @if (error()) {
+      <div class="error-bar">{{ error() }}</div>
+    }
+
+    <div class="drawer-body">
+      <div class="results-pane">
+        @if (query().trim().length < 2) {
+          <div class="state-message">
+            <span class="material-icons">keyboard_command_key</span>
+            <strong>Start typing to search Open5e.</strong>
+            <span>Use Ctrl+K any time to open this drawer.</span>
+          </div>
+        } @else if (isSearching()) {
+          <div class="state-message">
+            <span class="material-icons loading">progress_activity</span>
+            <strong>Searching Open5e...</strong>
+          </div>
+        } @else if (results().length === 0) {
+          <div class="state-message">
+            <span class="material-icons">search_off</span>
+            <strong>No matching SRD entries.</strong>
+          </div>
+        } @else {
+          <div class="results-count">{{ results().length }} matches</div>
+
+          <div class="results-list">
+            @for (result of results(); track result.id) {
+              <button
+                type="button"
+                class="result-item"
+                [class.selected]="selectedItem()?.id === result.id"
+                (click)="selectResult(result)"
+              >
+                <span class="result-main">{{ result.title }}</span>
+                <span class="result-category" [class.vault]="result.source === 'vault'">{{ result.category }}</span>
+                <span class="result-subtitle">{{ result.subtitle }}</span>
+                @if (result.snippet) {
+                  <span class="result-snippet">{{ result.snippet }}</span>
+                }
+              </button>
+            }
+          </div>
+        }
+      </div>
+
+      <aside class="detail-pane">
+        @if (selectedItem(); as selected) {
+          <div class="detail-header">
+            <span class="detail-category" [class.vault]="selected.source === 'vault'">{{ selected.category }}</span>
+            <h3>{{ detailTitle() }}</h3>
+            @if (selected.source === 'open5e') {
+              <div class="detail-actions">
+                <button
+                  type="button"
+                  class="detail-action-button"
+                  (click)="broadcastSelectedRule()"
+                  [disabled]="isDetailLoading() || isBroadcasting()"
+                >
+                  <span class="material-icons">broadcast_on_home</span>
+                  {{ isBroadcasting() ? 'Preparing...' : 'Broadcast' }}
+                </button>
+                <a [href]="selectedExternalUrl()" target="_blank" rel="noreferrer">
+                  API JSON
+                </a>
+              </div>
+            }
+          </div>
+
+          @if (isDetailLoading()) {
+            <div class="detail-loading">
+              <span class="material-icons loading">progress_activity</span>
+              Loading entry...
+            </div>
+          } @else {
+            @if (detailDescriptionBlock(); as description) {
+              @if (description.text) {
+                @if (description.isMarkdown) {
+                  <div class="detail-markdown detail-description" [innerHTML]="description.html"></div>
+                } @else {
+                  <p class="detail-description">{{ description.text }}</p>
+                }
+              }
+            }
+
+            @if (detailFacts().length) {
+              <dl class="fact-grid">
+                @for (fact of detailFacts(); track fact.label) {
+                  <div>
+                    <dt>{{ fact.label }}</dt>
+                    <dd>{{ fact.value }}</dd>
+                  </div>
+                }
+              </dl>
+            }
+
+            @for (section of richDetailSections(); track section.title) {
+              <section class="detail-section">
+                <h4>{{ section.title }}</h4>
+                @if (section.hasMarkdown) {
+                  <div class="section-markdown-list">
+                    @for (entry of section.entries; track entry.text) {
+                      @if (entry.isMarkdown) {
+                        <div class="detail-markdown section-markdown" [innerHTML]="entry.html"></div>
+                      } @else {
+                        <p class="section-text">{{ entry.text }}</p>
+                      }
+                    }
+                  </div>
+                } @else {
+                  <ul>
+                    @for (entry of section.entries; track entry.text) {
+                      <li>{{ entry.text }}</li>
+                    }
+                  </ul>
+                }
+              </section>
+            }
+          }
+        } @else {
+          <div class="detail-placeholder">
+            <span class="material-icons">auto_stories</span>
+            <strong>Select a result to inspect it.</strong>
+          </div>
+        }
+      </aside>
+    </div>
+  </div>
+</section>
