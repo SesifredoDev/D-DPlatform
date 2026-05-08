@@ -28,7 +28,6 @@ export class MessagingSocketService {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
-      transports: ['websocket'],
       auth: (cb) => {
         cb({ token: this.tokenService.getAccessToken() });
       }

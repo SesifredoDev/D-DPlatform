@@ -47,7 +47,6 @@ export class Message {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
-      transports: ['websocket'],
       autoConnect: false
     });
 
