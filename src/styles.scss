@@ -65,14 +65,15 @@ body {
 .token-config-menu {
   padding: var(--space-m);
 
-  .mat-mdc-menu-panel {
+  &.mat-mdc-menu-panel {
     background-color: var(--surface);
     border: 1px solid var(--surface-variant);
     border-radius: var(--radius-l);
-    box-shadow: var(--shadow-3);
-    padding: 20px;
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 0 18px var(--primary-glow);
+    padding: 0;
     min-width: 300px;
-    backdrop-filter: blur(10px);
+    overflow: hidden;
+    backdrop-filter: var(--glass-blur);
   }
 
   .menu-content {
@@ -179,6 +180,80 @@ body {
         background-color: var(--accent);
         font-weight: 500;
       }
+    }
+  }
+}
+
+.grid-config-menu {
+  &.mat-mdc-menu-panel {
+    background: var(--surface);
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-l);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 0 18px var(--primary-glow);
+    overflow: hidden;
+    backdrop-filter: var(--glass-blur);
+  }
+
+  .grid-menu-content {
+    width: 250px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .grid-menu-header,
+  .grid-color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .grid-menu-header {
+    justify-content: flex-start;
+    color: var(--primary);
+
+    h3 {
+      margin: 0;
+      color: var(--on-background);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+  }
+
+  .grid-menu-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .grid-field {
+    width: 100%;
+  }
+
+  .mat-mdc-form-field-subscript-wrapper {
+    display: none;
+  }
+
+  .grid-color-row {
+    padding: 9px 10px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-s);
+    background: rgba(255,255,255,0.06);
+    color: var(--on-background);
+    font-size: 12px;
+    font-weight: 700;
+
+    input[type="color"] {
+      width: 42px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius-s);
+      background: transparent;
+      cursor: pointer;
     }
   }
 }

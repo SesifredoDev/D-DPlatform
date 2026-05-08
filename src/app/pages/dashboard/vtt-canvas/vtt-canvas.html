@@ -110,6 +110,13 @@
       <button mat-icon-button (click)="addToken()" matTooltip="Add Monster Token">
         <mat-icon>person</mat-icon>
       </button>
+      <button
+        mat-icon-button
+        [class.active]="playersCanControlAllPlayerTokens"
+        (click)="togglePlayerTokenControlMode()"
+        [matTooltip]="playersCanControlAllPlayerTokens ? 'Players can move any player token' : 'Players can move only their tokens'">
+        <mat-icon>{{ playersCanControlAllPlayerTokens ? 'groups' : 'person_pin_circle' }}</mat-icon>
+      </button>
       <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" matTooltip="Toggle Lighting">
         <mat-icon>{{ lightingEnabled ? 'lightbulb' : 'lightbulb_outline' }}</mat-icon>
       </button>
@@ -132,13 +139,46 @@
 
     <!-- Settings/Utilities -->
     <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
-      <div class="input-wrapper" matTooltip="Grid Size (px)">
-        <mat-icon class="tiny">grid_on</mat-icon>
-        <input type="number" [value]="engine?.gridSize" (change)="engine.updateGridSize($any($event.target).value)">
-      </div>
+      <button mat-icon-button [matMenuTriggerFor]="gridMenu" matTooltip="Grid Settings">
+        <mat-icon>grid_on</mat-icon>
+      </button>
     </div>
   </div>
 </div>
+
+<mat-menu #gridMenu="matMenu" class="grid-config-menu">
+  <div class="grid-menu-content" (click)="$event.stopPropagation()">
+    <div class="grid-menu-header">
+      <mat-icon>grid_on</mat-icon>
+      <h3>Grid</h3>
+    </div>
+
+    <mat-form-field appearance="fill" class="grid-field">
+      <mat-label>Shape</mat-label>
+      <mat-select [(ngModel)]="gridSettings.type" (selectionChange)="applyGridSettings()">
+        <mat-option value="square">Square</mat-option>
+        <mat-option value="hex">Hexagon</mat-option>
+      </mat-select>
+    </mat-form-field>
+
+    <div class="grid-menu-row">
+      <mat-form-field appearance="fill" class="grid-field">
+        <mat-label>Pixels</mat-label>
+        <input matInput type="number" min="8" step="1" [(ngModel)]="gridSettings.size" (change)="applyGridSettings()">
+      </mat-form-field>
+
+      <mat-form-field appearance="fill" class="grid-field">
+        <mat-label>Thickness</mat-label>
+        <input matInput type="number" min="0.25" step="0.25" [(ngModel)]="gridSettings.thickness" (change)="applyGridSettings()">
+      </mat-form-field>
+    </div>
+
+    <div class="grid-color-row">
+      <span>Colour</span>
+      <input type="color" [(ngModel)]="gridSettings.color" (change)="applyGridSettings()" aria-label="Grid colour">
+    </div>
+  </div>
+</mat-menu>
 
 <div #vttContainer id="vtt-container"></div>
 
@@ -209,6 +249,7 @@
 <div style="visibility: hidden; position: fixed"
      [style.left]="menuTopLeftPosition.x"
      [style.top]="menuTopLeftPosition.y"
+     #tokenMenuTrigger="matMenuTrigger"
      [matMenuTriggerFor]="tokenMenu">
 </div>
 

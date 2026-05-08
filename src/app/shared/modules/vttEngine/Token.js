@@ -7,7 +7,7 @@ class Token {
     this.color = options.color || Konva.Util.getRandomColor();
     this.name = options.name || "Hero";
     this.id = options.id || crypto.randomUUID();
-    this.isPlayer = !!options.ownerId || false;
+    this.isPlayer = options.isPlayer !== undefined ? !!options.isPlayer : !!options.ownerId;
 
     // NEW: Track ownership and image
     this.ownerId = options.ownerId || null;
@@ -33,7 +33,9 @@ class Token {
   checkPermissions() {
     const isDM = this.engine.isDM;
     const currentUserId = this.engine.currentUserId;
-    return isDM || (this.ownerId === currentUserId);
+    return isDM ||
+      (this.isPlayer && this.engine.playersCanControlAllPlayerTokens) ||
+      (this.ownerId === currentUserId);
   }
 
   async initVisuals() {
@@ -108,8 +110,11 @@ class Token {
     if (config.forceBorder !== undefined) this.forceBorder = config.forceBorder;
     if (config.borderColor !== undefined) this.borderColor = config.borderColor;
     if (config.color !== undefined) this.color = config.color;
+    if (config.ownerId !== undefined) this.ownerId = config.ownerId;
+    if (config.isPlayer !== undefined) this.isPlayer = !!config.isPlayer;
 
     this.initVisuals();
+    this.group.draggable(this.checkPermissions());
     this.snapToGrid();
   }
 
@@ -136,36 +141,24 @@ class Token {
     }
   }
 
-  snapToGrid() {
-    const size = this.engine.gridSize;
-
-    let centerX, centerY;
-    if (this.size % 2 === 0) {
-      centerX = Math.round(this.group.x() / size) * size;
-      centerY = Math.round(this.group.y() / size) * size;
-    } else if (this.size === 0.5) {
-       // Small tokens snap to quarter tiles
-       const tileX = Math.floor(this.group.x() / size);
-       const tileY = Math.floor(this.group.y() / size);
-       centerX = (tileX * size) + (size / 2);
-       centerY = (tileY * size) + (size / 2);
-    } else {
-      // Odd sizes snap to tile centers
-      const tileX = Math.floor(this.group.x() / size);
-      const tileY = Math.floor(this.group.y() / size);
-      centerX = (tileX * size) + (size / 2);
-      centerY = (tileY * size) + (size / 2);
-    }
+  snapToGrid(emitMove = true) {
+    const { x: centerX, y: centerY } = this.engine.getSnapPosition(
+      this.group.x(),
+      this.group.y(),
+      this.size
+    );
 
     this.group.position({ x: centerX, y: centerY });
     this.engine.updateLighting();
     this.group.getLayer()?.batchDraw();
 
-    this.engine.stage.fire('tokenMoved', {
-      id: this.group.id(),
-      x: centerX,
-      y: centerY
-    });
+    if (emitMove) {
+      this.engine.stage.fire('tokenMoved', {
+        id: this.group.id(),
+        x: centerX,
+        y: centerY
+      });
+    }
   }
 
   initEvents() {
@@ -179,8 +172,11 @@ class Token {
       const tileX = Math.floor(this.group.x() / size); //
       const tileY = Math.floor(this.group.y() / size); //
 
-      const centerX = (tileX * size) + (size / 2); //
-      const centerY = (tileY * size) + (size / 2); //
+      const { x: centerX, y: centerY } = this.engine.getSnapPosition(
+        this.group.x(),
+        this.group.y(),
+        this.size
+      );
 
       this.group.position({ x: centerX, y: centerY }); //
       this.engine.updateLighting(); //

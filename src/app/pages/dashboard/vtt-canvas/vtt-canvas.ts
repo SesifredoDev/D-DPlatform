@@ -2,7 +2,7 @@ import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnCh
 import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
 import { MatDialog } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
-import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions} from '../../../shared/services/vttsync/vttsync';
+import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions, GridSettings} from '../../../shared/services/vttsync/vttsync';
 import {ICharacter} from '../../../shared/models/user/character.model';
 import {MatIconButton, MatButton} from '@angular/material/button';
 import {MatIcon} from '@angular/material/icon';
@@ -43,7 +43,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   @Output() vttSessionStopped = new EventEmitter<string>();
 
   @ViewChild('vttContainer', { static: true }) container!: ElementRef;
-  @ViewChild(MatMenuTrigger) menuTrigger!: MatMenuTrigger;
+  @ViewChild('tokenMenuTrigger') menuTrigger!: MatMenuTrigger;
 
 
   private resizeObserver!: ResizeObserver;
@@ -79,8 +79,17 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private hostDisconnectedSub!: Subscription;
   private sessionEndedSub!: Subscription;
   private turnOrderStateSub!: Subscription; // Subscription for turn order state
+  private playerTokenControlSub!: Subscription;
+  private gridSettingsSub!: Subscription;
   private syncStateRun = 0;
   private noHostedGameClosed = false;
+  public playersCanControlAllPlayerTokens = false;
+  public gridSettings: GridSettings = {
+    size: 50,
+    color: '#cccccc',
+    thickness: 1,
+    type: 'square'
+  };
 
   // Turn Order State
   public turnOrderState$: Observable<TurnOrderState>;
@@ -117,6 +126,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     } else {
       this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
     }
+    this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
 
     this.engine.stage.on('tokenContextMenu', (data: any) => {
       this.onTokenContextMenu(data);
@@ -144,6 +154,14 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
         this.newEntryInitiative = 0;
         this.lastAddedEntryId = null;
       }
+    });
+
+    this.playerTokenControlSub = this.syncService.playersCanControlAllPlayerTokens$.subscribe(enabled => {
+      this.playersCanControlAllPlayerTokens = enabled;
+    });
+
+    this.gridSettingsSub = this.syncService.gridSettings$.subscribe(settings => {
+      this.gridSettings = { ...settings };
     });
 
     void this.handleSyncState();
@@ -327,6 +345,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.hostDisconnectedSub) this.hostDisconnectedSub.unsubscribe();
     if (this.sessionEndedSub) this.sessionEndedSub.unsubscribe();
     if (this.turnOrderStateSub) this.turnOrderStateSub.unsubscribe(); // Unsubscribe
+    if (this.playerTokenControlSub) this.playerTokenControlSub.unsubscribe();
+    if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
     if (this.syncService.currentRoomId !== this.serverId) {
       this.syncService.stopSyncing(true);
     }
@@ -440,6 +460,34 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.isSyncing) {
       this.syncService.broadcastAction('lighting-toggle', { visible: this.lightingEnabled });
     }
+  }
+
+  togglePlayerTokenControlMode() {
+    this.syncService.setPlayersCanControlAllPlayerTokens(!this.playersCanControlAllPlayerTokens);
+  }
+
+  applyGridSettings() {
+    if (this.syncService.getEngine() === this.engine) {
+      this.syncService.updateGridSettings(this.gridSettings);
+    } else {
+      this.engine.updateGridSettings(this.gridSettings, false);
+    }
+
+    if (this.engine) {
+      this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
+    }
+  }
+
+  private normalizeGridSettings(settings: any): GridSettings {
+    const size = parseInt(settings?.size ?? settings?.gridSize ?? 50, 10);
+    const thickness = parseFloat(settings?.thickness ?? settings?.gridThickness ?? 1);
+
+    return {
+      size: Number.isFinite(size) ? Math.max(8, size) : 50,
+      color: settings?.color ?? settings?.gridColor ?? '#cccccc',
+      thickness: Number.isFinite(thickness) ? Math.max(0.25, thickness) : 1,
+      type: (settings?.gridType ?? settings?.type) === 'hex' ? 'hex' : 'square'
+    };
   }
 
   async onMapUpload(event: any) {

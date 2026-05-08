@@ -7,6 +7,9 @@ import {MeasurementManager} from "./MeasurementManagement";
 export class VttEngine {
   constructor(containerId, currentUserId, gridSize = 50) {
     this.gridSize = gridSize;
+    this.gridColor = '#cccccc';
+    this.gridThickness = 1;
+    this.gridType = 'square';
     this.currentMapW = 1000;
     this.currentMapH = 1000;
     this.currentMapUrl = null;
@@ -15,12 +18,15 @@ export class VttEngine {
     this.currentUserId= currentUserId;
 
     this.isDM = false
+    this.playersCanControlAllPlayerTokens = false;
+    this.backgroundViewportLimitMultiplier = 1.5;
     this.stage = new Konva.Stage({
       container: containerId,
       width: containerId.getBoundingClientRect().width,
       height: containerId.getBoundingClientRect().height,
       draggable: true
     });
+    this.stage.dragBoundFunc((pos) => this.clampStagePosition(pos));
 
     this.mapLayer = new Konva.Layer();
     this.gridLayer = new Konva.Layer();
@@ -133,6 +139,15 @@ export class VttEngine {
 
   setPermissions(isDM) {
     this.isDM = isDM;
+    this.refreshTokenPermissions();
+  }
+
+  setPlayerTokenControlMode(playersCanControlAllPlayerTokens) {
+    this.playersCanControlAllPlayerTokens = !!playersCanControlAllPlayerTokens;
+    this.refreshTokenPermissions();
+  }
+
+  refreshTokenPermissions() {
     this.tokenLayer.getChildren().forEach(group => {
       const token = group.tokenReference;
       if (token) {
@@ -158,41 +173,93 @@ export class VttEngine {
   }
 
   updateGridSize(newSize, remote = false) {
-    this.gridSize = parseInt(newSize);
+    this.updateGridSettings({ size: newSize }, remote);
+  }
+
+  updateGridSettings(settings = {}, remote = false) {
+    const previousSize = this.gridSize;
+    const previousType = this.gridType;
+    const nextSettings = this.normalizeGridSettings(settings);
+
+    this.gridSize = nextSettings.size;
+    this.gridColor = nextSettings.color;
+    this.gridThickness = nextSettings.thickness;
+    this.gridType = nextSettings.type;
 
     // 1. Redraw the background grid lines
     this.drawGrid(this.currentMapW, this.currentMapH);
 
-    // 2. Rescale and reposition all existing tokens
-    this.tokenLayer.getChildren().forEach(group => {
-      const token = group.tokenReference;
-      if (token) {
-        token.initVisuals();
-        token.snapToGrid();
-      }
-    });
+    if (previousSize !== this.gridSize || previousType !== this.gridType) {
+      // 2. Rescale and reposition all existing tokens
+      this.tokenLayer.getChildren().forEach(group => {
+        const token = group.tokenReference;
+        if (token) {
+          token.initVisuals();
+          token.snapToGrid(!remote);
+        }
+      });
+    }
 
     this.tokenLayer.batchDraw();
     this.updateLighting();
 
     // 3. BROADCAST: Tell the sync service to notify other players
     if (!remote) {
-      this.stage.fire('gridSizeChanged', { size: this.gridSize });
+      this.stage.fire('gridSettingsChanged', this.getGridSettings());
     }
+  }
+
+  normalizeGridSettings(settings = {}) {
+    const parsedSize = parseInt(settings.size ?? settings.gridSize ?? this.gridSize, 10);
+    const parsedThickness = parseFloat(settings.thickness ?? settings.gridThickness ?? this.gridThickness);
+    const type = settings.gridType ?? settings.type ?? this.gridType;
+
+    return {
+      size: Number.isFinite(parsedSize) ? Math.max(8, parsedSize) : this.gridSize,
+      color: settings.color ?? settings.gridColor ?? this.gridColor,
+      thickness: Number.isFinite(parsedThickness) ? Math.max(0.25, parsedThickness) : this.gridThickness,
+      type: type === 'hex' ? 'hex' : 'square'
+    };
+  }
+
+  getGridSettings() {
+    return {
+      size: this.gridSize,
+      color: this.gridColor,
+      thickness: this.gridThickness,
+      type: this.gridType,
+      gridType: this.gridType
+    };
   }
 
   drawGrid(width, height) {
     this.gridLayer.destroyChildren();
+    this.gridLayer.clip({
+      x: 0,
+      y: 0,
+      width,
+      height
+    });
+
+    if (this.gridType === 'hex') {
+      this.drawHexGrid(width, height);
+      this.gridLayer.batchDraw();
+      this.updateLighting();
+      return;
+    }
+
     for (let i = 0; i <= width / this.gridSize; i++) {
       this.gridLayer.add(new Konva.Line({
         points: [i * this.gridSize, 0, i * this.gridSize, height],
-        stroke: '#ccc', strokeWidth: 1,
+        stroke: this.gridColor,
+        strokeWidth: this.gridThickness,
       }));
     }
     for (let j = 0; j <= height / this.gridSize; j++) {
       this.gridLayer.add(new Konva.Line({
         points: [0, j * this.gridSize, width, j * this.gridSize],
-        stroke: '#ccc', strokeWidth: 1,
+        stroke: this.gridColor,
+        strokeWidth: this.gridThickness,
       }));
     }
     this.gridLayer.batchDraw();
@@ -200,9 +267,126 @@ export class VttEngine {
     this.updateLighting();
   }
 
+  drawHexGrid(width, height) {
+    const radius = this.getHexRadius();
+    const hexWidth = Math.sqrt(3) * radius;
+    const rowStep = 1.5 * radius;
+    const originX = hexWidth / 2;
+    const originY = radius;
+    const minRow = Math.floor((-originY - radius) / rowStep) - 1;
+    const maxRow = Math.ceil((height - originY + radius) / rowStep) + 1;
+    const columnPadding = Math.ceil(width / hexWidth) + maxRow + 4;
+
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let column = -columnPadding; column <= columnPadding; column++) {
+        const center = this.hexAxialToPixel(column, row, originX, originY, radius);
+        if (
+          center.x < -hexWidth ||
+          center.x > width + hexWidth ||
+          center.y < -radius ||
+          center.y > height + radius
+        ) {
+          continue;
+        }
+
+        this.gridLayer.add(new Konva.Line({
+          points: this.getHexPoints(center.x, center.y, radius),
+          stroke: this.gridColor,
+          strokeWidth: this.gridThickness,
+          closed: true,
+          listening: false
+        }));
+      }
+    }
+  }
+
+  getHexRadius() {
+    return this.gridSize / Math.sqrt(3);
+  }
+
+  hexAxialToPixel(q, r, originX, originY, radius) {
+    return {
+      x: originX + radius * Math.sqrt(3) * (q + r / 2),
+      y: originY + radius * 1.5 * r
+    };
+  }
+
+  getHexPoints(centerX, centerY, radius) {
+    const points = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (-90 + 60 * i) * Math.PI / 180;
+      points.push(
+        centerX + radius * Math.cos(angle),
+        centerY + radius * Math.sin(angle)
+      );
+    }
+    return points;
+  }
+
+  getSnapPosition(x, y, tokenSize = 1) {
+    if (this.gridType === 'hex') {
+      return this.getHexSnapPosition(x, y);
+    }
+
+    const size = this.gridSize;
+
+    if (tokenSize % 2 === 0) {
+      return {
+        x: Math.round(x / size) * size,
+        y: Math.round(y / size) * size
+      };
+    }
+
+    if (tokenSize === 0.5) {
+      return {
+        x: (Math.floor(x / size) * size) + (size / 2),
+        y: (Math.floor(y / size) * size) + (size / 2)
+      };
+    }
+
+    return {
+      x: (Math.floor(x / size) * size) + (size / 2),
+      y: (Math.floor(y / size) * size) + (size / 2)
+    };
+  }
+
+  getHexSnapPosition(x, y) {
+    const radius = this.getHexRadius();
+    const originX = this.gridSize / 2;
+    const originY = radius;
+    const localX = x - originX;
+    const localY = y - originY;
+    const q = ((Math.sqrt(3) / 3) * localX - (1 / 3) * localY) / radius;
+    const r = ((2 / 3) * localY) / radius;
+    const rounded = this.roundHex(q, r);
+
+    return this.hexAxialToPixel(rounded.q, rounded.r, originX, originY, radius);
+  }
+
+  roundHex(q, r) {
+    const s = -q - r;
+    let roundedQ = Math.round(q);
+    let roundedR = Math.round(r);
+    let roundedS = Math.round(s);
+
+    const qDiff = Math.abs(roundedQ - q);
+    const rDiff = Math.abs(roundedR - r);
+    const sDiff = Math.abs(roundedS - s);
+
+    if (qDiff > rDiff && qDiff > sDiff) {
+      roundedQ = -roundedR - roundedS;
+    } else if (rDiff > sDiff) {
+      roundedR = -roundedQ - roundedS;
+    }
+
+    return { q: roundedQ, r: roundedR };
+  }
+
   centerMap() {
     const mapObj = this.mapLayer.children[0];
     if (!mapObj) return;
+
+    this.enforceZoomLimits();
 
     const x = (this.stage.width() / 2) - (this.currentMapW / 2) * this.stage.scaleX();
     const y = (this.stage.height() / 2) - (this.currentMapH / 2) * this.stage.scaleY();
@@ -251,16 +435,76 @@ export class VttEngine {
         y: (pointer.y - this.stage.y()) / oldScale,
       };
 
-      const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
+      const requestedScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
+      const newScale = this.clampZoomScale(requestedScale);
       this.stage.scale({ x: newScale, y: newScale });
 
       const newPos = {
         x: pointer.x - mousePointTo.x * newScale,
         y: pointer.y - mousePointTo.y * newScale,
       };
-      this.stage.position(newPos);
+      this.stage.position(this.clampStagePosition(newPos));
       this.stage.batchDraw();
     });
+  }
+
+  getMinZoomScale() {
+    const stageWidth = this.stage?.width?.() || 0;
+    const stageHeight = this.stage?.height?.() || 0;
+
+    if (!stageWidth || !stageHeight || !this.currentMapW || !this.currentMapH) {
+      return 1;
+    }
+
+    const fitToBackgroundScale = Math.min(
+      stageWidth / this.currentMapW,
+      stageHeight / this.currentMapH
+    );
+
+    return Math.min(1, fitToBackgroundScale / this.backgroundViewportLimitMultiplier);
+  }
+
+  clampZoomScale(scale) {
+    return Math.max(scale, this.getMinZoomScale());
+  }
+
+  enforceZoomLimits() {
+    const clampedScale = this.clampZoomScale(this.stage.scaleX());
+    if (clampedScale !== this.stage.scaleX()) {
+      this.stage.scale({ x: clampedScale, y: clampedScale });
+    }
+  }
+
+  clampStagePosition(pos) {
+    const stageWidth = this.stage?.width?.() || 0;
+    const stageHeight = this.stage?.height?.() || 0;
+    const scale = this.stage?.scaleX?.() || 1;
+    const mapWidth = this.currentMapW * scale;
+    const mapHeight = this.currentMapH * scale;
+
+    if (!stageWidth || !stageHeight || !mapWidth || !mapHeight) {
+      return pos;
+    }
+
+    return {
+      x: this.clampAxisPosition(pos.x, stageWidth, mapWidth),
+      y: this.clampAxisPosition(pos.y, stageHeight, mapHeight)
+    };
+  }
+
+  clampAxisPosition(position, viewportSize, contentSize) {
+    const edgeBuffer = Math.min(
+      viewportSize / 2,
+      contentSize * ((this.backgroundViewportLimitMultiplier - 1) / 2)
+    );
+    const min = viewportSize - contentSize - edgeBuffer;
+    const max = edgeBuffer;
+
+    if (min > max) {
+      return (viewportSize - contentSize) / 2;
+    }
+
+    return Math.min(max, Math.max(min, position));
   }
 
   addToken(x, y, options = {}, remote = false) {
@@ -375,6 +619,10 @@ export class VttEngine {
   getRawConfig() {
     return {
       gridSize: this.gridSize,
+      gridColor: this.gridColor,
+      gridThickness: this.gridThickness,
+      gridType: this.gridType,
+      playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens,
       tokens: this.tokenLayer.getChildren().map(group => {
         const ref = group.tokenReference;
         return {
@@ -394,6 +642,10 @@ export class VttEngine {
     try {
       if (!config) return;
       this.clearAll();
+      if (config.playersCanControlAllPlayerTokens !== undefined) {
+        this.playersCanControlAllPlayerTokens = !!config.playersCanControlAllPlayerTokens;
+      }
+      this.updateGridSettings(config, true);
 
       if (config.mapUrl) {
         // ADD "true" as the second argument here to prevent redundant broadcasts
@@ -402,11 +654,6 @@ export class VttEngine {
       } else {
         this.initDefaultMap();
       }
-
-      if (config.gridSize) {
-        this.gridSize = config.gridSize;
-      }
-
 
       this.tokenLayer.destroyChildren();
       if (config.tokens) {

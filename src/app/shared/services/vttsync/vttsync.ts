@@ -38,6 +38,13 @@ export interface MapLoadingState {
     message: string;
 }
 
+export interface GridSettings {
+  size: number;
+  color: string;
+  thickness: number;
+  type: 'square' | 'hex';
+}
+
 export interface StartHostingOptions {
   preserveExistingState?: boolean;
 }
@@ -61,6 +68,13 @@ export class VttSync {
     isConfirmed: false,
     entries: [],
     activeIndex: 0
+  });
+  public playersCanControlAllPlayerTokens$ = new BehaviorSubject<boolean>(false);
+  public gridSettings$ = new BehaviorSubject<GridSettings>({
+    size: 50,
+    color: '#cccccc',
+    thickness: 1,
+    type: 'square'
   });
 
   public mapLoading$ = new BehaviorSubject<MapLoadingState>({
@@ -174,8 +188,14 @@ export class VttSync {
       if (config.turnOrder) {
           this.turnOrder$.next(config.turnOrder);
       }
+      this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
+      if (config.gridSize || config.gridColor || config.gridThickness || config.gridType) {
+        engine.updateGridSettings(config, true);
+        this.publishGridSettings(engine);
+      }
       if (isReattaching && engine.currentMapUrl) return;
       engine.loadConfigFromObject(config);
+      this.publishGridSettings(engine);
     });
 
     this.attachEngineListeners(engine);
@@ -252,8 +272,14 @@ export class VttSync {
         if (config.turnOrder) {
           this.turnOrder$.next(config.turnOrder);
         }
+        this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
+        if (config.gridSize || config.gridColor || config.gridThickness || config.gridType) {
+          engine.updateGridSettings(config, true);
+          this.publishGridSettings(engine);
+        }
         if (!isReattaching || !engine.currentMapUrl) {
           engine.loadConfigFromObject(config);
+          this.publishGridSettings(engine);
         }
         receivedMapUpdate = true;
         resolveWhenReady();
@@ -303,6 +329,8 @@ export class VttSync {
     this.engine = null;
     this.localVersion = 0;
     this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [], activeIndex: 0 });
+    this.playersCanControlAllPlayerTokens$.next(false);
+    this.gridSettings$.next({ size: 50, color: '#cccccc', thickness: 1, type: 'square' });
   }
 
   broadcastAction(action: string, data: any) {
@@ -376,6 +404,13 @@ export class VttSync {
       engine.stage.on('gridSizeChanged', (data: any) => {
         this.broadcastAction('grid-size-change', data);
       });
+
+      engine.stage.off('gridSettingsChanged');
+      engine.stage.on('gridSettingsChanged', (data: any) => {
+        const settings = this.normalizeGridSettings(data);
+        this.gridSettings$.next(settings);
+        this.broadcastAction('grid-settings-change', settings);
+      });
     }
   }
 
@@ -423,6 +458,12 @@ export class VttSync {
 
       case 'grid-size-change':
         engine.updateGridSize(data.size, true);
+        this.publishGridSettings(engine);
+        break;
+
+      case 'grid-settings-change':
+        engine.updateGridSettings(data, true);
+        this.publishGridSettings(engine);
         break;
 
       case 'map-change':
@@ -431,8 +472,12 @@ export class VttSync {
 
       case 'map-load':
         engine.loadConfigFromObject(data);
+        this.publishGridSettings(engine);
         if (data.turnOrder) {
             this.turnOrder$.next(data.turnOrder);
+        }
+        if (data.playersCanControlAllPlayerTokens !== undefined) {
+          this.applyPlayerTokenControlMode(engine, data.playersCanControlAllPlayerTokens);
         }
         break;
 
@@ -444,6 +489,10 @@ export class VttSync {
 
       case 'ping':
         engine.showPing(data.x, data.y, data.color);
+        break;
+
+      case 'player-token-control-change':
+        this.applyPlayerTokenControlMode(engine, data.enabled);
         break;
 
       case 'turn-order-sync':
@@ -531,6 +580,44 @@ export class VttSync {
 
     this.engine.updateTokenConfig(tokenId, options, false);
     this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+  }
+
+  public setPlayersCanControlAllPlayerTokens(enabled: boolean) {
+    if (!this.engine) return;
+
+    this.applyPlayerTokenControlMode(this.engine, enabled);
+    if (this.isHosting) {
+      this.broadcastAction('player-token-control-change', { enabled });
+    }
+  }
+
+  private applyPlayerTokenControlMode(engine: VttEngine, enabled: boolean) {
+    const normalized = !!enabled;
+    engine.setPlayerTokenControlMode(normalized);
+    this.playersCanControlAllPlayerTokens$.next(normalized);
+  }
+
+  public updateGridSettings(settings: Partial<GridSettings>) {
+    if (!this.engine) return;
+
+    this.engine.updateGridSettings(settings, false);
+    this.publishGridSettings(this.engine);
+  }
+
+  private publishGridSettings(engine: VttEngine) {
+    this.gridSettings$.next(this.normalizeGridSettings(engine.getGridSettings()));
+  }
+
+  private normalizeGridSettings(settings: any): GridSettings {
+    const size = parseInt(settings?.size ?? settings?.gridSize ?? 50, 10);
+    const thickness = parseFloat(settings?.thickness ?? settings?.gridThickness ?? 1);
+
+    return {
+      size: Number.isFinite(size) ? Math.max(8, size) : 50,
+      color: settings?.color ?? settings?.gridColor ?? '#cccccc',
+      thickness: Number.isFinite(thickness) ? Math.max(0.25, thickness) : 1,
+      type: (settings?.gridType ?? settings?.type) === 'hex' ? 'hex' : 'square'
+    };
   }
 
   public updateTurnOrder(state: TurnOrderState) {
