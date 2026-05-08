@@ -60,15 +60,21 @@ export class TabService {
     const existing = current.find(t => t.id === id);
 
     if (existing) {
-      this.selectTab(id);
-    } else {
-      const newTab: Tab = { id, title, type, pane, active: true, data }; // Passed data to newTab
-      // Deactivate others in the same pane
-      const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
-      const res = [...updated.map(t=> (t.id === id ? {...t, active: true} : t))];
-      if(!existing) res.push(newTab);
-      this.publishTabs(res);
+      const nextData = data === undefined ? existing.data : { ...(existing.data ?? {}), ...data };
+      this.publishTabs(current.map(t => {
+        if (t.id === id) {
+          return { ...t, title, type, data: nextData, active: true };
+        }
+
+        return t.pane === existing.pane ? { ...t, active: false } : t;
+      }));
+      return;
     }
+
+    const newTab: Tab = { id, title, type, pane, active: true, data }; // Passed data to newTab
+    // Deactivate others in the same pane
+    const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
+    this.publishTabs([...updated, newTab]);
   }
 
   selectTab(id: string) {

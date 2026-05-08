@@ -48,6 +48,55 @@ To create a Tauri desktop build, run:
 npm run tauri:build
 ```
 
+## Production desktop CORS
+
+The installed Tauri bundle serves the Angular app from the custom `ddplatform`
+protocol. On Windows and Android the production origin is
+`https://ddplatform.localhost`; on macOS and Linux it is
+`ddplatform://localhost`. The production API must allow the exact desktop origin
+explicitly because the app sends credentialed requests to
+`https://dissertation.pchaffey.me/api/...`.
+
+For nginx, put the `map` in the `http` block and the `/api/` handling in the
+`server` block that proxies `dissertation.pchaffey.me`:
+
+```nginx
+map $http_origin $cors_origin {
+  default "";
+  "https://dissertation.pchaffey.me" $http_origin;
+  "https://ddplatform.localhost" $http_origin;
+  "ddplatform://localhost" $http_origin;
+  "http://localhost:4200" $http_origin;
+}
+
+location /api/ {
+  if ($request_method = OPTIONS) {
+    add_header Access-Control-Allow-Origin $cors_origin always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With" always;
+    add_header Access-Control-Max-Age 86400 always;
+    add_header Vary Origin always;
+    return 204;
+  }
+
+  add_header Access-Control-Allow-Origin $cors_origin always;
+  add_header Access-Control-Allow-Credentials "true" always;
+  add_header Vary Origin always;
+
+  proxy_pass http://backend;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+If CORS is handled in the API app instead of nginx, allow these same origins
+there and keep `credentials: true`. Refresh/login cookies also need
+`SameSite=None; Secure; HttpOnly` in production so the Tauri origin can send
+them back to the HTTPS API.
+
 ## Running unit tests
 
 To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:

@@ -83,6 +83,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private gridSettingsSub!: Subscription;
   private syncStateRun = 0;
   private noHostedGameClosed = false;
+  private destroyed = false;
+  private readonly maxContainerReadyFrames = 30;
   public playersCanControlAllPlayerTokens = false;
   public gridSettings: GridSettings = {
     size: 50,
@@ -119,6 +121,13 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   ngAfterViewInit() {
+    void this.initializeCanvas();
+  }
+
+  private async initializeCanvas() {
+    await this.waitForContainerSize();
+    if (this.destroyed) return;
+
     if (this.syncService.currentRoomId === this.serverId && this.syncService.getEngine()) {
       this.engine = this.syncService.getEngine()!;
       this.engine.setContainer(this.container.nativeElement);
@@ -164,6 +173,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       this.gridSettings = { ...settings };
     });
 
+    this.handleResize();
     void this.handleSyncState();
   }
 
@@ -341,6 +351,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   ngOnDestroy() {
+    this.destroyed = true;
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.hostDisconnectedSub) this.hostDisconnectedSub.unsubscribe();
     if (this.sessionEndedSub) this.sessionEndedSub.unsubscribe();
@@ -358,6 +369,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       const width = Math.floor(rect.width);
       const height = Math.floor(rect.height);
 
+      if (width <= 0 || height <= 0) {
+        return;
+      }
+
       if (this.engine.stage.width() !== width || this.engine.stage.height() !== height) {
         this.engine.stage.width(width);
         this.engine.stage.height(height);
@@ -365,6 +380,32 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
         this.engine.stage.batchDraw();
       }
     }
+  }
+
+  private waitForContainerSize(): Promise<void> {
+    if (this.hasContainerSize()) {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      let attempts = 0;
+      const check = () => {
+        if (this.destroyed || this.hasContainerSize() || attempts >= this.maxContainerReadyFrames) {
+          resolve();
+          return;
+        }
+
+        attempts++;
+        window.requestAnimationFrame(check);
+      };
+
+      window.requestAnimationFrame(check);
+    });
+  }
+
+  private hasContainerSize(): boolean {
+    const rect = this.container?.nativeElement?.getBoundingClientRect();
+    return !!rect && rect.width > 0 && rect.height > 0;
   }
 
   onTokenContextMenu({ token, evt }: any) {

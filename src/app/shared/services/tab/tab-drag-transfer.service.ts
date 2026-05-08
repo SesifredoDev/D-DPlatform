@@ -1,11 +1,14 @@
 import { Injectable } from '@angular/core';
-import { Tab } from './tab-service';
+import type { Tab } from './tab-service';
 
 export interface TabDragPayload {
   tabId: string;
   sourcePane: string;
+  sourceWindowId: string;
+  type: Tab['type'];
   title: string;
   startedAt: number;
+  hasLiveConnection?: boolean;
 }
 
 interface TabDragHandledPayload {
@@ -20,16 +23,20 @@ export class TabDragTransferService {
   private static readonly storageKey = 'dd-platform-tab-drag';
   private static readonly handledStorageKey = 'dd-platform-tab-drag-handled';
   private static readonly maxAgeMs = 10000;
+  private readonly windowId = `tab-window-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   private cleanupTimer: number | null = null;
 
-  write(event: DragEvent, tab: Tab): TabDragPayload {
+  write(event: DragEvent, tab: Tab, options: { hasLiveConnection?: boolean } = {}): TabDragPayload {
     this.removeHandledPayload();
 
     const payload: TabDragPayload = {
       tabId: tab.id,
       sourcePane: String(tab.pane),
+      sourceWindowId: this.windowId,
+      type: tab.type,
       title: tab.title,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      hasLiveConnection: options.hasLiveConnection
     };
     const serialized = JSON.stringify(payload);
 
@@ -111,6 +118,10 @@ export class TabDragTransferService {
     } catch {
       return false;
     }
+  }
+
+  isFromCurrentWindow(payload: TabDragPayload): boolean {
+    return payload.sourceWindowId === this.windowId;
   }
 
   clear() {
@@ -199,8 +210,11 @@ export class TabDragTransferService {
       return {
         tabId: payload.tabId,
         sourcePane: payload.sourcePane,
+        sourceWindowId: payload.sourceWindowId ?? '',
+        type: payload.type ?? 'text',
         title: payload.title ?? 'Tab',
-        startedAt: payload.startedAt
+        startedAt: payload.startedAt,
+        hasLiveConnection: payload.hasLiveConnection === true
       };
     } catch {
       return null;

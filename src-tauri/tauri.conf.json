@@ -13,10 +13,12 @@
     "windows": [
       {
         "title": "D-D Platform",
-        "width": 1200,
-        "height": 800,
+        "url": "ddplatform://localhost/index.html",
+        "width": 1900,
+        "height": 1080,
         "resizable": true,
         "fullscreen": false,
+        "useHttpsScheme": true,
         "dragDropEnabled": false
       }
     ],

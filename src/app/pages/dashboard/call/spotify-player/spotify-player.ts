@@ -1,12 +1,24 @@
-import { Component, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
+import { Component, DoCheck, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
 import { SpotifyService, SpotifySearchResult } from '../../../../shared/services/playlist/spotify.service';
 import { TabService } from '../../../../shared/services/tab/tab-service';
 import { Video } from '../../../../shared/services/video/video';
-import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
 
 type ResultGroup = { [key: string]: SpotifySearchResult[] };
+type SidebarTab = 'playlists' | 'recent' | 'pinned';
+
+interface SpotifyPlayerUiState {
+  spotifySearch: string;
+  groupedResults: ResultGroup;
+  activeCategory: string;
+  showDevicePicker: boolean;
+  showQueue: boolean;
+  activeSidebarTab: SidebarTab;
+  showProfile: boolean;
+  profileData: any;
+  profileItems: SpotifySearchResult[];
+}
 
 @Component({
   selector: 'app-spotify-player',
@@ -15,7 +27,9 @@ type ResultGroup = { [key: string]: SpotifySearchResult[] };
   standalone: true,
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe]
 })
-export class SpotifyPlayer implements OnInit, OnDestroy {
+export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
+  private static readonly uiStateStorageKey = 'dd-platform.spotify-player.tab-ui-state';
+
   @Input() isCallActive: boolean = false;
   @Input() isTab: boolean = false;
   @Input() isServerOwner: boolean = false;
@@ -29,7 +43,7 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
   showPinnedPulldown: boolean = false;
   showQueue: boolean = false;
   isLoading: boolean = false;
-  activeSidebarTab: 'playlists' | 'recent' | 'pinned' = 'playlists';
+  activeSidebarTab: SidebarTab = 'playlists';
 
   // Profile View
   showProfile: boolean = false;
@@ -51,7 +65,15 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
     private videoService: Video
   ) {}
 
-  ngOnInit() {}
+  private lastPersistedUiState = '';
+
+  ngOnInit() {
+    this.restoreUiState();
+  }
+
+  ngDoCheck() {
+    this.persistUiState();
+  }
 
   async doSpotifySearch() {
     if (!this.spotifySearch) return;
@@ -188,5 +210,78 @@ export class SpotifyPlayer implements OnInit, OnDestroy {
     await this.spotify.setVolume(event.target.value);
   }
 
-  ngOnDestroy() {}
+  ngOnDestroy() {
+    this.persistUiState();
+  }
+
+  private restoreUiState() {
+    if (!this.isTab) return;
+
+    try {
+      const rawState = localStorage.getItem(SpotifyPlayer.uiStateStorageKey);
+      if (!rawState) return;
+
+      const state = JSON.parse(rawState) as Partial<SpotifyPlayerUiState>;
+      this.spotifySearch = typeof state.spotifySearch === 'string' ? state.spotifySearch : '';
+      this.groupedResults = this.isResultGroup(state.groupedResults) ? state.groupedResults : {};
+      this.activeCategory = this.isKnownCategory(state.activeCategory) ? state.activeCategory : 'all';
+      this.showDevicePicker = state.showDevicePicker === true;
+      this.showQueue = state.showQueue === true;
+      this.activeSidebarTab = this.isSidebarTab(state.activeSidebarTab) ? state.activeSidebarTab : 'playlists';
+      this.showProfile = state.showProfile === true;
+      this.profileData = state.profileData ?? null;
+      this.profileItems = Array.isArray(state.profileItems) ? state.profileItems : [];
+    } catch {
+      this.resetPersistedUiState();
+    }
+  }
+
+  private persistUiState() {
+    if (!this.isTab) return;
+
+    try {
+      const serialized = JSON.stringify(this.getUiState());
+      if (serialized === this.lastPersistedUiState) return;
+
+      localStorage.setItem(SpotifyPlayer.uiStateStorageKey, serialized);
+      this.lastPersistedUiState = serialized;
+    } catch {
+      // Persistence is best effort only; Spotify auth/playback state is still handled by SpotifyService.
+    }
+  }
+
+  private getUiState(): SpotifyPlayerUiState {
+    return {
+      spotifySearch: this.spotifySearch,
+      groupedResults: this.groupedResults,
+      activeCategory: this.activeCategory,
+      showDevicePicker: this.showDevicePicker,
+      showQueue: this.showQueue,
+      activeSidebarTab: this.activeSidebarTab,
+      showProfile: this.showProfile,
+      profileData: this.profileData,
+      profileItems: this.profileItems
+    };
+  }
+
+  private resetPersistedUiState() {
+    this.lastPersistedUiState = '';
+    try {
+      localStorage.removeItem(SpotifyPlayer.uiStateStorageKey);
+    } catch {
+      // Best effort cleanup only.
+    }
+  }
+
+  private isKnownCategory(value: unknown): value is string {
+    return typeof value === 'string' && this.categories.some(category => category.id === value);
+  }
+
+  private isSidebarTab(value: unknown): value is SidebarTab {
+    return value === 'playlists' || value === 'recent' || value === 'pinned';
+  }
+
+  private isResultGroup(value: unknown): value is ResultGroup {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
 }

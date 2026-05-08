@@ -31,6 +31,7 @@ export class TauriTabPanelService {
       focus: true,
       decorations: true,
       dragDropEnabled: false,
+      useHttpsScheme: true,
       parent: 'main'
     });
 
@@ -44,8 +45,6 @@ export class TauriTabPanelService {
   }
 
   private buildPanelUrl(panelId: string): string {
-    const url = new URL('/', window.location.origin);
-    url.searchParams.set('tabPanel', panelId);
-    return url.toString();
+    return `index.html?tabPanel=${encodeURIComponent(panelId)}`;
   }
 }

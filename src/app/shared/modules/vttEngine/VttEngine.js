@@ -20,10 +20,11 @@ export class VttEngine {
     this.isDM = false
     this.playersCanControlAllPlayerTokens = false;
     this.backgroundViewportLimitMultiplier = 1.5;
+    const containerSize = this.resolveContainerSize(containerId);
     this.stage = new Konva.Stage({
       container: containerId,
-      width: containerId.getBoundingClientRect().width,
-      height: containerId.getBoundingClientRect().height,
+      width: containerSize.width,
+      height: containerSize.height,
       draggable: true
     });
     this.stage.dragBoundFunc((pos) => this.clampStagePosition(pos));
@@ -51,11 +52,23 @@ export class VttEngine {
   }
 
   setContainer(container) {
+    const containerSize = this.resolveContainerSize(container);
     this.containerId = container;
     this.stage.container(container);
-    this.stage.width(container.getBoundingClientRect().width);
-    this.stage.height(container.getBoundingClientRect().height);
+    this.stage.width(containerSize.width);
+    this.stage.height(containerSize.height);
     this.stage.batchDraw();
+  }
+
+  resolveContainerSize(container) {
+    const rect = container?.getBoundingClientRect?.();
+    const width = Math.floor(rect?.width || container?.clientWidth || window.innerWidth || 800);
+    const height = Math.floor(rect?.height || container?.clientHeight || window.innerHeight || 600);
+
+    return {
+      width: Math.max(1, width),
+      height: Math.max(1, height)
+    };
   }
 
   initInteraction() {

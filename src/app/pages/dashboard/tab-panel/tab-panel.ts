@@ -4,11 +4,12 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { Subscription } from 'rxjs';
 import { Tab, TabService } from '../../../shared/services/tab/tab-service';
-import { TabDragTransferService } from '../../../shared/services/tab/tab-drag-transfer.service';
+import { TabDragTransferService, type TabDragPayload } from '../../../shared/services/tab/tab-drag-transfer.service';
 import { UserService } from '../../../shared/services/user/user';
 import { CharacterService } from '../../../shared/services/character/character';
 import { Video } from '../../../shared/services/video/video';
 import { VttSync } from '../../../shared/services/vttsync/vttsync';
+import { AuthService } from '../../../shared/services/auth/auth';
 import { Call, VttStopEvent } from '../call/call';
 import { TextChannel } from '../text-channel/text-channel';
 import { CharacterViewer } from '../character-viewer/character-viewer';
@@ -52,6 +53,7 @@ export class TabPanel implements OnInit, OnDestroy {
   private destroyingWindow = false;
   private suppressNextTabClick = false;
   private movingTabToNewPanel = false;
+  private hasSeenActiveVttSession = false;
 
   constructor(
     private tabService: TabService,
@@ -59,6 +61,7 @@ export class TabPanel implements OnInit, OnDestroy {
     private characterService: CharacterService,
     private videoService: Video,
     private vttSync: VttSync,
+    private authService: AuthService,
     private tabDragTransfer: TabDragTransferService,
     private tauriTabPanelService: TauriTabPanelService
   ) {}
@@ -75,15 +78,33 @@ export class TabPanel implements OnInit, OnDestroy {
       }
     }));
 
-    this.subscriptions.add(this.userService.getMe().subscribe(user => {
-      this.userInfo = user;
-      this.setupActiveCharacterListener();
+    this.userInfo = this.createFallbackUserInfo();
+    this.setupActiveCharacterListener();
+
+    this.subscriptions.add(this.userService.getMe().subscribe({
+      next: user => {
+        this.userInfo = user;
+        this.ensureDefaultCharacter();
+      },
+      error: error => {
+        console.warn('Failed to load user info for tab panel', error);
+        this.ensureDefaultCharacter();
+      }
     }));
 
     this.subscriptions.add(this.videoService.vttSession$.subscribe(session => {
+      if (session.active) {
+        this.hasSeenActiveVttSession = true;
+        return;
+      }
+
       if (!session.active) {
         this.vttHostSessionId = null;
         this.vttJoinSessionId = null;
+        if (this.hasSeenActiveVttSession) {
+          this.hasSeenActiveVttSession = false;
+          this.clearAllVttTabModes();
+        }
       }
     }));
 
@@ -106,6 +127,11 @@ export class TabPanel implements OnInit, OnDestroy {
   }
 
   dockPanel() {
+    if (this.tabs.some(tab => this.isActiveCallTab(tab))) {
+      this.showActiveCallMoveBlockedMessage();
+      return;
+    }
+
     this.closingForDock = true;
     this.tabService.dockPanel(this.panelId, 'left');
     void this.destroyWindow();
@@ -114,7 +140,7 @@ export class TabPanel implements OnInit, OnDestroy {
   onNativeTabDragStart(event: DragEvent, tab: Tab) {
     this.draggingTabId = tab.id;
     this.suppressNextTabClick = true;
-    this.tabDragTransfer.write(event, tab);
+    this.tabDragTransfer.write(event, tab, { hasLiveConnection: this.isActiveCallTab(tab) });
   }
 
   onNativeTabDragEnd(tab: Tab) {
@@ -154,6 +180,13 @@ export class TabPanel implements OnInit, OnDestroy {
       return;
     }
 
+    if (this.isBlockedLiveCallTransfer(payload)) {
+      this.tabDragTransfer.markHandled(payload.tabId);
+      this.showActiveCallMoveBlockedMessage();
+      this.tabDragTransfer.clearSoon();
+      return;
+    }
+
     const targetIndex = this.resolveNativeDropIndex(event, targetTab, payload.tabId);
     this.tabService.moveTab(payload.tabId, this.panelId, targetIndex);
     this.tabDragTransfer.clearSoon();
@@ -182,13 +215,19 @@ export class TabPanel implements OnInit, OnDestroy {
   onHostVtt(channelId: string) {
     this.vttHostSessionId = channelId;
     this.vttJoinSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.panelId);
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.panelId, {
+      vttSessionMode: 'host',
+      vttSessionRoomId: channelId
+    });
   }
 
   onJoinVtt(channelId: string) {
     this.vttJoinSessionId = channelId;
     this.vttHostSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.panelId);
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.panelId, {
+      vttSessionMode: 'join',
+      vttSessionRoomId: channelId
+    });
   }
 
   onStopVtt(event: string | VttStopEvent) {
@@ -201,23 +240,47 @@ export class TabPanel implements OnInit, OnDestroy {
 
     if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
     if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
+    this.clearVttTabMode(channelId);
   }
 
   private setupActiveCharacterListener() {
     this.subscriptions.add(this.characterService.getActiveCharacterObservable().subscribe(character => {
-      if (!character && this.userInfo) {
-        this.activeCharacter = {
-          _id: this.userInfo._id || '0',
-          ownerId: this.userInfo._id,
-          name: this.userInfo.username || 'User',
-          baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
-          classes: []
-        };
+      if (!character) {
+        this.ensureDefaultCharacter();
       } else if (character) {
         this.activeCharacter = character;
         this.activeCharacterID = character._id === '0' ? undefined : character._id;
       }
     }));
+  }
+
+  private createFallbackUserInfo() {
+    const userId = this.authService.getCurrentUserId();
+    if (!userId) return null;
+
+    return {
+      _id: userId,
+      id: userId,
+      username: 'User',
+      email: '',
+      profileIcon: ''
+    };
+  }
+
+  private ensureDefaultCharacter() {
+    if (!this.userInfo || (this.activeCharacter && this.activeCharacter._id !== '0')) {
+      return;
+    }
+
+    const userId = this.userInfo._id || this.userInfo.id || '0';
+    this.activeCharacter = {
+      _id: '0',
+      ownerId: userId,
+      name: this.userInfo.username || 'User',
+      baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
+      classes: []
+    };
+    this.activeCharacterID = undefined;
   }
 
   private async setupCloseHandler() {
@@ -251,6 +314,10 @@ export class TabPanel implements OnInit, OnDestroy {
 
   private async openTabInTauriPanel(tab: Tab) {
     if (!this.tauriTabPanelService.isAvailable()) return;
+    if (this.isActiveCallTab(tab)) {
+      this.showActiveCallMoveBlockedMessage();
+      return;
+    }
 
     const previousPane = tab.pane;
     this.movingTabToNewPanel = true;
@@ -275,6 +342,41 @@ export class TabPanel implements OnInit, OnDestroy {
 
   private shouldPopOutUnhandledDrag(tab: Tab): boolean {
     return this.tauriTabPanelService.isAvailable() && !this.tabDragTransfer.wasHandled(tab.id);
+  }
+
+  private isActiveCallTab(tab: Tab): boolean {
+    return tab.type === 'call' &&
+      this.videoService.currentChannelId === tab.id &&
+      !!this.videoService.getLocalStream();
+  }
+
+  private isBlockedLiveCallTransfer(payload: TabDragPayload): boolean {
+    return payload.type === 'call' &&
+      payload.hasLiveConnection === true &&
+      !this.tabDragTransfer.isFromCurrentWindow(payload);
+  }
+
+  private showActiveCallMoveBlockedMessage() {
+    window.alert('Active calls can be moved inside the same window, but cannot be moved to another window while connected. Leave the call first, or pop it out before joining.');
+  }
+
+  private clearAllVttTabModes() {
+    this.tabs
+      .filter(tab => tab.type === 'vtt' && tab.data?.vttSessionMode)
+      .forEach(tab => this.clearVttTabMode(tab.id));
+  }
+
+  private clearVttTabMode(channelId: string) {
+    const tab = this.tabs.find(currentTab => currentTab.id === channelId && currentTab.type === 'vtt');
+    if (!tab?.data?.vttSessionMode) return;
+
+    this.tabService.updateTab(channelId, {
+      data: {
+        ...tab.data,
+        vttSessionMode: null,
+        vttSessionRoomId: null
+      }
+    });
   }
 
   private readNativeTabDrop(event: DragEvent) {

@@ -61,10 +61,10 @@
             <app-character-viewer [character]="tab.data"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
             <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
-                            [isHostVttSession]="tab.id === vttHostSessionId"
-                            [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
+                            [isHostVttSession]="tab.id === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
+                            [isJoiningVttSession]="tab.id === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
-            <app-spotify-player [isCallActive]="true"></app-spotify-player>
+            <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
           } @else if (tab.type === 'obsidian') {
             <app-obsidian-view [serverId]="tab.data.serverId"></app-obsidian-view>
           }
@@ -129,10 +129,10 @@
               <app-character-viewer [character]="tab.data"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
               <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
-                              [isHostVttSession]="tab.id === vttHostSessionId"
-                              [isJoiningVttSession]="tab.id === vttJoinSessionId"></app-vtt-canvas>
+                              [isHostVttSession]="tab.id === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
+                              [isJoiningVttSession]="tab.id === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
-              <app-spotify-player [isCallActive]="true"></app-spotify-player>
+              <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
             } @else if (tab.type === 'obsidian') {
               <app-obsidian-view [serverId]="tab.data.serverId"></app-obsidian-view>
             }
