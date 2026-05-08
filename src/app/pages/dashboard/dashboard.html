@@ -9,27 +9,42 @@
   (actionPerformed)="onSidePanelAction()">
 </app-side-panel>
 
-<main #editorArea class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" [class.split-active]="rightTabs.length > 0 && !isMobile" cdkDropListGroup>
+<main #editorArea class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" [class.split-active]="rightTabs.length > 0 && !isMobile">
 
   <!-- LEFT PANE -->
   <div class="pane"
        #leftPane
        id="left-pane"
-       cdkDropList
        [style.flex-basis]="leftPaneBasis"
-       [cdkDropListData]="'left'"
-       (cdkDropListDropped)="onDrop($event)">
+       (dragover)="onNativeTabDragOver($event)"
+       (drop)="onNativeTabDrop($event, 'left')">
 
     <div class="tab-bar">
       @for (tab of leftTabs; track tab.id) {
         <div class="tab"
              [class.active]="tab.active"
-             cdkDrag
-             [cdkDragData]="tab"
+             [class.dragging]="draggingTabId === tab.id"
+             draggable="true"
+             (dragstart)="onNativeTabDragStart($event, tab)"
+             (dragend)="onNativeTabDragEnd(tab)"
+             (dragover)="onNativeTabDragOver($event)"
+             (drop)="onNativeTabDrop($event, 'left', tab)"
              (click)="selectTab(tab)">
           <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
           <span class="tab-title">{{ tab.title }}</span>
-          <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
+          <button mat-icon-button type="button" class="tab-action popout-btn" title="Pop out tab" aria-label="Pop out tab"
+                  draggable="false"
+                  *ngIf="canUseTauriPanels"
+                  (mousedown)="$event.stopPropagation()"
+                  (click)="popOutTab($event, tab)">
+            <mat-icon>open_in_new</mat-icon>
+          </button>
+          <button mat-icon-button type="button" class="tab-action close-btn" title="Close tab" aria-label="Close tab"
+                  draggable="false"
+                  (mousedown)="$event.stopPropagation()"
+                  (click)="closeTab($event, tab.id)">
+            <mat-icon>close</mat-icon>
+          </button>
         </div>
       }
     </div>
@@ -65,23 +80,39 @@
 
   <!-- RIGHT PANE -->
   <div class="pane right-pane"
+       #rightPane
        [class.empty]="rightTabs.length === 0"
        *ngIf="!isMobile || rightTabs.length > 0"
-       cdkDropList
-       [cdkDropListData]="'right'"
-       (cdkDropListDropped)="onDrop($event)">
+       (dragover)="onNativeTabDragOver($event)"
+       (drop)="onNativeTabDrop($event, 'right')">
 
     @if (rightTabs.length > 0) {
       <div class="tab-bar">
         @for (tab of rightTabs; track tab.id) {
           <div class="tab"
                [class.active]="tab.active"
-               cdkDrag
-               [cdkDragData]="tab"
+               [class.dragging]="draggingTabId === tab.id"
+               draggable="true"
+               (dragstart)="onNativeTabDragStart($event, tab)"
+               (dragend)="onNativeTabDragEnd(tab)"
+               (dragover)="onNativeTabDragOver($event)"
+               (drop)="onNativeTabDrop($event, 'right', tab)"
                (click)="selectTab(tab)">
             <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
             <span class="tab-title">{{ tab.title }}</span>
-            <mat-icon class="close-btn" (click)="closeTab($event, tab.id)">close</mat-icon>
+            <button mat-icon-button type="button" class="tab-action popout-btn" title="Pop out tab" aria-label="Pop out tab"
+                    draggable="false"
+                    *ngIf="canUseTauriPanels"
+                    (mousedown)="$event.stopPropagation()"
+                    (click)="popOutTab($event, tab)">
+              <mat-icon>open_in_new</mat-icon>
+            </button>
+            <button mat-icon-button type="button" class="tab-action close-btn" title="Close tab" aria-label="Close tab"
+                    draggable="false"
+                    (mousedown)="$event.stopPropagation()"
+                    (click)="closeTab($event, tab.id)">
+              <mat-icon>close</mat-icon>
+            </button>
           </div>
         }
       </div>
@@ -118,5 +149,6 @@
       </div>
     }
   </div>
+
 
 </main>

@@ -7,8 +7,7 @@ import {Call, VttStopEvent} from './call/call';
 import {ChannelService} from '../../shared/services/channel/channel';
 import {TextChannel} from './text-channel/text-channel';
 import {MatIcon, MatIconModule} from '@angular/material/icon';
-import {Tab, TabService} from '../../shared/services/tab/tab-service';
-import {CdkDrag, CdkDragDrop, CdkDropList, CdkDropListGroup} from '@angular/cdk/drag-drop';
+import {Tab, TabPane, TabService} from '../../shared/services/tab/tab-service';
 import {CharacterViewer} from './character-viewer/character-viewer';
 import {VttCanvas} from './vtt-canvas/vtt-canvas';
 import {SpotifyPlayer} from './call/spotify-player/spotify-player';
@@ -18,6 +17,8 @@ import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
 import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 import {VttSync} from '../../shared/services/vttsync/vttsync';
+import {TauriTabPanelService} from '../../shared/services/tab/tauri-tab-panel.service';
+import {TabDragTransferService} from '../../shared/services/tab/tab-drag-transfer.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -30,9 +31,6 @@ import {VttSync} from '../../shared/services/vttsync/vttsync';
     Call,
     TextChannel,
     MatIconModule,
-    CdkDropList,
-    CdkDrag,
-    CdkDropListGroup,
     CharacterViewer,
     VttCanvas,
     SpotifyPlayer,
@@ -45,12 +43,15 @@ import {VttSync} from '../../shared/services/vttsync/vttsync';
 export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('editorArea') private editorAreaRef?: ElementRef<HTMLElement>;
   @ViewChild('leftPane') private leftPaneRef?: ElementRef<HTMLElement>;
+  @ViewChild('rightPane') private rightPaneRef?: ElementRef<HTMLElement>;
 
   leftTabs: Tab[] = [];
   rightTabs: Tab[] = [];
   allTabs: Tab[] = [];
+  draggingTabId: string | null = null;
   leftWidth = 0;
   isResizing = false;
+  canUseTauriPanels = false;
 
   userInfo: any = null;
   activeCharacter: any = null;
@@ -65,6 +66,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   private pendingLeftWidth: number | null = null;
   private animationFrameId: number | null = null;
   private resizeObserver?: ResizeObserver;
+  private suppressNextTabClick = false;
 
   constructor(
     private tabService: TabService,
@@ -73,6 +75,8 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     private channelService: ChannelService,
     private videoService: Video,
     private vttSync: VttSync,
+    private tauriTabPanelService: TauriTabPanelService,
+    private tabDragTransfer: TabDragTransferService,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
   ) {
@@ -80,6 +84,8 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnInit() {
+    this.canUseTauriPanels = this.tauriTabPanelService.isAvailable();
+
     this.tabService.tabs$.subscribe(tabs => {
       this.allTabs = tabs;
       this.updatePaneTabs();
@@ -203,16 +209,90 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   selectTab(tab: Tab) {
+    if (this.suppressNextTabClick) return;
+
     this.tabService.selectTab(tab.id);
   }
 
-  onDrop(event: CdkDragDrop<any>) {
-    if (this.isMobile) return;
-    const tab = event.item.data as Tab;
-    const targetPane = event.container.data as 'left' | 'right';
-    if (tab.pane !== targetPane) {
-      this.tabService.moveTab(tab.id, targetPane);
+  async popOutTab(event: Event, tab: Tab) {
+    event.stopPropagation();
+    await this.openTabInTauriPanel(tab);
+  }
+
+  private async openTabInTauriPanel(tab: Tab) {
+    if (this.isMobile || !this.canUseTauriPanels) return;
+
+    const previousPane = tab.pane;
+    const panel = this.tabService.createPanelFromTab(tab.id);
+    if (!panel) return;
+
+    const opened = await this.tauriTabPanelService.openPanel(panel);
+    if (!opened) {
+      this.tabService.moveTab(tab.id, previousPane);
     }
+  }
+
+  onNativeTabDragStart(event: DragEvent, tab: Tab) {
+    if (this.isMobile) {
+      event.preventDefault();
+      return;
+    }
+
+    this.draggingTabId = tab.id;
+    this.suppressNextTabClick = true;
+    this.tabDragTransfer.write(event, tab);
+  }
+
+  onNativeTabDragEnd(tab: Tab) {
+    this.draggingTabId = null;
+    if (this.shouldPopOutUnhandledDrag(tab)) {
+      void this.openTabInTauriPanel(tab);
+    }
+
+    this.tabDragTransfer.clearSoon();
+    window.setTimeout(() => {
+      this.suppressNextTabClick = false;
+    });
+  }
+
+  onNativeTabDragOver(event: DragEvent) {
+    if (this.isMobile || !this.tabDragTransfer.hasPayload(event)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  }
+
+  onNativeTabDrop(event: DragEvent, targetPane: TabPane, targetTab?: Tab) {
+    if (this.isMobile) return;
+
+    const payload = this.readNativeTabDrop(event);
+    if (!payload) return;
+
+    this.tabDragTransfer.markHandled(payload.tabId);
+    if (targetTab?.id === payload.tabId) {
+      this.tabDragTransfer.clearSoon();
+      return;
+    }
+
+    const targetIndex = this.resolveNativeDropIndex(event, targetPane, targetTab, payload.tabId);
+    this.tabService.moveTab(payload.tabId, targetPane, targetIndex);
+    this.tabDragTransfer.clearSoon();
+  }
+
+  async onNativePopoutDrop(event: DragEvent) {
+    const payload = this.readNativeTabDrop(event);
+    if (!payload) return;
+
+    this.tabDragTransfer.markHandled(payload.tabId);
+    const tab = this.allTabs.find(currentTab => currentTab.id === payload.tabId);
+    if (tab) {
+      await this.openTabInTauriPanel(tab);
+    }
+
+    this.tabDragTransfer.clearSoon();
   }
 
   getAppIcon(type: string): string {
@@ -254,15 +334,43 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   @HostListener('dragover', ['$event'])
   onDragOver(event: DragEvent) {
+    if (this.tabDragTransfer.hasPayload(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+      return;
+    }
+
+    if (!this.hasDraggedFiles(event)) return;
+
     event.preventDefault();
     event.stopPropagation();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  @HostListener('dragenter', ['$event'])
+  onDragEnter(event: DragEvent) {
+    this.onDragOver(event);
   }
 
   @HostListener('drop', ['$event'])
   onFileDrop(event: DragEvent) {
+    const tabPayload = this.readNativeTabDrop(event);
+    if (tabPayload) {
+      this.tabDragTransfer.markHandled(tabPayload.tabId);
+      this.tabService.moveTab(tabPayload.tabId, this.resolvePaneFromDropPoint(event));
+      this.tabDragTransfer.clearSoon();
+      return;
+    }
+
+    if (!this.hasDraggedFiles(event)) return;
+
     event.preventDefault();
     event.stopPropagation();
-
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
       const file = files[0];
@@ -333,5 +441,56 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private getDefaultSplitWidth(totalWidth: number): number {
     return Math.round(Math.max(this.minPaneWidth, totalWidth / 2));
+  }
+
+  private shouldPopOutUnhandledDrag(tab: Tab): boolean {
+    return !this.isMobile && this.canUseTauriPanels && !this.tabDragTransfer.wasHandled(tab.id);
+  }
+
+  private readNativeTabDrop(event: DragEvent) {
+    if (!this.tabDragTransfer.hasPayload(event)) {
+      return null;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    return this.tabDragTransfer.read(event);
+  }
+
+  private resolveNativeDropIndex(event: DragEvent, targetPane: TabPane, targetTab: Tab | undefined, draggedTabId: string): number {
+    const targetTabs = this.allTabs.filter(tab => tab.pane === targetPane && tab.id !== draggedTabId);
+    if (!targetTab) {
+      return targetTabs.length;
+    }
+
+    const targetIndex = targetTabs.findIndex(tab => tab.id === targetTab.id);
+    if (targetIndex < 0) {
+      return targetTabs.length;
+    }
+
+    return targetIndex + (this.isAfterHorizontalMidpoint(event) ? 1 : 0);
+  }
+
+  private isAfterHorizontalMidpoint(event: DragEvent): boolean {
+    const target = event.currentTarget as HTMLElement | null;
+    const rect = target?.getBoundingClientRect();
+    return !!rect && event.clientX > rect.left + rect.width / 2;
+  }
+
+  private resolvePaneFromDropPoint(event: DragEvent): TabPane {
+    if (this.isMobile) {
+      return 'left';
+    }
+
+    const rightRect = this.rightPaneRef?.nativeElement.getBoundingClientRect();
+    if (rightRect && event.clientX >= rightRect.left && event.clientX <= rightRect.right) {
+      return 'right';
+    }
+
+    return 'left';
+  }
+
+  private hasDraggedFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
   }
 }

@@ -9,7 +9,10 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "electron": "npm run build && electron .",
-    "electron:dev": "concurrently \"ng serve\" \"wait-on http://localhost:4200 && electron .\""
+    "electron:dev": "concurrently \"ng serve\" \"wait-on http://localhost:4200 && electron .\"",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "prettier": {
     "printWidth": 100,
@@ -45,6 +48,7 @@
     "@milkdown/preset-gfm": "^7.20.0",
     "@milkdown/theme-nord": "^7.20.0",
     "@milkdown/transformer": "^7.20.0",
+    "@tauri-apps/api": "^2.11.0",
     "electron-json-storage": "^4.6.0",
     "idb-keyval": "^6.2.2",
     "konva": "^10.2.0",
@@ -65,6 +69,7 @@
     "@angular/build": "^21.0.0",
     "@angular/cli": "^21.0.0",
     "@angular/compiler-cli": "^21.0.0",
+    "@tauri-apps/cli": "^2.11.1",
     "@types/simple-peer": "^9.11.9",
     "concurrently": "^9.2.1",
     "electron": "github:castlabs/electron-releases#v22.3.27+wvcus",

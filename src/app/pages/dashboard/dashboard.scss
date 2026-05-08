@@ -107,7 +107,7 @@
         }
       }
 
-      app-video-call, app-text-channel, app-character-viewer, app-vtt-canvas, app-spotify-player {
+      app-video-call, app-text-channel, app-character-viewer, app-vtt-canvas, app-spotify-player, app-obsidian-view {
         display: block; height: 100%; width: 100%; flex: 1;
       }
     }
@@ -200,6 +200,7 @@
 
       .tab-title {
         flex: 1;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -233,24 +234,101 @@
         }
       }
 
-      .close-btn {
-        font-size: 14px;
-        width: 18px;
-        height: 18px;
-        margin-left: 8px;
+      &.dragging {
+        opacity: 0.45;
+      }
+
+      .tab-action {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        padding: 0;
+        margin-left: 4px;
         display: flex;
         align-items: center;
         justify-content: center;
         border-radius: var(--radius-s);
-        opacity: 0.4;
+        color: currentColor;
+        opacity: 0.45;
         transition: all var(--transition-fast);
+        --mdc-icon-button-state-layer-size: 22px;
+        --mat-icon-button-state-layer-size: 22px;
+
+        mat-icon {
+          font-size: 14px;
+          width: 14px;
+          height: 14px;
+          line-height: 14px;
+        }
 
         &:hover {
           background: rgba(255, 255, 255, 0.15);
           opacity: 1;
+        }
+      }
+
+      .popout-btn {
+        opacity: 0;
+
+        &:hover {
+          color: var(--brand-blue);
+        }
+      }
+
+      &:hover .popout-btn,
+      &.active .popout-btn {
+        opacity: 0.55;
+      }
+
+      .close-btn {
+        &:hover {
           color: var(--danger);
         }
       }
+    }
+  }
+
+  .cdk-drag-preview {
+    box-sizing: border-box;
+    border-radius: var(--radius-m);
+    background: rgba(26, 31, 42, 0.96);
+    color: var(--on-surface);
+    box-shadow: var(--shadow-2);
+  }
+
+  .cdk-drag-placeholder {
+    opacity: 0.22;
+  }
+
+  .popout-drop-target {
+    position: absolute;
+    top: 64px;
+    right: 16px;
+    width: 44px;
+    height: 44px;
+    z-index: 24;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-m);
+    border: 1px solid var(--outline);
+    background: rgba(0, 0, 0, 0.42);
+    color: var(--on-surface-variant);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transition: all var(--transition-standard);
+
+    mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    &:hover {
+      color: var(--on-surface);
+      border-color: var(--brand-blue-alpha);
+      background: rgba(255, 255, 255, 0.08);
+      box-shadow: 0 0 14px rgba(88, 166, 255, 0.2);
     }
   }
 

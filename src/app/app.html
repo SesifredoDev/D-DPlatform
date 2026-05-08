@@ -1,1 +1,5 @@
-<router-outlet />
+@if (tabPanelId; as panelId) {
+  <app-tab-panel [panelId]="panelId"></app-tab-panel>
+} @else {
+  <router-outlet />
+}

@@ -12,6 +12,12 @@ ng serve
 
 Once the index is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
+To run the frontend in a Tauri desktop shell, run:
+
+```bash
+npm run tauri:dev
+```
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
@@ -35,6 +41,12 @@ ng build
 ```
 
 This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+
+To create a Tauri desktop build, run:
+
+```bash
+npm run tauri:build
+```
 
 ## Running unit tests
 
