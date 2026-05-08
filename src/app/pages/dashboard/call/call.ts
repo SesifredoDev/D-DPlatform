@@ -53,6 +53,19 @@ export interface VttStopEvent {
 type MicrophoneProcessingMode = 'studio' | 'processed';
 type RemoteVideoQualityLevel = 0 | 1 | 2;
 
+interface StoredCallMediaPreferences {
+  selectedVideoId?: string;
+  selectedAudioId?: string;
+  selectedOutputId?: string;
+  microphoneProcessingMode?: MicrophoneProcessingMode;
+  remoteVideoQualityPreference?: RemoteVideoQualityPreference;
+  selectedPcVideoSource?: CompanionSourceId;
+  selectedPcAudioSource?: CompanionSourceId;
+  isPreviewMuted?: boolean;
+  isPreviewVideoOff?: boolean;
+  experimentalMobile1080pEnabled?: boolean;
+}
+
 interface RemoteAudioOutput {
   stream: MediaStream;
   audioTrackId: string;
@@ -82,6 +95,7 @@ interface PriorityGridPlacement {
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
+  private static readonly mediaPreferencesStorageKey = 'd-d-platform.call.media-preferences';
   private static readonly micTestMaxDurationMs = 8000;
   private static readonly minSceneMainLayoutWidthPx = 720;
   private static readonly minSceneMainLayoutHeightPx = 420;
@@ -321,6 +335,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
     this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
+    await this.restoreStoredMediaPreferences();
     this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(
       this.videoService.getRemoteVideoQualityPreference()
     );
@@ -337,6 +352,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.localStream = existingStream;
       this.isAudioMuted = !this.localStream.getAudioTracks().every(t => t.enabled);
       this.isVideoOff = !this.localStream.getVideoTracks().every(t => t.enabled);
+      this.syncPreviewSetupFromLive();
       this.syncMicInputMonitor();
 
       setTimeout(() => {
@@ -670,9 +686,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.audioDevices = devices.filter(d => d.kind === 'audioinput');
       this.audioOutputDevices = devices.filter(d => d.kind === 'audiooutput');
 
-      if (this.videoDevices.length && !this.selectedVideoId) this.selectedVideoId = this.videoDevices[0].deviceId;
-      if (this.audioDevices.length && !this.selectedAudioId) this.selectedAudioId = this.audioDevices[0].deviceId;
-      if (this.audioOutputDevices.length && !this.selectedOutputId) this.selectedOutputId = this.audioOutputDevices[0].deviceId;
+      this.selectedVideoId = this.resolveAvailableDeviceId(this.videoDevices, this.selectedVideoId);
+      this.selectedAudioId = this.resolveAvailableDeviceId(this.audioDevices, this.selectedAudioId);
+      this.selectedOutputId = this.resolveAvailableDeviceId(this.audioOutputDevices, this.selectedOutputId);
       this.mobileMediaReady = true;
       this.mobileMediaMessage = '';
       await this.applyAudioOutputToAllMedia();
@@ -690,6 +706,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     try {
       this.previewStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+      this.applyPreviewSetupToStream();
 
       if (this.previewVideo) {
         this.previewVideo.nativeElement.srcObject = this.previewStream;
@@ -702,6 +719,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       console.error('Preview failed, trying fallback', err);
       try {
         this.previewStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        this.applyPreviewSetupToStream();
         this.syncMicInputMonitor();
         await this.applyAudioOutputToAllMedia();
         this.cdr.detectChanges();
@@ -712,6 +730,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async onDeviceChange() {
+    this.persistMediaPreferences();
     if (this.localStream) {
       await this.replaceActiveMediaStream();
       return;
@@ -721,6 +740,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async onMicrophoneProcessingChange() {
+    this.persistMediaPreferences();
     if (!this.localStream && !this.previewStream && this.isMobileBrowser && !this.mobileMediaReady) {
       return;
     }
@@ -1034,6 +1054,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     this.experimentalMobile1080pEnabled = !this.experimentalMobile1080pEnabled;
+    this.persistMediaPreferences();
 
     if (this.localStream) {
       await this.replaceActiveMediaStream();
@@ -1048,13 +1069,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   async changePcVideoSource(sourceId: CompanionSourceId) {
     await this.videoService.selectVideoSource(sourceId);
     this.updateLocalVideoDisplay();
+    this.persistMediaPreferences();
   }
 
   async changePcAudioSource(sourceId: CompanionSourceId) {
     await this.videoService.selectAudioSource(sourceId);
+    this.persistMediaPreferences();
   }
 
   async changeAudioOutput() {
+    this.persistMediaPreferences();
     await this.applyAudioOutputToAllMedia();
   }
 
@@ -1480,9 +1504,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   onRemoteVideoQualityChange() {
-    this.videoService.setRemoteVideoQualityPreference(
-      this.remoteVideoQualityOptions[this.remoteVideoQualityLevel]?.value ?? 'medium'
-    );
+    this.remoteVideoQualityLevel = this.normalizeRemoteVideoQualityLevel(this.remoteVideoQualityLevel);
+    this.videoService.setRemoteVideoQualityPreference(this.getSelectedRemoteVideoQualityPreference());
+    this.persistMediaPreferences();
   }
 
   get remoteVideoQualityLabel(): string {
@@ -1519,6 +1543,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       // SYNC: Transfer preview settings to live state
       this.isAudioMuted = this.isPreviewMuted;
       this.isVideoOff = this.isPreviewVideoOff;
+      this.persistMediaPreferences();
 
       // Apply initial track states
       this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
@@ -1566,6 +1591,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.showSpotify = false;
     this.stopVtt.emit({ roomId: this.getVttRoomId(), endSession: false });
     this.isDmMode = false;
+    this.syncPreviewSetupFromLive();
     if (!this.isComponentDestroying) {
         await this.startPreview();
     }
@@ -1576,12 +1602,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.isAudioMuted = !this.isAudioMuted;
       this.localStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
       this.videoService.setMicrophoneEnabled(!this.isAudioMuted);
+      this.isPreviewMuted = this.isAudioMuted;
     } else {
       this.isPreviewMuted = !this.isPreviewMuted;
       if (this.previewStream) {
         this.previewStream.getAudioTracks().forEach(t => t.enabled = !this.isPreviewMuted);
       }
     }
+    this.persistMediaPreferences();
   }
 
   toggleVideo() {
@@ -1589,12 +1617,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.isVideoOff = !this.isVideoOff;
       this.localStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));
       this.videoService.setCameraEnabled(!this.isVideoOff);
+      this.isPreviewVideoOff = this.isVideoOff;
     } else {
       this.isPreviewVideoOff = !this.isPreviewVideoOff;
       if (this.previewStream) {
         this.previewStream.getVideoTracks().forEach(t => t.enabled = !this.isPreviewVideoOff);
       }
     }
+    this.persistMediaPreferences();
   }
 
   triggerVttNotification() {
@@ -1902,6 +1932,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.isDmMode = false;
     this.vttSession = { active: false, roomId: null, hostId: null };
     this.lastAutoSelectedCompanionVideoId = null;
+    this.syncPreviewSetupFromLive();
 
     if (!this.isComponentDestroying) {
       await this.startPreview();
@@ -1950,6 +1981,164 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.isPreparingMobileMedia = false;
       this.cdr.detectChanges();
     }
+  }
+
+  private async restoreStoredMediaPreferences() {
+    const preferences = this.readStoredMediaPreferences();
+    if (!preferences) {
+      return;
+    }
+
+    if (typeof preferences.selectedVideoId === 'string') {
+      this.selectedVideoId = preferences.selectedVideoId;
+    }
+    if (typeof preferences.selectedAudioId === 'string') {
+      this.selectedAudioId = preferences.selectedAudioId;
+    }
+    if (typeof preferences.selectedOutputId === 'string') {
+      this.selectedOutputId = preferences.selectedOutputId;
+    }
+    if (this.isMicrophoneProcessingMode(preferences.microphoneProcessingMode)) {
+      this.microphoneProcessingMode = preferences.microphoneProcessingMode;
+    }
+    if (this.isRemoteVideoQualityPreference(preferences.remoteVideoQualityPreference)) {
+      this.videoService.setRemoteVideoQualityPreference(preferences.remoteVideoQualityPreference);
+    }
+    if (typeof preferences.isPreviewMuted === 'boolean') {
+      this.isPreviewMuted = preferences.isPreviewMuted;
+      this.isAudioMuted = preferences.isPreviewMuted;
+    }
+    if (typeof preferences.isPreviewVideoOff === 'boolean') {
+      this.isPreviewVideoOff = preferences.isPreviewVideoOff;
+      this.isVideoOff = preferences.isPreviewVideoOff;
+    }
+    if (typeof preferences.experimentalMobile1080pEnabled === 'boolean') {
+      this.experimentalMobile1080pEnabled = preferences.experimentalMobile1080pEnabled;
+    }
+    if (typeof preferences.selectedPcVideoSource === 'string' && preferences.selectedPcVideoSource) {
+      this.selectedPcVideoSource = preferences.selectedPcVideoSource;
+      await this.videoService.selectVideoSource(preferences.selectedPcVideoSource);
+    }
+    if (typeof preferences.selectedPcAudioSource === 'string' && preferences.selectedPcAudioSource) {
+      this.selectedPcAudioSource = preferences.selectedPcAudioSource;
+      await this.videoService.selectAudioSource(preferences.selectedPcAudioSource);
+    }
+  }
+
+  private readStoredMediaPreferences(): Partial<StoredCallMediaPreferences> | null {
+    const storage = this.getPreferenceStorage();
+    if (!storage) {
+      return null;
+    }
+
+    const value = storage.getItem(Call.mediaPreferencesStorageKey);
+    if (!value) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private persistMediaPreferences() {
+    const preferences: StoredCallMediaPreferences = {
+      selectedVideoId: this.selectedVideoId,
+      selectedAudioId: this.selectedAudioId,
+      selectedOutputId: this.selectedOutputId,
+      microphoneProcessingMode: this.microphoneProcessingMode,
+      remoteVideoQualityPreference: this.getSelectedRemoteVideoQualityPreference(),
+      selectedPcVideoSource: this.selectedPcVideoSource,
+      selectedPcAudioSource: this.selectedPcAudioSource,
+      isPreviewMuted: this.localStream ? this.isAudioMuted : this.isPreviewMuted,
+      isPreviewVideoOff: this.localStream ? this.isVideoOff : this.isPreviewVideoOff,
+      experimentalMobile1080pEnabled: this.experimentalMobile1080pEnabled
+    };
+
+    this.writeStoredMediaPreferences(preferences);
+  }
+
+  private persistCurrentMediaSetupState() {
+    const preferences = this.readStoredMediaPreferences() ?? {};
+    preferences.isPreviewMuted = this.localStream ? this.isAudioMuted : this.isPreviewMuted;
+    preferences.isPreviewVideoOff = this.localStream ? this.isVideoOff : this.isPreviewVideoOff;
+    preferences.experimentalMobile1080pEnabled = this.experimentalMobile1080pEnabled;
+    this.writeStoredMediaPreferences(preferences);
+  }
+
+  private writeStoredMediaPreferences(preferences: Partial<StoredCallMediaPreferences>) {
+    const storage = this.getPreferenceStorage();
+    if (!storage) {
+      return;
+    }
+
+    try {
+      storage.setItem(Call.mediaPreferencesStorageKey, JSON.stringify(preferences));
+    } catch (error) {
+      console.warn('Failed to persist call media preferences', error);
+    }
+  }
+
+  private getPreferenceStorage(): Storage | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      return window.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolveAvailableDeviceId(devices: MediaDeviceInfo[], selectedDeviceId: string): string {
+    if (!devices.length) {
+      return '';
+    }
+
+    return selectedDeviceId && devices.some(device => device.deviceId === selectedDeviceId)
+      ? selectedDeviceId
+      : devices[0].deviceId;
+  }
+
+  private applyPreviewSetupToStream() {
+    if (!this.previewStream) {
+      return;
+    }
+
+    this.previewStream.getAudioTracks().forEach(track => (track.enabled = !this.isPreviewMuted));
+    this.previewStream.getVideoTracks().forEach(track => (track.enabled = !this.isPreviewVideoOff));
+  }
+
+  private syncPreviewSetupFromLive() {
+    this.isPreviewMuted = this.isAudioMuted;
+    this.isPreviewVideoOff = this.isVideoOff;
+    this.persistCurrentMediaSetupState();
+  }
+
+  private isMicrophoneProcessingMode(value: unknown): value is MicrophoneProcessingMode {
+    return value === 'studio' || value === 'processed';
+  }
+
+  private isRemoteVideoQualityPreference(value: unknown): value is RemoteVideoQualityPreference {
+    return value === 'low' || value === 'medium' || value === 'high';
+  }
+
+  private normalizeRemoteVideoQualityLevel(value: unknown): RemoteVideoQualityLevel {
+    const numericValue = typeof value === 'string' ? Number(value) : value;
+    if (numericValue === 0 || numericValue === 1 || numericValue === 2) {
+      return numericValue;
+    }
+
+    return 1;
+  }
+
+  private getSelectedRemoteVideoQualityPreference(): RemoteVideoQualityPreference {
+    const level = this.normalizeRemoteVideoQualityLevel(this.remoteVideoQualityLevel);
+    return this.remoteVideoQualityOptions[level]?.value ?? 'medium';
   }
 
   private parseDeviceTypeParam(value: string | null | undefined): DeviceType | null {
