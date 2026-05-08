@@ -127,12 +127,34 @@
 
   <!-- ACTIVE CALL VIEW -->
   @if (localStream) {
-    <div #gridContainer class="grid count-{{ remoteStreams.length + 1}}">
+    <div
+      #gridContainer
+      class="grid count-{{ visibleParticipantCount }}"
+      [class.scene-main-active]="isSceneMainLayoutActive"
+      [style.--scene-main-row-count]="sceneMainRowCount"
+      [style.--scene-main-row-height]="sceneMainRowHeightCss"
+      [style.--scene-side-row-height]="sceneSideRowHeightCss"
+      [style.--scene-side-tile-max-width]="sceneSideTileMaxWidthCss"
+    >
       <!-- Local Video -->
-      <div class="video-box local" [class.video-hidden]="isVideoOff">
+      <div
+        *ngIf="showLocalSelfView"
+        class="video-box local"
+        [class.video-hidden]="isVideoOff"
+        [class.context-menu-open]="localContextMenuOpen"
+        [class.scene-main-character]="isSceneMainLayoutActive && localSceneMainCharacter"
+        [class.scene-side-character]="isSceneMainLayoutActive && !localSceneMainCharacter"
+        [style.grid-column]="getLocalPriorityGridColumn()"
+        [style.grid-row]="getLocalPriorityGridRow()"
+        [style.max-height]="getLocalPriorityGridMaxHeight()"
+        (contextmenu)="openLocalContextMenu($event)"
+      >
         <video #localVideo autoplay playsinline [muted]="true"></video>
         <div class="video-placeholder" *ngIf="isVideoOff">
           <div class="user-avatar">{{ (isDmMode ? dmCharacter : character).name?.charAt(0) || 'Y' }}</div>
+        </div>
+        <div class="scene-main-badge" *ngIf="isSceneMainLayoutActive && localSceneMainCharacter" matTooltip="Scene Main Character">
+          <mat-icon>star</mat-icon>
         </div>
 
         <!-- RPG Unit Frame Overlay -->
@@ -215,10 +237,18 @@
         class="video-box remote"
         *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream"
         [class.context-menu-open]="remoteContextMenu?.remoteId === remote.id"
+        [class.scene-main-character]="isSceneMainLayoutActive && remote.isSceneMainCharacter"
+        [class.scene-side-character]="isSceneMainLayoutActive && !remote.isSceneMainCharacter"
+        [style.grid-column]="getPriorityGridColumn(remote.id)"
+        [style.grid-row]="getPriorityGridRow(remote.id)"
+        [style.max-height]="getPriorityGridMaxHeight(remote.id)"
         (click)="openCharacter(remote.userData)"
         (contextmenu)="openRemoteContextMenu($event, remote)"
       >
         <video #remoteVideo autoplay playsinline [muted]="supportsRemoteAudioGain"></video>
+        <div class="scene-main-badge" *ngIf="isSceneMainLayoutActive && remote.isSceneMainCharacter" matTooltip="Scene Main Character">
+          <mat-icon>star</mat-icon>
+        </div>
 
         @if (remote.userData){
           <div class="character-overlay">
@@ -294,6 +324,17 @@
 
     </div>
 
+    <button
+      type="button"
+      class="scene-main-clear-button glass"
+      *ngIf="isSceneMainLayoutActive && isServerOwner && sceneMainCharacterIds.length"
+      (click)="clearSceneMainCharacters()"
+      matTooltip="Clear scene main characters"
+    >
+      <mat-icon>stars</mat-icon>
+      <span>Clear MC</span>
+    </button>
+
     @if (remoteContextMenu) {
       @if (activeRemoteContextMenuParticipant; as activeRemote) {
         <div
@@ -318,9 +359,21 @@
               <mat-icon>person</mat-icon>
               <span>Open Character</span>
             </button>
+            <button
+              *ngIf="isServerOwner"
+              type="button"
+              class="remote-menu-action"
+              role="menuitem"
+              [class.active]="isSceneMainCharacter(activeRemote.id)"
+              [disabled]="isSceneMainCharacterLimitReached(activeRemote)"
+              (click)="toggleSceneMainCharacter(activeRemote)"
+            >
+              <mat-icon>{{ getSceneMainCharacterMenuIcon(activeRemote) }}</mat-icon>
+              <span>{{ getSceneMainCharacterMenuLabel(activeRemote) }}</span>
+            </button>
           </div>
 
-          <div class="remote-menu-section remote-volume-menu-item">
+          <div class="remote-menu-section remote-volume-menu-item" *ngIf="!activeRemote.isLocal">
             <div class="remote-menu-label">
               <mat-icon>{{ getRemoteVolumeIcon(activeRemote) }}</mat-icon>
               <span>Volume</span>
@@ -359,6 +412,9 @@
           </button>
           <button (click)="toggleVideo()" [class.active]="isVideoOff" class="btn-action" [matTooltip]="isVideoOff ? 'Start Video' : 'Stop Video'">
             <mat-icon>{{ isVideoOff ? 'videocam_off' : 'videocam' }}</mat-icon>
+          </button>
+          <button (click)="toggleSelfView()" [class.active]="hideSelfView" class="btn-action" [matTooltip]="hideSelfView ? 'Show Self View and MC Layout' : 'Hide Self View and Ignore MC'">
+            <mat-icon>{{ hideSelfView ? 'visibility' : 'visibility_off' }}</mat-icon>
           </button>
 
           <!-- DM Mode Toggle -->

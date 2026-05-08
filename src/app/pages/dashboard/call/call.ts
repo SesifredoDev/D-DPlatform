@@ -42,6 +42,7 @@ interface ParticipantStream {
   isLocal?: boolean;
   diagnostics?: ParticipantMediaDiagnostics;
   volumePercent: number;
+  isSceneMainCharacter: boolean;
 }
 
 export interface VttStopEvent {
@@ -67,6 +68,12 @@ interface RemoteContextMenuState {
   y: number;
 }
 
+interface PriorityGridPlacement {
+  row: number;
+  column: number;
+  columnSpan: number;
+}
+
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
@@ -76,6 +83,15 @@ interface RemoteContextMenuState {
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   private static readonly micTestMaxDurationMs = 8000;
+  private static readonly minSceneMainLayoutWidthPx = 720;
+  private static readonly minSceneMainLayoutHeightPx = 420;
+  private static readonly scenePriorityGridColumns = 12;
+  private static readonly sceneMainColumnsPerRow = 2;
+  private static readonly sceneSideColumnsPerRow = 4;
+  private static readonly sceneGridGapPx = 12;
+  private static readonly sceneMainMinAspectRatio = 1 / 1;
+  private static readonly sceneDefaultMainAreaRatio = 0.5;
+  private static readonly sceneExpandedMainAreaRatio = 0.8;
   private static readonly desktopVideoConstraints: MediaTrackConstraints = {
     width: { ideal: 1920, max: 1920 },
     height: { ideal: 1080, max: 1080 },
@@ -119,6 +135,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('micTestAudio') micTestAudio?: ElementRef<HTMLAudioElement>;
+  @ViewChild('gridContainer') set gridContainer(value: ElementRef<HTMLElement> | undefined) {
+    this.gridContainerRef = value;
+    this.observeSceneMainLayoutSize();
+  }
   @ViewChildren('remoteVideo') remoteVideos!: QueryList<ElementRef<HTMLVideoElement>>;
 
   videoDevices: MediaDeviceInfo[] = [];
@@ -150,6 +170,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   localStream: MediaStream | null = null;
   previewStream: MediaStream | null = null;
   remoteStreams: ParticipantStream[] = [];
+  hideSelfView = false;
+  sceneMainCharacterIds: string[] = [];
+  maxSceneMainCharacters = 4;
+  hasSceneMainLayoutSpace = true;
+  sceneGridContentWidthPx = 0;
+  sceneGridContentHeightPx = 0;
   localParticipantPing: number | undefined;
   localParticipantDiagnostics?: ParticipantMediaDiagnostics;
   micInputLevel = 0;
@@ -232,6 +258,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private selectedAudioSourceSub!: Subscription;
   private remoteVideoQualitySub!: Subscription;
   private participantVolumesSub!: Subscription;
+  private sceneMainCharactersSub!: Subscription;
   readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   readonly supportsRemoteAudioGain = typeof window !== 'undefined' && !!this.getAudioContextConstructor();
 
@@ -252,6 +279,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private monitoredMicTrack: MediaStreamTrack | null = null;
   private remoteAudioContext: AudioContext | null = null;
   private remoteAudioOutputs = new Map<string, RemoteAudioOutput>();
+  private gridContainerRef?: ElementRef<HTMLElement>;
+  private gridResizeObserver: ResizeObserver | null = null;
   private readonly handleDeviceChangeBound = () => {
     void this.loadDevices();
   };
@@ -285,12 +314,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
     });
+    this.serverDetailsSub = this.serverService.getServerDetailsObservable().subscribe(() => {
+      this.checkServerOwner();
+      this.cdr.detectChanges();
+    });
 
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
     this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
     this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(
       this.videoService.getRemoteVideoQualityPreference()
     );
+    this.maxSceneMainCharacters = this.videoService.getMaxSceneMainCharacters();
 
     if (!this.isMobileBrowser) {
       await this.loadDevices();
@@ -323,19 +357,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.localParticipantDiagnostics = localParticipantData.diagnostics;
       }
 
-      const visibleRemoteParticipants = streams.filter(p => !p.isLocal && this.shouldDisplayRemoteParticipant(p));
-      this.remoteStreams = visibleRemoteParticipants.map(r => ({
-        id: r.id,
-        stream: r.stream,
-        userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
-        participantMeta: r.participantMeta,
-        ping: r.ping,
-        diagnostics: r.diagnostics,
-        volumePercent: this.videoService.getParticipantVolume(r.id)
-      }));
+      this.refreshVisibleRemoteStreams(streams);
       if (
         this.remoteContextMenu &&
-        !this.remoteStreams.some(remote => remote.id === this.remoteContextMenu?.remoteId)
+        !this.isContextMenuParticipantAvailable(this.remoteContextMenu.remoteId)
       ) {
         this.closeRemoteContextMenu();
       }
@@ -349,6 +374,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           const stream = remote?.stream;
           if (video && stream && video.srcObject !== stream) {
             video.srcObject = stream;
+          }
+          if (video && !stream && video.srcObject) {
+            video.srcObject = null;
           }
           if (video && remote) {
             this.configureRemoteAudio(remote, video);
@@ -560,23 +588,26 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.applyRemoteVolumes();
       this.cdr.detectChanges();
     });
-
-      this.checkServerOwner();
+    this.sceneMainCharactersSub = this.videoService.sceneMainCharacters$.subscribe(state => {
+      this.sceneMainCharacterIds = state.participantIds;
+      this.refreshSceneMainCharacterFlags();
       this.cdr.detectChanges();
+    });
+
+    this.checkServerOwner();
+    this.cdr.detectChanges();
 
 
 
   }
 
   checkServerOwner(){
-    const server = this.serverService.getCurrentServer()
-    if (server && this.character && this.character.ownerId) {
+    const server = this.serverService.getCurrentServer();
+    const serverOwnerId = server ? this.extractOwnerId(server) : '';
+    const currentUserId = this.character?.ownerId || '';
 
-      this.isServerOwner = this.extractOwnerId(server) === this.character.ownerId;
-    } else {
-      this.isServerOwner = false;
-    }
-    console.log("Is Server Owner: ",this.isServerOwner)
+    this.videoService.setSceneMainCharacterControllerUserId(serverOwnerId || null);
+    this.isServerOwner = !!serverOwnerId && serverOwnerId === currentUserId;
   }
 
   private extractOwnerId(server: IServer): string {
@@ -1043,13 +1074,324 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return 'volume_down';
   }
 
+  get localSceneMainCharacter(): boolean {
+    return this.isSceneMainCharacter(this.videoService.getCurrentParticipantIdentity());
+  }
+
+  get localContextMenuOpen(): boolean {
+    return this.remoteContextMenu?.remoteId === this.videoService.getCurrentParticipantIdentity();
+  }
+
+  get showLocalSelfView(): boolean {
+    return !!this.localStream && !this.hideSelfView;
+  }
+
+  get visibleSceneMainCharacterCount(): number {
+    return this.getVisibleSceneMainParticipantIds().length;
+  }
+
+  get visibleParticipantCount(): number {
+    return this.remoteStreams.length + (this.showLocalSelfView ? 1 : 0);
+  }
+
+  get hasVisibleSceneMainCharacters(): boolean {
+    return this.visibleSceneMainCharacterCount > 0;
+  }
+
+  get isSceneMainLayoutActive(): boolean {
+    return this.hasVisibleSceneMainCharacters && this.hasSceneMainLayoutSpace;
+  }
+
+  get sceneSideRowCount(): number {
+    if (!this.isSceneMainLayoutActive) {
+      return 1;
+    }
+
+    const sideParticipantCount = Math.max(0, this.visibleParticipantCount - this.visibleSceneMainCharacterCount);
+    return Math.max(1, Math.ceil(sideParticipantCount / Call.sceneSideColumnsPerRow));
+  }
+
+  get sceneMainRowCount(): number {
+    return this.getSceneMainGridRowCount(this.visibleSceneMainCharacterCount);
+  }
+
+  get sceneMainRowHeightCss(): string {
+    if (!this.sceneGridContentHeightPx) {
+      if (this.sceneMainRowCount <= 1) {
+        return `${this.sceneMainAreaHeightPercent}%`;
+      }
+
+      const rowPercent = this.sceneMainAreaHeightPercent / this.sceneMainRowCount;
+      const rowGapOffsetPx = Call.sceneGridGapPx * (this.sceneMainRowCount - 1) / this.sceneMainRowCount;
+      return `calc(${rowPercent}% - ${rowGapOffsetPx}px)`;
+    }
+
+    return `${this.sceneMainRowHeightPx}px`;
+  }
+
+  get sceneSideRowHeightCss(): string {
+    if (!this.sceneGridContentHeightPx) {
+      return '120px';
+    }
+
+    return `${this.sceneSideRowHeightPx}px`;
+  }
+
+  get sceneSideTileMaxWidthCss(): string {
+    if (!this.sceneGridContentHeightPx) {
+      return '100%';
+    }
+
+    return `${Math.floor(this.sceneSideRowHeightPx * 16 / 9)}px`;
+  }
+
+  private get sceneMainRowHeightPx(): number {
+    const rowCount = this.sceneMainRowCount;
+    const rowHeightPoolPx = Math.max(0, this.sceneMainAreaHeightPx - Call.sceneGridGapPx * (rowCount - 1));
+
+    return Math.max(1, Math.floor(rowHeightPoolPx / rowCount));
+  }
+
+  private get sceneSideRowHeightPx(): number {
+    const sideRowCount = this.sceneSideRowCount;
+    const remainingHeightPx = Math.max(
+      0,
+      this.sceneGridContentHeightPx - this.sceneMainAreaHeightPx - (Call.sceneGridGapPx * sideRowCount)
+    );
+
+    return Math.max(1, Math.floor(remainingHeightPx / sideRowCount));
+  }
+
+  private get sceneMainAreaHeightPx(): number {
+    return Math.max(0, Math.floor(this.sceneGridContentHeightPx * this.sceneMainAreaHeightRatio));
+  }
+
+  private get sceneMainAreaHeightRatio(): number {
+    if (this.visibleParticipantCount <= 1) {
+      return 1;
+    }
+
+    return this.visibleSceneMainCharacterCount >= 3
+      ? Call.sceneExpandedMainAreaRatio
+      : Call.sceneDefaultMainAreaRatio;
+  }
+
+  private get sceneMainAreaHeightPercent(): number {
+    return this.sceneMainAreaHeightRatio * 100;
+  }
+
+  getLocalPriorityGridColumn(): string | null {
+    return this.getPriorityGridColumn(this.videoService.getCurrentParticipantIdentity());
+  }
+
+  getLocalPriorityGridRow(): string | null {
+    return this.getPriorityGridRow(this.videoService.getCurrentParticipantIdentity());
+  }
+
+  getLocalPriorityGridMaxHeight(): string | null {
+    return this.getPriorityGridMaxHeight(this.videoService.getCurrentParticipantIdentity());
+  }
+
+  getPriorityGridColumn(participantId: string | null | undefined): string | null {
+    const placement = this.getPriorityGridPlacement(participantId);
+    return placement ? `${placement.column} / span ${placement.columnSpan}` : null;
+  }
+
+  getPriorityGridRow(participantId: string | null | undefined): string | null {
+    const placement = this.getPriorityGridPlacement(participantId);
+    return placement ? `${placement.row}` : null;
+  }
+
+  getPriorityGridMaxHeight(participantId: string | null | undefined): string | null {
+    if (this.visibleParticipantCount <= 1) {
+      return null;
+    }
+
+    if (!this.isSceneMainCharacter(participantId)) {
+      return null;
+    }
+
+    const placement = this.getPriorityGridPlacement(participantId);
+    if (!placement) {
+      return null;
+    }
+
+    const cellWidthPx = this.getPriorityGridCellWidthPx(placement.columnSpan);
+    return cellWidthPx ? `${Math.floor(cellWidthPx / Call.sceneMainMinAspectRatio)}px` : null;
+  }
+
+  private getPriorityGridPlacement(participantId: string | null | undefined): PriorityGridPlacement | null {
+    if (!this.isSceneMainLayoutActive || !participantId) {
+      return null;
+    }
+
+    const visibleIds = this.getVisibleParticipantIds();
+    if (!visibleIds.includes(participantId)) {
+      return null;
+    }
+
+    const sceneMainIds = this.getVisibleSceneMainParticipantIds(visibleIds);
+    const sceneMainIndex = sceneMainIds.indexOf(participantId);
+    if (sceneMainIndex !== -1) {
+      return this.getSceneMainPriorityGridPlacement(sceneMainIndex, sceneMainIds.length);
+    }
+
+    const sideIds = visibleIds.filter(id => !sceneMainIds.includes(id));
+    const sideIndex = sideIds.indexOf(participantId);
+    if (sideIndex === -1) {
+      return null;
+    }
+
+    const rowIndex = Math.floor(sideIndex / Call.sceneSideColumnsPerRow);
+    const indexInRow = sideIndex % Call.sceneSideColumnsPerRow;
+    const rowItemCount = Math.min(
+      Call.sceneSideColumnsPerRow,
+      sideIds.length - rowIndex * Call.sceneSideColumnsPerRow
+    );
+
+    return this.getCenteredRowPlacement(
+      this.getSceneMainGridRowCount(sceneMainIds.length) + 1 + rowIndex,
+      indexInRow,
+      rowItemCount,
+      3
+    );
+  }
+
+  private getSceneMainPriorityGridPlacement(sceneMainIndex: number, sceneMainCount: number): PriorityGridPlacement {
+    const rowIndex = Math.floor(sceneMainIndex / Call.sceneMainColumnsPerRow);
+    const indexInRow = sceneMainIndex % Call.sceneMainColumnsPerRow;
+    const rowItemCount = Math.min(
+      Call.sceneMainColumnsPerRow,
+      sceneMainCount - rowIndex * Call.sceneMainColumnsPerRow
+    );
+
+    const columnSpan = sceneMainCount === 1 && this.visibleParticipantCount === 1
+      ? Call.scenePriorityGridColumns
+      : this.getSceneMainColumnSpan(rowItemCount);
+
+    return this.getCenteredRowPlacement(
+      1 + rowIndex,
+      indexInRow,
+      rowItemCount,
+      columnSpan
+    );
+  }
+
+  private getCenteredRowPlacement(row: number, indexInRow: number, rowItemCount: number, columnSpan: number): PriorityGridPlacement {
+    const usedColumns = rowItemCount * columnSpan;
+    const offsetColumns = Math.floor((Call.scenePriorityGridColumns - usedColumns) / 2);
+
+    return {
+      row,
+      column: 1 + offsetColumns + indexInRow * columnSpan,
+      columnSpan
+    };
+  }
+
+  private getSceneMainGridRowCount(sceneMainCount: number): number {
+    return Math.max(1, Math.ceil(sceneMainCount / Call.sceneMainColumnsPerRow));
+  }
+
+  private getSceneMainColumnSpan(rowItemCount: number): number {
+    return rowItemCount <= 1 ? 8 : 6;
+  }
+
+  private getPriorityGridCellWidthPx(columnSpan: number): number | null {
+    if (!this.sceneGridContentWidthPx) {
+      return null;
+    }
+
+    const trackWidthPx = (
+      this.sceneGridContentWidthPx - Call.sceneGridGapPx * (Call.scenePriorityGridColumns - 1)
+    ) / Call.scenePriorityGridColumns;
+
+    return Math.max(
+      1,
+      Math.floor(trackWidthPx * columnSpan + Call.sceneGridGapPx * (columnSpan - 1))
+    );
+  }
+
+  private getVisibleParticipantIds(): string[] {
+    const participantIds: string[] = [];
+    const localParticipantId = this.videoService.getCurrentParticipantIdentity();
+
+    if (this.showLocalSelfView && localParticipantId) {
+      participantIds.push(localParticipantId);
+    }
+
+    this.remoteStreams.forEach(remote => participantIds.push(remote.id));
+
+    return participantIds;
+  }
+
+  private getVisibleSceneMainParticipantIds(visibleIds: string[] = this.getVisibleParticipantIds()): string[] {
+    const visibleIdSet = new Set(visibleIds);
+    return this.sceneMainCharacterIds.filter(id => visibleIdSet.has(id));
+  }
+
+  isSceneMainCharacter(participantId: string | null | undefined): boolean {
+    return !!participantId && this.sceneMainCharacterIds.includes(participantId);
+  }
+
+  isSceneMainCharacterLimitReached(remote: ParticipantStream): boolean {
+    return !this.isSceneMainCharacter(remote.id) &&
+      this.sceneMainCharacterIds.length >= this.maxSceneMainCharacters;
+  }
+
+  getSceneMainCharacterMenuIcon(remote: ParticipantStream): string {
+    return this.isSceneMainCharacter(remote.id) ? 'star' : 'star_border';
+  }
+
+  getSceneMainCharacterMenuLabel(remote: ParticipantStream): string {
+    if (this.isSceneMainCharacter(remote.id)) {
+      return 'Remove Scene Main Character';
+    }
+
+    if (this.isSceneMainCharacterLimitReached(remote)) {
+      return 'Main Character Limit Reached';
+    }
+
+    return 'Set Scene Main Character';
+  }
+
+  async toggleSceneMainCharacter(remote: ParticipantStream) {
+    if (!this.isServerOwner) {
+      return;
+    }
+
+    if (this.isSceneMainCharacterLimitReached(remote)) {
+      return;
+    }
+
+    await this.videoService.setSceneMainCharacter(remote.id, !this.isSceneMainCharacter(remote.id));
+    this.closeRemoteContextMenu();
+  }
+
+  async clearSceneMainCharacters() {
+    if (!this.isServerOwner) {
+      return;
+    }
+
+    await this.videoService.clearSceneMainCharacters();
+  }
+
+  toggleSelfView() {
+    this.hideSelfView = !this.hideSelfView;
+    this.closeRemoteContextMenu();
+    this.cdr.detectChanges();
+
+    if (!this.hideSelfView) {
+      this.updateLocalVideoDisplay();
+    }
+  }
+
   openRemoteContextMenu(event: MouseEvent, remote: ParticipantStream) {
     event.preventDefault();
     event.stopPropagation();
 
     const padding = 12;
     const menuWidth = 260;
-    const menuHeight = 220;
+    const menuHeight = this.getContextMenuHeight(remote);
     const viewportWidth = typeof window !== 'undefined'
       ? window.innerWidth
       : event.clientX + menuWidth + padding;
@@ -1062,6 +1404,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       x: Math.max(padding, Math.min(event.clientX, viewportWidth - menuWidth - padding)),
       y: Math.max(padding, Math.min(event.clientY, viewportHeight - menuHeight - padding))
     };
+  }
+
+  openLocalContextMenu(event: MouseEvent) {
+    const localParticipant = this.getLocalContextMenuParticipant();
+    if (!localParticipant) {
+      return;
+    }
+
+    this.openRemoteContextMenu(event, localParticipant);
   }
 
   closeRemoteContextMenu() {
@@ -1078,7 +1429,54 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return undefined;
     }
 
+    const localParticipant = this.getLocalContextMenuParticipant();
+    if (localParticipant?.id === this.remoteContextMenu.remoteId) {
+      return localParticipant;
+    }
+
     return this.remoteStreams.find(remote => remote.id === this.remoteContextMenu?.remoteId);
+  }
+
+  private getLocalContextMenuParticipant(): ParticipantStream | undefined {
+    const localParticipantId = this.videoService.getCurrentParticipantIdentity();
+    if (!localParticipantId) {
+      return undefined;
+    }
+
+    return {
+      id: localParticipantId,
+      stream: this.localStream || undefined,
+      userData: this.isDmMode ? this.dmCharacter : this.character,
+      participantMeta: this.videoService.getCurrentParticipantMetadata(),
+      ping: this.localParticipantPing,
+      isLocal: true,
+      diagnostics: this.localParticipantDiagnostics,
+      volumePercent: 100,
+      isSceneMainCharacter: this.isSceneMainCharacter(localParticipantId)
+    };
+  }
+
+  private isContextMenuParticipantAvailable(participantId: string): boolean {
+    return participantId === this.videoService.getCurrentParticipantIdentity() ||
+      this.remoteStreams.some(remote => remote.id === participantId);
+  }
+
+  private getContextMenuHeight(participant: ParticipantStream): number {
+    return 96 + (this.isServerOwner ? 44 : 0) + (participant.isLocal ? 0 : 112);
+  }
+
+  private refreshVisibleRemoteStreams(streams: any[] = this.videoService.remoteStreams$.value) {
+    const visibleRemoteParticipants = streams.filter(p => !p.isLocal && this.shouldDisplayRemoteParticipant(p));
+    this.remoteStreams = visibleRemoteParticipants.map(r => ({
+      id: r.id,
+      stream: r.stream,
+      userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
+      participantMeta: r.participantMeta,
+      ping: r.ping,
+      diagnostics: r.diagnostics,
+      volumePercent: this.videoService.getParticipantVolume(r.id),
+      isSceneMainCharacter: this.isSceneMainCharacter(r.id)
+    }));
   }
 
   onRemoteVideoQualityChange() {
@@ -1162,6 +1560,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.themeService.resetToDefault();
     this.localStream = null;
     this.remoteStreams = [];
+    this.sceneMainCharacterIds = [];
     this.closeRemoteContextMenu();
     this.teardownAllRemoteAudioOutputs();
     this.showSpotify = false;
@@ -1213,10 +1612,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       if (newCharacter.ownerId && this.dmCharacter.ownerId !== newCharacter.ownerId) {
         this.dmCharacter.ownerId = newCharacter.ownerId;
-        const currentServer = this.serverService.getCurrentServer();
-        if (currentServer) {
-          this.isServerOwner = this.extractOwnerId(currentServer) === newCharacter.ownerId;
-        }
+        this.checkServerOwner();
       }
 
       if (!this.isDmMode && this.channelId) {
@@ -1225,7 +1621,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (channelIdChange && channelIdChange.currentValue) {
-      this.checkServerOwner()
+      this.checkServerOwner();
     }
   }
 
@@ -1305,10 +1701,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @HostListener('window:resize')
   handleWindowResize() {
+    this.updateSceneMainLayoutSpaceFromElement();
     this.closeRemoteContextMenu();
   }
 
   ngOnDestroy() {
+    this.gridResizeObserver?.disconnect();
+    this.gridResizeObserver = null;
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
     if (this.streamSub) this.streamSub.unsubscribe();
@@ -1328,6 +1727,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.selectedAudioSourceSub) this.selectedAudioSourceSub.unsubscribe();
     if (this.remoteVideoQualitySub) this.remoteVideoQualitySub.unsubscribe();
     if (this.participantVolumesSub) this.participantVolumesSub.unsubscribe();
+    if (this.sceneMainCharactersSub) this.sceneMainCharactersSub.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
 
     // Just clean up local hardware previews.
@@ -1414,6 +1814,73 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (!currentUserId || currentDeviceType === 'mobile') return null;
 
     return this.videoService.getSelectedCompanionVideoStream();
+  }
+
+  private observeSceneMainLayoutSize() {
+    this.gridResizeObserver?.disconnect();
+    this.gridResizeObserver = null;
+
+    const element = this.gridContainerRef?.nativeElement;
+    if (!element) {
+      this.hasSceneMainLayoutSpace = true;
+      return;
+    }
+
+    const measureLayoutSpace = () => this.updateSceneMainLayoutSpaceFromElement();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(measureLayoutSpace);
+    } else {
+      setTimeout(measureLayoutSpace);
+    }
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    this.gridResizeObserver = new ResizeObserver(() => {
+      this.updateSceneMainLayoutSpaceFromElement();
+    });
+    this.gridResizeObserver.observe(element);
+  }
+
+  private updateSceneMainLayoutSpaceFromElement() {
+    const element = this.gridContainerRef?.nativeElement;
+    if (!element) {
+      return;
+    }
+
+    const styles = getComputedStyle(element);
+    const contentWidthPx = Math.max(
+      0,
+      element.clientWidth - this.toCssPixelValue(styles.paddingLeft) - this.toCssPixelValue(styles.paddingRight)
+    );
+    const contentHeightPx = Math.max(
+      0,
+      element.clientHeight - this.toCssPixelValue(styles.paddingTop) - this.toCssPixelValue(styles.paddingBottom)
+    );
+
+    const nextHasSpace = contentWidthPx >= Call.minSceneMainLayoutWidthPx &&
+      contentHeightPx >= Call.minSceneMainLayoutHeightPx;
+    if (
+      this.hasSceneMainLayoutSpace === nextHasSpace &&
+      this.sceneGridContentWidthPx === contentWidthPx &&
+      this.sceneGridContentHeightPx === contentHeightPx
+    ) {
+      return;
+    }
+
+    this.hasSceneMainLayoutSpace = nextHasSpace;
+    this.sceneGridContentWidthPx = contentWidthPx;
+    this.sceneGridContentHeightPx = contentHeightPx;
+    if (!nextHasSpace) {
+      this.closeRemoteContextMenu();
+    }
+    this.cdr.detectChanges();
+  }
+
+  private toCssPixelValue(value: string): number {
+    const numericValue = Number.parseFloat(value);
+    return Number.isFinite(numericValue) ? numericValue : 0;
   }
 
   private updateLocalVideoDisplay(participants: any[] = this.videoService.remoteStreams$.value) {
@@ -1704,6 +2171,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     return Math.min(200, Math.max(0, Math.round(numericValue)));
+  }
+
+  private refreshSceneMainCharacterFlags() {
+    this.remoteStreams = this.remoteStreams.map(remote => ({
+      ...remote,
+      isSceneMainCharacter: this.isSceneMainCharacter(remote.id)
+    }));
   }
 
   private teardownMissingRemoteAudioOutputs(activeParticipantIds: Set<string>) {

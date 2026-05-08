@@ -26,6 +26,12 @@ export type CompanionSourceId = 'desktop-local' | string;
 export type RemoteVideoQualityPreference = 'low' | 'medium' | 'high';
 export type ParticipantVolumeMap = Record<string, number>;
 
+export interface SceneMainCharacterState {
+  participantIds: string[];
+  updatedAt: number;
+  updatedBy?: string;
+}
+
 export interface CallParticipantMetadata {
   userId: string;
   deviceId: string;
@@ -34,6 +40,7 @@ export interface CallParticipantMetadata {
   character: any;
   selectedVideoSource?: CompanionSourceId;
   selectedAudioSource?: CompanionSourceId;
+  sceneMainCharacters?: SceneMainCharacterState;
 }
 
 export interface CompanionDeviceOption {
@@ -73,6 +80,7 @@ interface LiveKitConnectionInfo {
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly maxIceServers = 4;
+  private static readonly maxSceneMainCharacters = 4;
   private static readonly defaultParticipantVolumePercent = 100;
   private static readonly minParticipantVolumePercent = 0;
   private static readonly maxParticipantVolumePercent = 200;
@@ -152,6 +160,7 @@ export class Video {
   public readonly selectedAudioSource$ = new BehaviorSubject<CompanionSourceId>('desktop-local');
   public readonly remoteVideoQualityPreference$ = new BehaviorSubject<RemoteVideoQualityPreference>('medium');
   public readonly participantVolumes$ = new BehaviorSubject<ParticipantVolumeMap>({});
+  public readonly sceneMainCharacters$ = new BehaviorSubject<SceneMainCharacterState>({ participantIds: [], updatedAt: 0 });
 
   private localStream: MediaStream | null = null;
   public currentChannelId: string | null = null;
@@ -161,6 +170,7 @@ export class Video {
   private pingInterval: any;
   private currentParticipantMetadata: CallParticipantMetadata | null = null;
   private currentParticipantIdentity: string | null = null;
+  private sceneMainCharacterControllerUserId: string | null = null;
   private phoneCompanionTargetIdentity: string | null = null;
   private companionSyncPromise: Promise<void> | null = null;
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
@@ -248,6 +258,7 @@ export class Video {
       })
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         this.participantStreams.delete(participant.identity);
+        void this.removeDisconnectedSceneMainCharacter(participant.identity);
         void this.syncCompanionState();
         void this.emitParticipants();
         if (this.vttSession$.value.hostId === participant.identity) {
@@ -255,6 +266,7 @@ export class Video {
         }
       })
       .on(RoomEvent.ParticipantMetadataChanged, () => {
+        this.applyLatestSceneMainCharactersFromMetadata();
         void this.syncCompanionState();
         void this.emitParticipants();
       })
@@ -303,6 +315,8 @@ export class Video {
             this.overlayImage$.next(data.url);
           } else if (data.type === 'overlay-text') {
             this.overlayText$.next(data.text);
+          } else if (data.type === 'scene-main-characters') {
+            void this.receiveSceneMainCharactersState(data.state, participant);
           }
         } catch (e) {
           console.error('Failed to parse data message', e);
@@ -360,8 +374,12 @@ export class Video {
       await this.room.connect(environment.livekitUrl, data.token, connectOptions);
       this.currentChannelId = channelId;
       this.currentParticipantIdentity = identity;
-      this.currentParticipantMetadata = metadata;
-      await this.room.localParticipant.setMetadata(JSON.stringify(metadata));
+      this.applyLatestSceneMainCharactersFromMetadata();
+      this.currentParticipantMetadata = {
+        ...metadata,
+        sceneMainCharacters: this.sceneMainCharacters$.value
+      };
+      await this.room.localParticipant.setMetadata(JSON.stringify(this.currentParticipantMetadata));
       this.applyRemoteVideoSubscriptionPreferences();
 
       if (deviceRole === 'phone-camera') {
@@ -482,6 +500,70 @@ export class Video {
     void this.emitParticipants();
   }
 
+  getSceneMainCharacterIds(): string[] {
+    return [...this.sceneMainCharacters$.value.participantIds];
+  }
+
+  getMaxSceneMainCharacters(): number {
+    return Video.maxSceneMainCharacters;
+  }
+
+  setSceneMainCharacterControllerUserId(userId: string | null) {
+    const nextControllerUserId = userId?.trim() || null;
+    if (this.sceneMainCharacterControllerUserId === nextControllerUserId) {
+      return;
+    }
+
+    this.sceneMainCharacterControllerUserId = nextControllerUserId;
+    this.applyLatestSceneMainCharactersFromMetadata();
+  }
+
+  async setSceneMainCharacter(participantIdentity: string, enabled: boolean): Promise<boolean> {
+    if (!this.canCurrentParticipantManageSceneMainCharacters()) {
+      return false;
+    }
+
+    const normalizedIdentity = participantIdentity.trim();
+    if (!normalizedIdentity) {
+      return false;
+    }
+
+    const currentIds = this.sceneMainCharacters$.value.participantIds;
+    const alreadySelected = currentIds.includes(normalizedIdentity);
+    if (enabled) {
+      if (alreadySelected) {
+        return true;
+      }
+
+      if (currentIds.length >= Video.maxSceneMainCharacters) {
+        return false;
+      }
+
+      await this.publishSceneMainCharactersState([...currentIds, normalizedIdentity]);
+      return true;
+    }
+
+    if (!alreadySelected) {
+      return true;
+    }
+
+    await this.publishSceneMainCharactersState(currentIds.filter(id => id !== normalizedIdentity));
+    return true;
+  }
+
+  async clearSceneMainCharacters(): Promise<boolean> {
+    if (!this.canCurrentParticipantManageSceneMainCharacters()) {
+      return false;
+    }
+
+    if (!this.sceneMainCharacters$.value.participantIds.length) {
+      return true;
+    }
+
+    await this.publishSceneMainCharactersState([]);
+    return true;
+  }
+
   getSelectedCompanionVideoStream(): MediaStream | null {
     if (this.selectedVideoSource$.value === 'desktop-local') return null;
     return this.participantStreams.get(this.selectedVideoSource$.value) || null;
@@ -545,6 +627,177 @@ export class Video {
     const payload = new TextEncoder().encode(JSON.stringify({ type: 'overlay-text', text }));
     this.room.localParticipant.publishData(payload, { reliable: true });
     this.overlayText$.next(text);
+  }
+
+  private async receiveSceneMainCharactersState(state: unknown, participant?: RemoteParticipant) {
+    if (!this.canParticipantManageSceneMainCharacters(participant)) {
+      return;
+    }
+
+    if (!this.applySceneMainCharactersState(state)) {
+      return;
+    }
+
+    await this.persistSceneMainCharactersMetadata();
+    await this.emitParticipants();
+  }
+
+  private async publishSceneMainCharactersState(participantIds: string[]) {
+    const state: SceneMainCharacterState = {
+      participantIds: this.normalizeSceneMainCharacterIds(participantIds),
+      updatedAt: this.nextSceneMainCharactersTimestamp(),
+      updatedBy: this.currentParticipantIdentity || undefined
+    };
+
+    this.applySceneMainCharactersState(state, true);
+    await this.persistSceneMainCharactersMetadata();
+    this.broadcastSceneMainCharactersState(state);
+    await this.emitParticipants();
+  }
+
+  private broadcastSceneMainCharactersState(state: SceneMainCharacterState) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'scene-main-characters', state }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  private async persistSceneMainCharactersMetadata() {
+    if (this.room.state !== 'connected' || !this.currentParticipantMetadata) {
+      return;
+    }
+
+    const nextState = this.sceneMainCharacters$.value;
+    if (this.isSameSceneMainCharactersState(this.currentParticipantMetadata.sceneMainCharacters, nextState)) {
+      return;
+    }
+
+    this.currentParticipantMetadata = {
+      ...this.currentParticipantMetadata,
+      sceneMainCharacters: nextState
+    };
+
+    await this.publishLocalMetadata();
+  }
+
+  private async removeDisconnectedSceneMainCharacter(participantIdentity: string) {
+    if (!this.sceneMainCharacters$.value.participantIds.includes(participantIdentity)) {
+      return;
+    }
+
+    await this.setSceneMainCharacter(participantIdentity, false);
+  }
+
+  private applyLatestSceneMainCharactersFromMetadata() {
+    const states: SceneMainCharacterState[] = [];
+    const localState = this.normalizeSceneMainCharactersState(this.currentParticipantMetadata?.sceneMainCharacters);
+    if (localState && this.canMetadataManageSceneMainCharacters(this.currentParticipantMetadata)) {
+      states.push(localState);
+    }
+
+    this.room.remoteParticipants.forEach(participant => {
+      const metadata = this.parseMetadata(participant.metadata);
+      const state = this.normalizeSceneMainCharactersState(metadata?.sceneMainCharacters);
+      if (state && this.canMetadataManageSceneMainCharacters(metadata)) {
+        states.push(state);
+      }
+    });
+
+    const latestState = states.reduce<SceneMainCharacterState | null>((latest, state) => {
+      if (!latest || state.updatedAt > latest.updatedAt) {
+        return state;
+      }
+
+      return latest;
+    }, null);
+
+    if (latestState) {
+      this.applySceneMainCharactersState(latestState);
+    } else if (this.sceneMainCharacters$.value.participantIds.length) {
+      this.sceneMainCharacters$.next({ participantIds: [], updatedAt: this.nextSceneMainCharactersTimestamp() });
+    }
+  }
+
+  private applySceneMainCharactersState(state: unknown, force = false): boolean {
+    const nextState = this.normalizeSceneMainCharactersState(state);
+    if (!nextState) {
+      return false;
+    }
+
+    const currentState = this.sceneMainCharacters$.value;
+    if (
+      !force &&
+      (nextState.updatedAt < currentState.updatedAt ||
+        this.isSameSceneMainCharactersState(currentState, nextState))
+    ) {
+      return false;
+    }
+
+    this.sceneMainCharacters$.next(nextState);
+    return true;
+  }
+
+  private normalizeSceneMainCharactersState(state: unknown): SceneMainCharacterState | null {
+    if (!state || typeof state !== 'object') {
+      return null;
+    }
+
+    const candidate = state as Partial<SceneMainCharacterState>;
+    const updatedAt = typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
+      ? Math.max(0, Math.round(candidate.updatedAt))
+      : 0;
+
+    return {
+      participantIds: this.normalizeSceneMainCharacterIds(candidate.participantIds),
+      updatedAt,
+      updatedBy: typeof candidate.updatedBy === 'string' ? candidate.updatedBy : undefined
+    };
+  }
+
+  private normalizeSceneMainCharacterIds(participantIds: unknown): string[] {
+    if (!Array.isArray(participantIds)) {
+      return [];
+    }
+
+    const normalizedIds: string[] = [];
+    participantIds.forEach(candidate => {
+      const participantId = typeof candidate === 'string' ? candidate.trim() : '';
+      if (participantId && !normalizedIds.includes(participantId)) {
+        normalizedIds.push(participantId);
+      }
+    });
+
+    return normalizedIds.slice(0, Video.maxSceneMainCharacters);
+  }
+
+  private nextSceneMainCharactersTimestamp(): number {
+    return Math.max(Date.now(), this.sceneMainCharacters$.value.updatedAt + 1);
+  }
+
+  private isSameSceneMainCharactersState(
+    currentState: SceneMainCharacterState | undefined,
+    nextState: SceneMainCharacterState
+  ): boolean {
+    return !!currentState &&
+      currentState.updatedAt === nextState.updatedAt &&
+      this.areSameSceneMainCharacterIds(currentState.participantIds, nextState.participantIds);
+  }
+
+  private areSameSceneMainCharacterIds(firstIds: string[], secondIds: string[]): boolean {
+    return firstIds.length === secondIds.length && firstIds.every((id, index) => id === secondIds[index]);
+  }
+
+  private canCurrentParticipantManageSceneMainCharacters(): boolean {
+    return this.canMetadataManageSceneMainCharacters(this.currentParticipantMetadata);
+  }
+
+  private canParticipantManageSceneMainCharacters(participant?: RemoteParticipant): boolean {
+    return this.canMetadataManageSceneMainCharacters(this.parseMetadata(participant?.metadata));
+  }
+
+  private canMetadataManageSceneMainCharacters(metadata: CallParticipantMetadata | null | undefined): boolean {
+    return !!this.sceneMainCharacterControllerUserId &&
+      metadata?.userId === this.sceneMainCharacterControllerUserId &&
+      metadata.deviceRole === 'desktop-main';
   }
 
   private async emitParticipants() {
@@ -648,6 +901,7 @@ export class Video {
     this.selectedVideoSource$.next('desktop-local');
     this.selectedAudioSource$.next('desktop-local');
     this.participantVolumes$.next({});
+    this.sceneMainCharacters$.next({ participantIds: [], updatedAt: 0 });
     this.participantStreams.clear();
     this.effectiveParticipantStreams.clear();
     this.vttSession$.next({ active: false, roomId: null, hostId: null });
@@ -677,7 +931,8 @@ export class Video {
       deviceRole,
       character,
       selectedVideoSource: deviceRole === 'desktop-main' ? this.selectedVideoSource$.value : 'desktop-local',
-      selectedAudioSource: deviceRole === 'desktop-main' ? this.selectedAudioSource$.value : 'desktop-local'
+      selectedAudioSource: deviceRole === 'desktop-main' ? this.selectedAudioSource$.value : 'desktop-local',
+      sceneMainCharacters: this.sceneMainCharacters$.value
     };
   }
 
