@@ -311,6 +311,26 @@
   button { width: 24px; height: 24px; line-height: 24px; mat-icon { font-size: 16px; width: 16px; height: 16px; } }
 }
 
+.send-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(240, 71, 71, 0.45);
+  border-radius: var(--radius-m);
+  background: rgba(240, 71, 71, 0.12);
+  color: #ffb3b3;
+  font-size: 13px;
+  font-weight: 700;
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+}
+
 .input-box {
   background: rgba(43, 45, 49, 0.5);
   backdrop-filter: blur(12px);
@@ -342,6 +362,10 @@
     padding: 4px 0;
     max-height: 300px;
     &:focus { outline: none; }
+    &:disabled {
+      color: var(--on-surface-muted);
+      cursor: not-allowed;
+    }
   }
 
   .input-actions {

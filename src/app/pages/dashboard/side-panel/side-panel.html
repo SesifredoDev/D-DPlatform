@@ -84,7 +84,14 @@
     <section class="nav-section" *ngIf="selectedServer">
       <div class="section-header">
         <span class="title">Channels</span>
-        <button mat-icon-button class="mini-btn" *ngIf="isServerOwner"><mat-icon>add</mat-icon></button>
+        <button
+          mat-icon-button
+          class="mini-btn"
+          *ngIf="canManageChannels"
+          (click)="openSettings()"
+          matTooltip="Manage Channels">
+          <mat-icon>add</mat-icon>
+        </button>
       </div>
 
       <nav class="side-nav">
@@ -172,7 +179,7 @@
   <!-- 3. FOOTER: USER & SYSTEM CONTROLS -->
   <footer class="sidebar-footer">
     <div class="footer-actions">
-      <button mat-icon-button *ngIf="isServerOwner" (click)="openSettings()" matTooltip="Server Settings">
+      <button mat-icon-button *ngIf="canOpenSettings" (click)="openSettings()" matTooltip="Server Settings">
         <mat-icon>settings</mat-icon>
       </button>
       <button mat-icon-button *ngIf="selectedServer" (click)="openVTT()" matTooltip="Game Map">

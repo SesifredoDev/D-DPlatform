@@ -60,9 +60,9 @@
           } @else if(tab.type ==='character'){
             <app-character-viewer [character]="tab.data"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
-            <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
-                            [isHostVttSession]="tab.id === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
-                            [isJoiningVttSession]="tab.id === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
+            <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+                            [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
+                            [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
             <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
           } @else if (tab.type === 'obsidian') {
@@ -132,9 +132,9 @@
             } @else if(tab.type ==='character'){
               <app-character-viewer [character]="tab.data"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
-              <app-vtt-canvas [serverId]="tab.id" [character]="activeCharacter" [userId]="userInfo._id"
-                              [isHostVttSession]="tab.id === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
-                              [isJoiningVttSession]="tab.id === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
+              <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+                              [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
+                              [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
               <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
             } @else if (tab.type === 'obsidian') {

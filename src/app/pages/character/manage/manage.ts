@@ -14,7 +14,7 @@ import { Edit } from '../edit/edit';
 import { dndbeyond } from '../../../shared/services/character/dndbeyond/dndbeyond';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
@@ -28,7 +28,6 @@ import { MatTooltipModule } from '@angular/material/tooltip';
     MatChipsModule,
     MatMenuModule,
     MatDividerModule,
-    RouterLink,
     MatTooltipModule,
     MatDialogModule
   ],

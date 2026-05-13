@@ -27,6 +27,9 @@ import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
 import { IUser } from '../../../shared/models/user/user.model';
+import { IRole } from '../../../shared/models/server/role.model';
+
+type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
 
 @Component({
   selector: 'app-text-channel',
@@ -65,6 +68,8 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   newMessageContent = '';
   replyingTo: MessageData | null = null;
   currentUserId: string | null = null;
+  canSendMessages = true;
+  sendError = '';
 
   attachments: Attachment[] = [];
   isUploading = false;
@@ -117,6 +122,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     const channel = server.channels.find(c => c._id === this.channelId);
     if (channel && channel.type === ChannelType.Whisper) {
       this.isWhisperMode = true;
+      this.canSendMessages = true;
 
       const ownerId = typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
       const isOwner = ownerId === this.currentUserId;
@@ -131,6 +137,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     } else {
       this.isWhisperMode = false;
       this.whisperRecipient = null;
+      this.canSendMessages = channel ? this.hasChannelPermission(server, channel, 'SEND_MESSAGES') : true;
     }
   }
 
@@ -152,6 +159,12 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   }
 
   sendMessage() {
+    this.sendError = '';
+    if (!this.canSendMessages) {
+      this.sendError = 'You do not have permission to send messages in this channel.';
+      return;
+    }
+
     if (!this.newMessageContent.trim() && this.attachments.length === 0) return;
 
     // In a whisper channel, every message is a whisper
@@ -175,8 +188,52 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
           this.attachments = [];
           this.scrollToBottom(true);
         },
-        error: err => console.error('Failed to send message', err)
+        error: err => {
+          console.error('Failed to send message', err);
+          this.sendError = err?.error?.message || 'Message could not be sent.';
+        }
       });
+  }
+
+  private hasChannelPermission(
+    server: IServer,
+    channel: IChannel,
+    permissionName: ChannelAccessPermission
+  ): boolean {
+    if (!this.currentUserId) return true;
+
+    const ownerId = typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
+    if (ownerId === this.currentUserId) return true;
+
+    const member = server.members?.find(candidate => {
+      const user = candidate.user as any;
+      return (typeof user === 'string' ? user : user?._id) === this.currentUserId;
+    });
+    if (!member) return false;
+
+    const roleIds = new Set((member.roles ?? []).map(role => this.resolveId(role)).filter(Boolean));
+    const memberRoles = (server.roles ?? []).filter(role => roleIds.has(role._id));
+
+    if (memberRoles.some(role => role.permissions?.ADMINISTRATOR)) return true;
+
+    const overwrites = (channel.permissionOverwrites ?? []).filter(overwrite =>
+      roleIds.has(this.resolveId(overwrite.role))
+    );
+
+    if (overwrites.some(overwrite => (overwrite.deny ?? []).includes(permissionName))) return false;
+    if (overwrites.some(overwrite => (overwrite.allow ?? []).includes(permissionName))) return true;
+
+    return memberRoles.some(role => role.permissions?.[permissionName] === true);
+  }
+
+  private resolveId(value: unknown): string {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && '_id' in value) {
+      const id = (value as IRole | { _id?: unknown })._id;
+      return typeof id === 'string' ? id : '';
+    }
+    return '';
   }
 
   handleKeyDown(event: KeyboardEvent) {

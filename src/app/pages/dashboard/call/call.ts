@@ -207,6 +207,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isPreparingMobileMedia = false;
   mobileMediaReady = false;
   mobileMediaMessage = '';
+  joinError = '';
   experimentalMobile1080pEnabled = false;
   private hasRequestedMobileMedia = false;
 
@@ -1585,6 +1586,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   async joinCall() {
     if (!this.channelId || !this.character || this.isJoining) return;
     this.isJoining = true;
+    this.joinError = '';
 
     try {
       const currentUserId = this.authService.getCurrentUserId();
@@ -1634,21 +1636,31 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       this.videoService.requestSpotifyState();
 
-    } catch (err) {
-      console.error('[CRITICAL] Join call failed:', err);
-      if (this.localStream) {
-        this.localStream.getTracks().forEach(t => t.stop());
-        this.localStream = null;
+      } catch (err) {
+        console.error('[CRITICAL] Join call failed:', err);
+        this.joinError = this.getJoinErrorMessage(err);
+        if (this.localStream) {
+          this.localStream.getTracks().forEach(t => t.stop());
+          this.localStream = null;
       }
       this.isJoining = false;
       await this.startPreview();
     } finally {
       this.isJoining = false;
       this.cdr.detectChanges();
+      }
     }
-  }
 
-  async leaveCall() {
+    private getJoinErrorMessage(error: unknown): string {
+      const message = error instanceof Error ? error.message : String(error || '');
+      if (message.toLowerCase().includes('permission')) {
+        return message;
+      }
+
+      return 'Could not join this call. Check your device access and channel permissions.';
+    }
+  
+    async leaveCall() {
     this.resetMicTestForCaptureChange();
     await this.videoService.leaveCall(this.channelId);
     this.themeService.resetToDefault();

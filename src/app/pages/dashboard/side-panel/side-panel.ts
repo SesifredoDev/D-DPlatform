@@ -16,6 +16,7 @@ import {UserService} from '../../../shared/services/user/user';
 import {ServerService} from '../../../shared/services/server/server';
 import {IServer, ServerMember, TemporaryDmDuration} from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
+import {IRole, RolePermissions} from '../../../shared/models/server/role.model';
 import {ChannelService} from '../../../shared/services/channel/channel';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {MatDialog} from '@angular/material/dialog';
@@ -26,9 +27,15 @@ import {ServerAddDialogComponent} from '../../../objects/server-add-dialog-compo
 import {VttSync} from '../../../shared/services/vttsync/vttsync';
 import {ObsidianVaultService} from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import {MatTooltipModule} from '@angular/material/tooltip';
+import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
 import {Subscription} from 'rxjs';
 
+type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
+type ServerManagementPermission = Extract<
+  keyof RolePermissions,
+  'ADMINISTRATOR' | 'MANAGE_SERVER' | 'MANAGE_ROLES' | 'MANAGE_CHANNELS'
+>;
 
 @Component({
 
@@ -44,7 +51,8 @@ import {Subscription} from 'rxjs';
     MatButtonModule,
     MatDividerModule,
     MatMenuModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatSnackBarModule
   ],
 
   templateUrl: './side-panel.html',
@@ -91,7 +99,8 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     private dialog: MatDialog,
     private vttSync: VttSync,
     public obsidianService: ObsidianVaultService,
-    private messagingSocketService: MessagingSocketService
+    private messagingSocketService: MessagingSocketService,
+    private snackBar: MatSnackBar
   ) {
   }
 
@@ -101,6 +110,9 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
     this.userService.getMe().subscribe((user) => {
       this.currentUserId = user._id;
+      if (this.selectedServer) {
+        this.applyServerDetails(this.selectedServer);
+      }
       this.charService.getMyCharacters().subscribe((chars) => {
         this.characters = chars;
         let userChar = ({
@@ -147,27 +159,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
     this.subscriptions.add(this.serverService.getServerDetailsObservable().subscribe((server) => {
       if (server) {
-        this.selectedServer = server;
-        this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
-
-        const currentChannelId = this.channelService.currentChannel?._id;
-        const currentChannelStillExists = this.channels.some(channel => channel._id === currentChannelId);
-        if (this.channels[0] && !currentChannelStillExists) this.selectChannel(this.channels[0]);
-
-        if (server && this.currentUserId) {
-          this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
-
-          // Only show if user is owner AND a vault is linked
-          if (this.obsidianService.isOwner(server, this.currentUserId) &&
-            this.obsidianService.hasVaultAttached(server._id)) {
-            this.channels.push(this.obsidianService.getObsidianChannel(server._id));
-          }
-
-
-          this.groupMembersByRole(server);
-          this.messagingSocketService.joinServerRoom(server._id);
-        }
-
+        this.applyServerDetails(server);
       }
 
 
@@ -234,6 +226,11 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   }
 
   selectChannel(channel: IChannel) {
+    if (!this.canOpenChannel(channel)) {
+      this.snackBar.open('You do not have access to that channel.', 'OK', { duration: 2500 });
+      return;
+    }
+
     this.channelService.setChannelObservable(channel);
     this.actionPerformed.emit();
   }
@@ -261,8 +258,26 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     return this.serverService.getServerOwnerId(this.selectedServer) === this.currentUserId;
   }
 
+  get canOpenSettings(): boolean {
+    return this.hasAnyServerPermission([
+      'ADMINISTRATOR',
+      'MANAGE_SERVER',
+      'MANAGE_ROLES',
+      'MANAGE_CHANNELS'
+    ]);
+  }
+
+  get canManageChannels(): boolean {
+    return this.hasServerPermission('MANAGE_CHANNELS');
+  }
 
   openSettings() {
+    if (!this.selectedServer) return;
+    if (!this.canOpenSettings) {
+      this.snackBar.open('You do not have permission to manage this server.', 'OK', { duration: 2500 });
+      return;
+    }
+
     this.dialog.open(ServerSettingsDialogComponent, {
       data: this.selectedServer,
       width: '1800px',
@@ -362,7 +377,9 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   }
 
   openCall() {
-    const callChannel = this.selectedServer?.channels.find(c => c.type === ChannelType.Call);
+    const callChannel = this.channels.find(c =>
+      c.type === ChannelType.Call && this.hasChannelPermission(c, 'CONNECT')
+    );
     if (callChannel) {
       this.selectChannel(callChannel);
     } else {
@@ -460,6 +477,118 @@ export class SidePanel implements AfterViewInit, OnDestroy {
         this.actionPerformed.emit();
       }
     });
+  }
+
+  private applyServerDetails(server: IServer) {
+    this.selectedServer = server;
+    this.channels = this.getVisibleChannels(server);
+
+    if (this.currentUserId &&
+      this.obsidianService.isOwner(server, this.currentUserId) &&
+      this.obsidianService.hasVaultAttached(server._id)) {
+      this.channels.push(this.obsidianService.getObsidianChannel(server._id));
+    }
+
+    const currentChannelId = this.channelService.currentChannel?._id;
+    const currentChannelStillExists = this.channels.some(channel => channel._id === currentChannelId);
+    if (this.channels[0] && !currentChannelStillExists) this.selectChannel(this.channels[0]);
+
+    this.groupMembersByRole(server);
+    this.messagingSocketService.joinServerRoom(server._id);
+    this.cdr.markForCheck();
+  }
+
+  private getVisibleChannels(server: IServer): IChannel[] {
+    return (server.channels ?? []).filter(channel =>
+      channel.type !== ChannelType.Whisper &&
+      this.hasChannelPermission(channel, 'READ_MESSAGE_HISTORY')
+    );
+  }
+
+  private canOpenChannel(channel: IChannel): boolean {
+    if (channel.type === ChannelType.Obsidian) return true;
+    if (channel.type === ChannelType.Whisper) return true;
+    if (!this.hasChannelPermission(channel, 'READ_MESSAGE_HISTORY')) return false;
+    if (channel.type === ChannelType.Call) return this.hasChannelPermission(channel, 'CONNECT');
+    return true;
+  }
+
+  private hasAnyServerPermission(permissionNames: ServerManagementPermission[]): boolean {
+    return permissionNames.some(permissionName => this.hasServerPermission(permissionName));
+  }
+
+  private hasServerPermission(permissionName: ServerManagementPermission): boolean {
+    const server = this.selectedServer;
+    if (!server || !this.currentUserId) return false;
+
+    if (this.serverService.getServerOwnerId(server) === this.currentUserId) return true;
+
+    const member = this.getCurrentServerMember(server);
+    if (!member) return false;
+
+    const memberRoles = this.getMemberRoles(server, member);
+    return memberRoles.some(role =>
+      role.permissions?.ADMINISTRATOR === true ||
+      role.permissions?.[permissionName] === true
+    );
+  }
+
+  private hasChannelPermission(channel: IChannel, permissionName: ChannelAccessPermission): boolean {
+    const server = this.selectedServer;
+    if (!server || !this.currentUserId) return true;
+
+    if (this.serverService.getServerOwnerId(server) === this.currentUserId) return true;
+
+    const member = this.getCurrentServerMember(server);
+    if (!member) return false;
+
+    const roleIds = new Set((member.roles ?? []).map(role => this.resolveId(role)).filter(Boolean));
+    const memberRoles = this.getMemberRoles(server, member);
+
+    if (memberRoles.some(role => role.permissions?.ADMINISTRATOR)) return true;
+
+    const overwrites = (channel.permissionOverwrites ?? []).filter(overwrite =>
+      roleIds.has(this.resolveId(overwrite.role))
+    );
+
+    if (overwrites.some(overwrite => (overwrite.deny ?? []).includes(permissionName))) return false;
+    if (overwrites.some(overwrite => (overwrite.allow ?? []).includes(permissionName))) return true;
+
+    return memberRoles.some(role => role.permissions?.[permissionName] === true);
+  }
+
+  private getCurrentServerMember(server: IServer): ServerMember | undefined {
+    return server.members?.find(candidate =>
+      this.serverService.getMemberUserId(candidate) === this.currentUserId
+    );
+  }
+
+  private getMemberRoles(server: IServer, member: ServerMember): IRole[] {
+    const roleIds = new Set((member.roles ?? []).map(role => this.resolveId(role)).filter(Boolean));
+    const roles = new Map<string, IRole>();
+
+    (server.roles ?? []).forEach(role => {
+      if (roleIds.has(role._id)) roles.set(role._id, role);
+    });
+
+    (member.roles ?? []).forEach(role => {
+      if (role && typeof role === 'object' && 'permissions' in role) {
+        const resolvedRole = role as unknown as IRole;
+        if (resolvedRole._id) roles.set(resolvedRole._id, resolvedRole);
+      }
+    });
+
+    return Array.from(roles.values());
+  }
+
+  private resolveId(value: unknown): string {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && '_id' in value) {
+      const id = (value as IRole | { _id?: unknown })._id;
+      return typeof id === 'string' ? id : '';
+    }
+    return '';
   }
 
 }

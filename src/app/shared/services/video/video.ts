@@ -20,6 +20,7 @@ import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { ThemeColors } from '../theme/theme.service';
 import { DeviceInfo, DeviceService } from '../device/device';
+import { TokenService } from '../auth/token';
 
 export type CallDeviceRole = 'desktop-main' | 'phone-camera';
 export type CompanionSourceId = 'desktop-local' | string;
@@ -176,7 +177,10 @@ export class Video {
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
 
-  constructor(private deviceService: DeviceService) {
+  constructor(
+    private deviceService: DeviceService,
+    private tokenService: TokenService
+  ) {
     setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
     this.room = new Room({
@@ -1289,8 +1293,18 @@ export class Video {
 
   private async getLiveKitConnectionInfo(room: string, identity: string): Promise<LiveKitConnectionInfo> {
     const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch LiveKit connection info');
+    const token = this.tokenService.getAccessToken();
+    const res = await fetch(url, {
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+
+    if (!res.ok) {
+      const errorPayload = await res.json().catch(() => null);
+      const message = errorPayload?.error || errorPayload?.message || 'Failed to fetch LiveKit connection info';
+      throw new Error(message);
+    }
+
     return await res.json();
   }
 

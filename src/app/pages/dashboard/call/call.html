@@ -116,9 +116,14 @@
             </button>
           </div>
 
-          <button class="btn-primary-join" (click)="joinCall()">
-            <mat-icon>login</mat-icon>
-            <span>Enter Call</span>
+          <div *ngIf="joinError" class="call-join-error">
+            <mat-icon>error</mat-icon>
+            <span>{{ joinError }}</span>
+          </div>
+
+          <button class="btn-primary-join" (click)="joinCall()" [disabled]="isJoining">
+            <mat-icon>{{ isJoining ? 'hourglass_top' : 'login' }}</mat-icon>
+            <span>{{ isJoining ? 'Joining...' : 'Enter Call' }}</span>
           </button>
         </div>
       </div>

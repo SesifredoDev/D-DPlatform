@@ -118,12 +118,20 @@
       </div>
     }
 
+    @if(sendError) {
+      <div class="send-error">
+        <mat-icon>error</mat-icon>
+        <span>{{ sendError }}</span>
+      </div>
+    }
+
     <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
       <textarea
         #messageInput
-        placeholder="Scribe a message to the chronicle..."
+        [placeholder]="canSendMessages ? 'Scribe a message to the chronicle...' : 'You can read this channel, but cannot send messages.'"
         [(ngModel)]="newMessageContent"
         (keydown)="handleKeyDown($event)"
+        [disabled]="!canSendMessages"
         cdkTextareaAutosize
         #autosize="cdkTextareaAutosize"
         cdkAutosizeMinRows="1"
@@ -131,7 +139,7 @@
       </textarea>
 
       <div class="input-actions">
-        <button mat-icon-button class="action-btn" (click)="fileInput.click()" [disabled]="isUploading">
+        <button mat-icon-button class="action-btn" (click)="fileInput.click()" [disabled]="isUploading || !canSendMessages">
           <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
         </button>
         <input type="file" #fileInput style="display: none" (change)="onFileSelected($event)">
@@ -140,7 +148,7 @@
           mat-icon-button
           class="send-btn"
           (click)="sendMessage()"
-          [disabled]="(!newMessageContent.trim() && attachments.length === 0) || isUploading"
+          [disabled]="(!newMessageContent.trim() && attachments.length === 0) || isUploading || !canSendMessages"
           [class.can-send]="newMessageContent.trim() || attachments.length > 0">
           <mat-icon>send</mat-icon>
         </button>
