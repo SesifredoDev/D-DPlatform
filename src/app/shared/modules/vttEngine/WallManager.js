@@ -128,18 +128,22 @@ export class WallManager {
       const points = this.activeLine.points();
       // Remove the "ghost" point that was following the mouse
       const finalPoints = points.slice(0, -2);
+      let wallWasCreated = false;
 
       if (finalPoints.length < 4) {
         this.activeLine.destroy();
       } else {
         this.activeLine.points(finalPoints);
         this.activeLine.stroke('#888'); // Change back to standard wall color
+        wallWasCreated = true;
       }
 
       this.activeLine = null;
       this.engine.updateLighting();
       this.layer.batchDraw();
-      this.engine.stage.fire('wallAdded', { points: finalPoints });
+      if (wallWasCreated) {
+        this.engine.stage.fire('wallAdded', { points: finalPoints });
+      }
     }
   }
 

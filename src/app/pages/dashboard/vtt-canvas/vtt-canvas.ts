@@ -203,7 +203,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
 
     if (this.syncService.currentRoomId === this.serverId && this.syncService.isConnected) {
-      if (!this.syncService.isHosting && await this.isCurrentUserServerOwner()) {
+      if (!this.syncService.isHosting && await this.canCurrentUserDm()) {
         this.startHostingSession({ preserveExistingState: true });
         return;
       }
@@ -218,7 +218,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       if (runId !== this.syncStateRun) return;
       if (!joined) {
         this.closeNoHostedGame();
-      } else if (await this.isCurrentUserServerOwner()) {
+      } else if (await this.canCurrentUserDm()) {
         this.startHostingSession({ preserveExistingState: true });
       } else {
         this.isCheckingSession = false;
@@ -236,7 +236,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
 
     if (!this.isHostVttSession && !this.isJoiningVttSession) {
-      if (await this.isCurrentUserServerOwner()) {
+      if (await this.canCurrentUserDm()) {
         const resumed = await this.joinExistingSession();
         if (runId !== this.syncStateRun) return;
 
@@ -268,7 +268,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     const joined = await this.joinExistingSession();
     if (!joined) {
       this.closeNoHostedGame();
-    } else if (await this.isCurrentUserServerOwner()) {
+    } else if (await this.canCurrentUserDm()) {
       this.startHostingSession({ preserveExistingState: true });
     }
     return joined;
@@ -303,7 +303,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       return;
     }
 
-    if (await this.isCurrentUserServerOwner()) {
+    if (await this.canCurrentUserDm()) {
       this.startHostingSession({ preserveExistingState: true });
       return;
     }
@@ -316,20 +316,14 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.engine.isDM = isHost;
   }
 
-  private async isCurrentUserServerOwner(): Promise<boolean> {
+  private async canCurrentUserDm(): Promise<boolean> {
     let server = this.serverService.getCurrentServer();
     if ((!server || server._id !== this.serverId) && this.serverId) {
       await this.serverService.getServerDetails(this.serverId);
       server = this.serverService.getCurrentServer();
     }
 
-    if (!server || !this.userId) return false;
-
-    const ownerId = typeof server.owner === 'string'
-      ? server.owner
-      : server.owner?._id;
-
-    return ownerId === this.userId;
+    return this.serverService.canUserDm(server, this.userId);
   }
 
   private closeNoHostedGame() {
@@ -453,9 +447,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.selectedToken) {
       const id = this.selectedToken.id;
       this.engine.removeToken(id);
-      if (this.isSyncing) {
-        this.syncService.broadcastAction('token-deleted', { id });
-      }
     }
   }
 
@@ -463,18 +454,12 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     const id = crypto.randomUUID();
     const options = { id, name: "New Monster" };
     this.engine.addToken(100, 100, options);
-    if (this.isSyncing) {
-      this.syncService.broadcastAction('token-added', { x: 100, y: 100, options });
-    }
   }
 
   addPlayer(){
     const id = crypto.randomUUID();
     const options = { id, name: "New Hero", isPlayer: true };
     this.engine.addToken(100, 100, options);
-    if (this.isSyncing) {
-      this.syncService.broadcastAction('token-added', { x: 100, y: 100, options });
-    }
   }
 
   setMeasureTool(tool: 'line' | 'radius' | 'none') {

@@ -527,9 +527,8 @@ export class VttEngine {
       if (remote) {
         const token = existingGroup.tokenReference;
         if (token) {
-          token.updateConfig(options);
-          // Only update position if x,y are provided and non-zero
-          if (x || y) {
+          token.updateConfig(options, false);
+          if (x !== undefined && y !== undefined) {
             existingGroup.x(x);
             existingGroup.y(y);
           }
@@ -559,7 +558,7 @@ export class VttEngine {
     if (existingGroup) {
       const token = existingGroup.tokenReference;
       if (token) {
-        token.updateConfig(options);
+        token.updateConfig(options, !remote);
         this.tokenLayer.batchDraw();
         this.updateLighting();
         if (!remote) {
@@ -636,6 +635,7 @@ export class VttEngine {
       gridThickness: this.gridThickness,
       gridType: this.gridType,
       playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens,
+      lightingEnabled: this.lightLayer.visible(),
       tokens: this.tokenLayer.getChildren().map(group => {
         const ref = group.tokenReference;
         return {
@@ -657,6 +657,9 @@ export class VttEngine {
       this.clearAll();
       if (config.playersCanControlAllPlayerTokens !== undefined) {
         this.playersCanControlAllPlayerTokens = !!config.playersCanControlAllPlayerTokens;
+      }
+      if (config.lightingEnabled !== undefined) {
+        this.lightLayer.visible(!!config.lightingEnabled);
       }
       this.updateGridSettings(config, true);
 

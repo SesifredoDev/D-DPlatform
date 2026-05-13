@@ -349,6 +349,7 @@
         >
           <div class="remote-menu-header">
             <span>{{ activeRemote.userData?.name || 'Remote User' }}</span>
+            <span class="remote-menu-badge" *ngIf="isParticipantTemporaryDm(activeRemote)">Temporary DM</span>
             <button type="button" class="remote-menu-close" (click)="closeRemoteContextMenu()" aria-label="Close menu">
               <mat-icon>close</mat-icon>
             </button>
@@ -370,6 +371,33 @@
             >
               <mat-icon>{{ getSceneMainCharacterMenuIcon(activeRemote) }}</mat-icon>
               <span>{{ getSceneMainCharacterMenuLabel(activeRemote) }}</span>
+            </button>
+          </div>
+
+          <div class="remote-menu-section" *ngIf="canShowTemporaryDmMenu(activeRemote)">
+            <div class="remote-menu-label">
+              <mat-icon>admin_panel_settings</mat-icon>
+              <span>Temporary DM</span>
+            </div>
+            <button
+              *ngFor="let option of temporaryDmDurations"
+              type="button"
+              class="remote-menu-action"
+              role="menuitem"
+              (click)="setTemporaryDmFromCall(activeRemote, option.duration)"
+            >
+              <mat-icon>schedule</mat-icon>
+              <span>{{ option.label }}</span>
+            </button>
+            <button
+              *ngIf="isParticipantTemporaryDm(activeRemote)"
+              type="button"
+              class="remote-menu-action"
+              role="menuitem"
+              (click)="setTemporaryDmFromCall(activeRemote, 'none')"
+            >
+              <mat-icon>person_remove</mat-icon>
+              <span>Remove temporary DM</span>
             </button>
           </div>
 

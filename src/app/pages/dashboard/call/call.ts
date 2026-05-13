@@ -27,8 +27,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { PinnedTheme, ThemeColors, ThemeService } from '../../../shared/services/theme/theme.service';
 import { MatMenuModule } from '@angular/material/menu';
 import { ServerService } from '../../../shared/services/server/server';
-import { IServer } from '../../../shared/models/server/server.model';
-import { IUser } from '../../../shared/models/user/user.model';
+import { IServer, TemporaryDmDuration } from '../../../shared/models/server/server.model';
 import { MarkdownComponent } from 'ngx-markdown';
 import { AuthService } from '../../../shared/services/auth/auth';
 import { DeviceService, DeviceType } from '../../../shared/services/device/device';
@@ -239,7 +238,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   // DM Mode State
   isServerOwner: boolean = false;
+  canManageTemporaryDms: boolean = false;
   isDmMode: boolean = false;
+  temporaryDmDurations: Array<{ duration: TemporaryDmDuration; label: string }> = [
+    { duration: 'day', label: 'DM for 1 day' },
+    { duration: 'week', label: 'DM for 1 week' },
+    { duration: 'month', label: 'DM for 1 month' },
+    { duration: 'permanent', label: 'DM permanently' }
+  ];
   dmCharacter: ICharacter = {
     _id: 'dm-character-id',
     ownerId: '',
@@ -414,14 +420,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
 
         // HOST: Completely ignore manual playback commands from standard users
-        if (state.source === 'manual' && state.hostId && state.hostId !== this.character.ownerId) return;
+        if (state.source === 'manual' && state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
       } else {
         // CLIENT: Only obey the Host
-        const currentServer = this.serverService.getCurrentServer();
-        const actualHostId = currentServer ? this.extractOwnerId(currentServer) : null;
-
-        // Drop the command if it wasn't stamped by the Server Owner
-        if (state.hostId && state.hostId !== actualHostId) return;
+        // Drop the command if it was not stamped by the server owner or active temporary DM.
+        if (state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
 
         // Anti-bounce lock: Prevent rapid shuffling while Spotify API is loading the last track
         if (this.isSyncing) return;
@@ -621,14 +624,41 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const server = this.serverService.getCurrentServer();
     const serverOwnerId = server ? this.extractOwnerId(server) : '';
     const currentUserId = this.character?.ownerId || '';
+    const dmControllerUserIds = server ? this.getActiveDmUserIds(server) : [];
 
-    this.videoService.setSceneMainCharacterControllerUserId(serverOwnerId || null);
-    this.isServerOwner = !!serverOwnerId && serverOwnerId === currentUserId;
+    this.videoService.setSceneMainCharacterControllerUserIds(dmControllerUserIds);
+    this.canManageTemporaryDms = !!serverOwnerId && serverOwnerId === currentUserId;
+    this.isServerOwner = this.serverService.canUserDm(server, currentUserId);
+
+    if (!this.isServerOwner && this.isDmMode) {
+      this.isDmMode = false;
+      if (this.channelId && this.character) {
+        this.videoService.updateUserData(this.channelId, this.character);
+      }
+    }
   }
 
   private extractOwnerId(server: IServer): string {
-    if (!server.owner) return '';
-    return typeof server.owner === 'string' ? server.owner : (server.owner as IUser)._id;
+    return this.serverService.getServerOwnerId(server);
+  }
+
+  private getActiveDmUserIds(server: IServer): string[] {
+    const userIds = new Set<string>();
+    const ownerId = this.extractOwnerId(server);
+    if (ownerId) userIds.add(ownerId);
+
+    server.members?.forEach(member => {
+      const memberId = this.serverService.getMemberUserId(member);
+      if (memberId && this.serverService.isTemporaryDmGrantActive(member.temporaryDm)) {
+        userIds.add(memberId);
+      }
+    });
+
+    return Array.from(userIds);
+  }
+
+  private isAuthorizedDmUserId(userId: string | null | undefined): boolean {
+    return this.serverService.canUserDm(this.serverService.getCurrentServer(), userId);
   }
 
   private buildVideoConstraints(): MediaTrackConstraints {
@@ -1448,6 +1478,42 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.openCharacter(remote.userData);
   }
 
+  canShowTemporaryDmMenu(participant: ParticipantStream | undefined): boolean {
+    if (!this.canManageTemporaryDms || !participant) return false;
+
+    const participantUserId = this.getParticipantUserId(participant);
+    const currentUserId = this.character?.ownerId;
+    const server = this.serverService.getCurrentServer();
+    const ownerId = server ? this.extractOwnerId(server) : '';
+
+    return !!participantUserId &&
+      participantUserId !== currentUserId &&
+      participantUserId !== ownerId;
+  }
+
+  isParticipantTemporaryDm(participant: ParticipantStream | undefined): boolean {
+    const participantUserId = this.getParticipantUserId(participant);
+    return this.serverService.isUserTemporaryDm(this.serverService.getCurrentServer(), participantUserId);
+  }
+
+  async setTemporaryDmFromCall(participant: ParticipantStream, duration: TemporaryDmDuration) {
+    const server = this.serverService.getCurrentServer();
+    const participantUserId = this.getParticipantUserId(participant);
+    if (!server || !participantUserId || !this.canShowTemporaryDmMenu(participant)) return;
+
+    try {
+      await this.serverService.updateTemporaryDm(server._id, participantUserId, duration);
+      this.checkServerOwner();
+      this.closeRemoteContextMenu();
+    } catch (error) {
+      console.error('Failed to update temporary DM', error);
+    }
+  }
+
+  private getParticipantUserId(participant: ParticipantStream | undefined): string {
+    return participant?.participantMeta?.userId || participant?.userData?.ownerId || '';
+  }
+
   get activeRemoteContextMenuParticipant(): ParticipantStream | undefined {
     if (!this.remoteContextMenu) {
       return undefined;
@@ -1486,7 +1552,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private getContextMenuHeight(participant: ParticipantStream): number {
-    return 96 + (this.isServerOwner ? 44 : 0) + (participant.isLocal ? 0 : 112);
+    return 96 +
+      (this.isServerOwner ? 44 : 0) +
+      (this.canShowTemporaryDmMenu(participant) ? 220 : 0) +
+      (participant.isLocal ? 0 : 112);
   }
 
   private refreshVisibleRemoteStreams(streams: any[] = this.videoService.remoteStreams$.value) {

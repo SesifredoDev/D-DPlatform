@@ -4,7 +4,7 @@ import { catchError, tap } from 'rxjs/operators';
 import { BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { handleApiError } from '../../utils/api-error.util';
 import { environment } from '../../../../environments/environment';
-import { IServer } from '../../models/server/server.model';
+import { IServer, ServerMember, TemporaryDmDuration, TemporaryDmGrant } from '../../models/server/server.model';
 import { IChannel } from '../../models/server/channel.model';
 import { FileService } from '../file/file';
 
@@ -29,6 +29,50 @@ export class ServerService {
 
   getCurrentServer(): IServer | null {
     return this.serverDetailsSubject.value;
+  }
+
+  updateCurrentServerMembers(members: ServerMember[]): void {
+    const currentServer = this.serverDetailsSubject.value;
+    if (!currentServer) return;
+
+    this.serverDetailsSubject.next({
+      ...currentServer,
+      members
+    });
+  }
+
+  getServerOwnerId(server: IServer | null | undefined): string {
+    if (!server?.owner) return '';
+    return typeof server.owner === 'string' ? server.owner : server.owner._id;
+  }
+
+  getMemberUserId(member: ServerMember | null | undefined): string {
+    const user = member?.user as any;
+    if (!user) return '';
+    return typeof user === 'string' ? user : user._id;
+  }
+
+  isTemporaryDmGrantActive(grant: TemporaryDmGrant | null | undefined): boolean {
+    if (!grant?.enabled) return false;
+    if (!grant.expiresAt) return true;
+
+    const expiresAt = grant.expiresAt instanceof Date
+      ? grant.expiresAt.getTime()
+      : new Date(grant.expiresAt).getTime();
+
+    return Number.isFinite(expiresAt) && expiresAt > Date.now();
+  }
+
+  isUserTemporaryDm(server: IServer | null | undefined, userId: string | null | undefined): boolean {
+    if (!server || !userId) return false;
+
+    const member = server.members?.find(candidate => this.getMemberUserId(candidate) === userId);
+    return this.isTemporaryDmGrantActive(member?.temporaryDm);
+  }
+
+  canUserDm(server: IServer | null | undefined, userId: string | null | undefined): boolean {
+    if (!server || !userId) return false;
+    return this.getServerOwnerId(server) === userId || this.isUserTemporaryDm(server, userId);
   }
 
   async getMyServers(): Promise<void> {
@@ -106,6 +150,18 @@ export class ServerService {
     );
 
     // Refreshing details to get the populated role/user objects back
+    await this.getServerDetails(serverId);
+  }
+
+  async updateTemporaryDm(serverId: string, memberId: string, duration: TemporaryDmDuration): Promise<void> {
+    await firstValueFrom(
+      this.http.post(
+        `${this.baseUrl}/${serverId}/temporary-dm/${memberId}`,
+        { duration },
+        { withCredentials: true }
+      ).pipe(catchError(handleApiError))
+    );
+
     await this.getServerDetails(serverId);
   }
 

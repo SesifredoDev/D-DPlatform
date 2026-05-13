@@ -331,7 +331,24 @@
     align-items: center;
     gap: 12px;
     .member-avatar { width: 32px; height: 32px; border-radius: 10px; background: #2a2a2a; }
+    .member-details {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 0;
+    }
     .username { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.8); }
+    .member-role-badge {
+      width: fit-content;
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: rgba(var(--primary-rgb, 114, 137, 218), 0.18);
+      color: var(--primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
   }
 
   .member-chars {

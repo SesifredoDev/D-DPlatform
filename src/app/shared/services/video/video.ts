@@ -170,7 +170,7 @@ export class Video {
   private pingInterval: any;
   private currentParticipantMetadata: CallParticipantMetadata | null = null;
   private currentParticipantIdentity: string | null = null;
-  private sceneMainCharacterControllerUserId: string | null = null;
+  private sceneMainCharacterControllerUserIds = new Set<string>();
   private phoneCompanionTargetIdentity: string | null = null;
   private companionSyncPromise: Promise<void> | null = null;
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
@@ -509,12 +509,21 @@ export class Video {
   }
 
   setSceneMainCharacterControllerUserId(userId: string | null) {
-    const nextControllerUserId = userId?.trim() || null;
-    if (this.sceneMainCharacterControllerUserId === nextControllerUserId) {
+    this.setSceneMainCharacterControllerUserIds(userId ? [userId] : []);
+  }
+
+  setSceneMainCharacterControllerUserIds(userIds: string[]) {
+    const nextControllerUserIds = new Set(
+      userIds
+        .map(userId => userId.trim())
+        .filter(userId => !!userId)
+    );
+
+    if (this.areSameControllerUserIds(nextControllerUserIds)) {
       return;
     }
 
-    this.sceneMainCharacterControllerUserId = nextControllerUserId;
+    this.sceneMainCharacterControllerUserIds = nextControllerUserIds;
     this.applyLatestSceneMainCharactersFromMetadata();
   }
 
@@ -795,9 +804,17 @@ export class Video {
   }
 
   private canMetadataManageSceneMainCharacters(metadata: CallParticipantMetadata | null | undefined): boolean {
-    return !!this.sceneMainCharacterControllerUserId &&
-      metadata?.userId === this.sceneMainCharacterControllerUserId &&
+    return !!metadata?.userId &&
+      this.sceneMainCharacterControllerUserIds.has(metadata.userId) &&
       metadata.deviceRole === 'desktop-main';
+  }
+
+  private areSameControllerUserIds(nextControllerUserIds: Set<string>): boolean {
+    if (this.sceneMainCharacterControllerUserIds.size !== nextControllerUserIds.size) {
+      return false;
+    }
+
+    return Array.from(this.sceneMainCharacterControllerUserIds).every(userId => nextControllerUserIds.has(userId));
   }
 
   private async emitParticipants() {

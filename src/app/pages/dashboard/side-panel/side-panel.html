@@ -140,11 +140,12 @@
             <div class="category-name">{{ group.role.name }} — {{ group.members.length }}</div>
 
             @for (member of group.members; track member) {
-              <div class="member-card">
+              <div class="member-card" (contextmenu)="onRightClickMember($event, member)">
                 <div class="member-main">
                   <img class="member-avatar" [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
                   <div class="member-details">
                     <span class="username">{{ member.user.username }}</span>
+                    <span class="member-role-badge" *ngIf="isMemberTemporaryDm(member)">Temporary DM</span>
                   </div>
                 </div>
 
@@ -188,5 +189,28 @@
       <span class="version-text">v1.2.0</span>
     </div>
   </footer>
+
+  <div
+    style="visibility: hidden; position: fixed"
+    [style.left]="memberContextMenuPosition.x"
+    [style.top]="memberContextMenuPosition.y"
+    #memberContextMenuTrigger="matMenuTrigger"
+    [matMenuTriggerFor]="temporaryDmMenu">
+  </div>
+
+  <mat-menu #temporaryDmMenu="matMenu" class="custom-glass-menu">
+    <div class="menu-label">Temporary DM: {{ selectedMemberName }}</div>
+    @for (option of temporaryDmDurations; track option.duration) {
+      <button mat-menu-item (click)="setTemporaryDm(option.duration)">
+        <mat-icon>admin_panel_settings</mat-icon>
+        <span>{{ option.label }}</span>
+      </button>
+    }
+    <mat-divider *ngIf="isMemberTemporaryDm(selectedMemberForMenu)"></mat-divider>
+    <button mat-menu-item *ngIf="isMemberTemporaryDm(selectedMemberForMenu)" (click)="setTemporaryDm('none')">
+      <mat-icon>person_remove</mat-icon>
+      <span>Remove temporary DM</span>
+    </button>
+  </mat-menu>
 
 </div>

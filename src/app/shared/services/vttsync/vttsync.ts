@@ -49,6 +49,13 @@ export interface StartHostingOptions {
   preserveExistingState?: boolean;
 }
 
+interface SyncActionPayload {
+  action: string;
+  data: any;
+  version?: number;
+  sourceId?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class VttSync {
   private socket: Socket | null = null;
@@ -60,6 +67,9 @@ export class VttSync {
   private localVersion = 0;
   private resyncing = false;
   private hostClaimedAt = 0;
+  private localCharacter: ICharacter | null = null;
+  private needsSessionRestore = false;
+  private isStopping = false;
 
   public hostDisconnected$ = new BehaviorSubject<boolean>(false);
   public sessionEnded$ = new Subject<void>();
@@ -106,6 +116,9 @@ export class VttSync {
 
       this.socket.on('connect', () => {
         this.isConnected = true;
+        if (this.needsSessionRestore) {
+          this.restoreSessionAfterReconnect();
+        }
       });
 
       this.socket.on('connect_error', (err) => {
@@ -145,16 +158,43 @@ export class VttSync {
 
       this.socket.on('disconnect', () => {
           this.isConnected = false;
+          if (!this.isStopping && this.currentRoomId) {
+            this.needsSessionRestore = true;
+          }
       });
 
       this.socket.on('reconnect', () => {
           this.isConnected = true;
-          if (this.currentRoomId) {
-              this.requestResync();
-          }
+          this.restoreSessionAfterReconnect();
       });
     }
     return this.socket;
+  }
+
+  private restoreSessionAfterReconnect() {
+      if (!this.currentRoomId || !this.engine) return;
+
+      const socket = this.getSocket();
+      if (!socket.connected) return;
+
+      const roomId = this.currentRoomId;
+      this.needsSessionRestore = false;
+      this.resyncing = false;
+
+      if (this.isHosting) {
+          socket.emit('host-session', {
+              roomId,
+              initialState: this.createHostState(this.engine)
+          });
+          return;
+      }
+
+      if (this.localCharacter) {
+          socket.emit('join-session', { roomId, character: this.localCharacter });
+          return;
+      }
+
+      this.requestResync();
   }
 
   requestResync() {
@@ -164,14 +204,21 @@ export class VttSync {
       this.getSocket().emit('request-resync', this.currentRoomId);
   }
 
+  private createHostState(engine: VttEngine) {
+      return {
+          ...engine.getRawConfig(),
+          turnOrder: this.turnOrder$.value,
+          playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens$.value
+      };
+  }
+
   startHosting(engine: VttEngine, roomId: string, options: StartHostingOptions = {}) {
-    const wasInRoom = this.currentRoomId === roomId;
     this.currentRoomId = roomId;
     this.isHosting = true;
     this.engine = engine;
+    this.needsSessionRestore = false;
 
     const socket = this.getSocket();
-    const isReattaching = options.preserveExistingState || (socket.connected && wasInRoom);
     this.hostClaimedAt = Date.now();
 
     socket.off('remote-action');
@@ -179,30 +226,21 @@ export class VttSync {
       this.handleRemoteAction(engine, payload);
     });
 
+    socket.off('host-action-request');
+    socket.on('host-action-request', (payload: any) => {
+      this.handleHostActionRequest(engine, payload);
+    });
+
     socket.off('map-update');
     socket.on('map-update', (config: any) => {
-      this.resyncing = false;
-      if (config.version !== undefined) {
-          this.localVersion = config.version;
-      }
-      if (config.turnOrder) {
-          this.turnOrder$.next(config.turnOrder);
-      }
-      this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
-      if (config.gridSize || config.gridColor || config.gridThickness || config.gridType) {
-        engine.updateGridSettings(config, true);
-        this.publishGridSettings(engine);
-      }
-      if (isReattaching && engine.currentMapUrl) return;
-      engine.loadConfigFromObject(config);
-      this.publishGridSettings(engine);
+      this.applyMapState(engine, config);
     });
 
     this.attachEngineListeners(engine);
 
     socket.emit('host-session', {
       roomId,
-      initialState: isReattaching ? null : { ...engine.getRawConfig(), turnOrder: this.turnOrder$.value }
+      initialState: this.createHostState(engine)
     });
 
     this.callService.sendVttCommand("start", roomId);
@@ -210,18 +248,19 @@ export class VttSync {
   }
 
   joinSession(engine: VttEngine, roomId: string, character: ICharacter): Promise<boolean> {
-    const wasInRoom = this.currentRoomId === roomId;
     this.currentRoomId = roomId;
     this.isHosting = false;
     this.engine = engine;
+    this.localCharacter = character;
+    this.needsSessionRestore = false;
 
     engine.setLocalCharacter(character);
 
     const socket = this.getSocket();
-    const isReattaching = socket.connected && wasInRoom;
 
     socket.off('map-update');
     socket.off('remote-action');
+    socket.off('host-action-request');
     socket.off('error');
 
     return new Promise((resolve) => {
@@ -265,22 +304,7 @@ export class VttSync {
       socket.once('session-ended', sessionEndedHandler);
 
       socket.on('map-update', (config: any) => {
-        this.resyncing = false;
-        if (config.version !== undefined) {
-          this.localVersion = config.version;
-        }
-        if (config.turnOrder) {
-          this.turnOrder$.next(config.turnOrder);
-        }
-        this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
-        if (config.gridSize || config.gridColor || config.gridThickness || config.gridType) {
-          engine.updateGridSettings(config, true);
-          this.publishGridSettings(engine);
-        }
-        if (!isReattaching || !engine.currentMapUrl) {
-          engine.loadConfigFromObject(config);
-          this.publishGridSettings(engine);
-        }
+        this.applyMapState(engine, config);
         receivedMapUpdate = true;
         resolveWhenReady();
       });
@@ -299,6 +323,23 @@ export class VttSync {
     });
   }
 
+  private applyMapState(engine: VttEngine, config: any) {
+    if (!config) return;
+
+    this.resyncing = false;
+    if (config.version !== undefined) {
+      this.localVersion = config.version;
+    }
+
+    engine.loadConfigFromObject(config);
+    this.publishGridSettings(engine);
+
+    if (config.turnOrder) {
+      this.turnOrder$.next(config.turnOrder);
+    }
+    this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
+  }
+
   endSession() {
     this.stopSyncing(true, true);
   }
@@ -309,6 +350,7 @@ export class VttSync {
     if (this.socket && this.currentRoomId) {
       const socket = this.socket;
       const roomId = this.currentRoomId;
+      this.isStopping = true;
 
       if (this.isHosting && endHostedSession) {
         this.callService.sendVttCommand("stop", roomId);
@@ -327,6 +369,9 @@ export class VttSync {
     this.isConnected = false;
     this.hostDisconnected$.next(false);
     this.engine = null;
+    this.localCharacter = null;
+    this.needsSessionRestore = false;
+    this.isStopping = false;
     this.localVersion = 0;
     this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [], activeIndex: 0 });
     this.playersCanControlAllPlayerTokens$.next(false);
@@ -336,10 +381,15 @@ export class VttSync {
   broadcastAction(action: string, data: any) {
     const socket = this.getSocket();
     if (!socket.connected || !this.currentRoomId) return;
+    const roomId = this.currentRoomId;
     socket.emit('sync-action', {
-      roomId: this.currentRoomId,
+      roomId,
       action,
       data
+    }, (response: any) => {
+      if (response?.ok === false && this.currentRoomId === roomId) {
+        this.requestResync();
+      }
     });
   }
 
@@ -415,16 +465,55 @@ export class VttSync {
   }
 
 
-  private handleRemoteAction(engine: VttEngine, { action, data, version }: any) {
+  private handleRemoteAction(engine: VttEngine, payload: SyncActionPayload) {
+    if (!payload?.action) return;
+
+    const { action, data, version, sourceId } = payload;
+    const isOwnEcho = !!sourceId && sourceId === this.socket?.id;
+
     if (version !== undefined) {
+        if (isOwnEcho) {
+            this.localVersion = Math.max(this.localVersion, version);
+            return;
+        }
+
+        if (version <= this.localVersion) {
+            return;
+        }
+
         if (version > this.localVersion + 1) {
             console.warn(`Out of sync! Local: ${this.localVersion}, Remote: ${version}. Requesting resync.`);
             this.requestResync();
             return;
         }
         this.localVersion = version;
+    } else if (isOwnEcho) {
+      return;
     }
 
+    this.applyRemoteAction(engine, action, data);
+  }
+
+  private handleHostActionRequest(engine: VttEngine, payload: SyncActionPayload) {
+    if (!this.isHosting || !payload?.action) return;
+
+    const { action, data } = payload;
+
+    if (action === 'turn-order-add') {
+      this.addTurnOrderEntry(data);
+      return;
+    }
+
+    if (action === 'turn-order-remove') {
+      this.removeTurnOrderEntry(data.id);
+      return;
+    }
+
+    this.applyRemoteAction(engine, action, data);
+    this.broadcastAction(action, data);
+  }
+
+  private applyRemoteAction(engine: VttEngine, action: string, data: any) {
     switch (action) {
       case 'token-move':
         engine.animateTokenMove(data.id, data.x, data.y);

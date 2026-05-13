@@ -103,7 +103,7 @@ class Token {
     this.group.getLayer()?.batchDraw();
   }
 
-  updateConfig(config) {
+  updateConfig(config, emitMove = true) {
     if (config.name !== undefined) this.name = config.name;
     if (config.icon !== undefined) this.imageUrl = config.icon;
     if (config.size !== undefined) this.size = config.size;
@@ -115,7 +115,7 @@ class Token {
 
     this.initVisuals();
     this.group.draggable(this.checkPermissions());
-    this.snapToGrid();
+    this.snapToGrid(emitMove);
   }
 
   loadImage(url) {

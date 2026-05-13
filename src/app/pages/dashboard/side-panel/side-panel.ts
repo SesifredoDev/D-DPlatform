@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, OnDestroy, Output} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, OnDestroy, Output, ViewChild} from '@angular/core';
 
 import {ICharacter} from '../../../shared/models/user/character.model';
 
@@ -11,10 +11,10 @@ import {MatIconModule} from '@angular/material/icon';
 import {MatButtonModule} from '@angular/material/button';
 import {MatDividerModule} from '@angular/material/divider';
 import {Router} from '@angular/router';
-import {MatMenuModule} from '@angular/material/menu';
+import {MatMenuModule, MatMenuTrigger} from '@angular/material/menu';
 import {UserService} from '../../../shared/services/user/user';
 import {ServerService} from '../../../shared/services/server/server';
-import {IServer} from '../../../shared/models/server/server.model';
+import {IServer, ServerMember, TemporaryDmDuration} from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
 import {ChannelService} from '../../../shared/services/channel/channel';
 import {TabService} from '../../../shared/services/tab/tab-service';
@@ -56,6 +56,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   @Output() whisperInitiated = new EventEmitter<any>();
   @Output() actionPerformed = new EventEmitter<void>();
+  @ViewChild('memberContextMenuTrigger') memberContextMenuTrigger!: MatMenuTrigger;
 
   characters: ICharacter[] = [];
   selectedCharacter: ICharacter | null = null;
@@ -65,6 +66,14 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   channels: IChannel[] = [];
 
   groupedMembers: any[] = [];
+  selectedMemberForMenu: ServerMember | null = null;
+  memberContextMenuPosition = { x: '0px', y: '0px' };
+  temporaryDmDurations: Array<{ duration: TemporaryDmDuration; label: string }> = [
+    { duration: 'day', label: 'DM for 1 day' },
+    { duration: 'week', label: 'DM for 1 week' },
+    { duration: 'month', label: 'DM for 1 month' },
+    { duration: 'permanent', label: 'DM permanently' }
+  ];
 
   currentUserId: string | null = null;
 
@@ -141,7 +150,9 @@ export class SidePanel implements AfterViewInit, OnDestroy {
         this.selectedServer = server;
         this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
 
-        if (this.channels[0]) this.selectChannel(this.channels[0]);
+        const currentChannelId = this.channelService.currentChannel?._id;
+        const currentChannelStillExists = this.channels.some(channel => channel._id === currentChannelId);
+        if (this.channels[0] && !currentChannelStillExists) this.selectChannel(this.channels[0]);
 
         if (server && this.currentUserId) {
           this.channels = server.channels.filter(c => c.type !== ChannelType.Whisper);
@@ -164,6 +175,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
     this.subscriptions.add(this.messagingSocketService.memberUpdate$.subscribe((members) => {
       if (this.selectedServer) {
+        this.serverService.updateCurrentServerMembers(members);
         this.selectedServer.members = members;
         this.groupMembersByRole(this.selectedServer);
         this.cdr.markForCheck();
@@ -246,10 +258,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   }
   get isServerOwner(){
     if (!this.selectedServer || !this.currentUserId) return false;
-    const ownerId = typeof this.selectedServer.owner === 'string'
-      ? this.selectedServer.owner
-      : this.selectedServer.owner._id;
-    return ownerId === this.currentUserId;
+    return this.serverService.getServerOwnerId(this.selectedServer) === this.currentUserId;
   }
 
 
@@ -363,6 +372,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   onRightClickCharacter(event: MouseEvent, character: ICharacter) {
     event.preventDefault(); // Prevent browser context menu
+    event.stopPropagation();
 
     // 1. Check if we are actually in a VTT session
     if (!this.vttSync.isConnected) {
@@ -380,6 +390,49 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       console.log(`Added ${character.name} to the map via right-click.`);
     } else {
       console.error('VTT Engine not found. Is the map tab open?');
+    }
+  }
+
+  onRightClickMember(event: MouseEvent, member: ServerMember) {
+    if (!this.canManageTemporaryDm(member)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.selectedMemberForMenu = member;
+    this.memberContextMenuPosition = {
+      x: `${event.clientX}px`,
+      y: `${event.clientY}px`
+    };
+    this.memberContextMenuTrigger.openMenu();
+  }
+
+  canManageTemporaryDm(member: ServerMember | null | undefined): boolean {
+    if (!this.selectedServer || !this.currentUserId || !member) return false;
+    return this.isServerOwner && this.serverService.getMemberUserId(member) !== this.currentUserId;
+  }
+
+  isMemberTemporaryDm(member: ServerMember | null | undefined): boolean {
+    return this.serverService.isTemporaryDmGrantActive(member?.temporaryDm);
+  }
+
+  get selectedMemberName(): string {
+    const user = this.selectedMemberForMenu?.user as any;
+    if (!user || typeof user === 'string') return 'Member';
+    return user.username;
+  }
+
+  async setTemporaryDm(duration: TemporaryDmDuration) {
+    if (!this.selectedServer || !this.selectedMemberForMenu) return;
+
+    const memberId = this.serverService.getMemberUserId(this.selectedMemberForMenu);
+    if (!memberId) return;
+
+    try {
+      await this.serverService.updateTemporaryDm(this.selectedServer._id, memberId, duration);
+      this.memberContextMenuTrigger.closeMenu();
+    } catch (error) {
+      console.error('Failed to update temporary DM', error);
     }
   }
 
