@@ -21,17 +21,12 @@
         <mat-icon>open_in_new</mat-icon>
       </button>
 
-      <ng-container *ngIf="isEditing && selectedFileName.endsWith('.md')">
-        <button mat-icon-button (click)="toggleEditMode()" [matTooltip]="isPreview ? 'Edit Source' : 'Show Preview'">
-          <mat-icon>{{ isPreview ? 'edit' : 'visibility' }}</mat-icon>
-        </button>
-      </ng-container>
     </div>
   </div>
 
   <div class="obsidian-main-content">
     <!-- Sidebar - File Explorer -->
-    <div class="obsidian-sidebar" [class.collapsed]="isEditing && !isPreview"
+    <div class="obsidian-sidebar"
          (dragover)="onDragOver($event)" (drop)="onDrop($event)">
       <div class="sidebar-header">
         <span>Files</span>
@@ -169,7 +164,7 @@
 
         <div *ngIf="permissionGranted && !isEditing" class="no-file-selected">
           <mat-icon>description</mat-icon>
-          <p>Select a file to view or edit</p>
+          <p>Select a file to edit</p>
         </div>
       </div>
 
@@ -183,11 +178,11 @@
 
         <div class="content-scroll-container">
           <!-- Selection Broadcast Button (Float/Contextual) -->
-          <div class="selection-actions-container" [class.visible]="hasActiveSelection">
-            <button mat-mini-fab color="accent" (click)="broadcast()" matTooltip="Broadcast Selection">
-              <mat-icon>broadcast_on_home</mat-icon>
-            </button>
-          </div>
+<!--          <div class="selection-actions-container" [class.visible]="hasActiveSelection">-->
+<!--            <button mat-mini-fab color="accent" (click)="broadcast()" matTooltip="Broadcast Selection">-->
+<!--              <mat-icon>broadcast_on_home</mat-icon>-->
+<!--            </button>-->
+<!--          </div>-->
 
           <!-- Milkdown Editor (Replaces Markdown Previewer and Textarea) -->
           <div class="editor-wrapper" *ngIf="selectedFileName.endsWith('.md')">
@@ -195,7 +190,7 @@
               [markdown]="selectedFileContent"
               [serverId]="serverId"
               [currentFilePath]="selectedFileRelativePath"
-              [isPreview]="isPreview"
+              [isPreview]="false"
               (markdownChange)="onContentChange($event)"
               (onLinkClick)="onWikilinkClick($event)">
             </app-milkdown-editor>

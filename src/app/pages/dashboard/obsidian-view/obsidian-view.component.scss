@@ -84,13 +84,6 @@
       border-right: 1px solid var(--obsidian-border);
       transition: width var(--transition-speed) ease;
 
-      &.collapsed {
-        width: 0;
-        min-width: 0;
-        overflow: hidden;
-        border: none;
-      }
-
       .sidebar-header {
         height: 40px;
         display: flex;

@@ -26,6 +26,7 @@ export interface BroadcastData {
   source?: string;
   filename?: string;
   embeddedFiles?: BroadcastEmbeddedFile[];
+  preferTextForBroadcast?: boolean;
 }
 
 export interface BroadcastEmbeddedFile {
@@ -173,7 +174,10 @@ export class BroadcastDialog implements OnInit {
 
       // 3. Process Content (HTML or Markdown or Standalone Image)
       let contentResult = '';
-      if (this.data.htmlContent) {
+      if (this.data.preferTextForBroadcast && this.data.text) {
+        console.log('[BroadcastDialog] Processing preferred Markdown text content');
+        contentResult = await this.rewriteMarkdownImages(this.data.text, context);
+      } else if (this.data.htmlContent) {
         console.log('[BroadcastDialog] Processing HTML content');
         contentResult = await this.processHtmlContent(this.data.htmlContent, context);
       } else if (this.data.text) {

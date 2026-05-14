@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import { ActivatedRoute } from '@angular/router';
@@ -55,7 +55,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   selectedFileDisplayName: string = ''; // Name without extension for editing
   selectedFileRelativePath: string = '';
   isEditing: boolean = false;
-  isPreview: boolean = true;
   permissionGranted: boolean = false;
   fileSystemApiSupported: boolean = false;
 
@@ -79,7 +78,8 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
     private dialog: MatDialog,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private hostRef: ElementRef<HTMLElement>
   ) {}
 
   ngOnInit(): void {
@@ -200,7 +200,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       this.isPdf = false;
       this.nonMarkdownUrl = null;
       this.selectedFileContent = await this.obsidianVaultService.readFile(this.serverId, entry.relativePath);
-      this.isPreview = true;
     } else {
       const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, entry.relativePath);
       const url = URL.createObjectURL(blob);
@@ -208,7 +207,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       this.nonMarkdownUrl = this.sanitizer.bypassSecurityTrustResourceUrl(url);
       this.isImage = this.isImageFile(entry.name);
       this.isPdf = this.isPdfFile(entry.name);
-      this.isPreview = true;
       this.selectedFileContent = '';
     }
   }
@@ -226,7 +224,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       const newEntry = this.findEntryByPath(fullFileName, this.vaultEntries);
       if (newEntry) {
         await this.selectFile(newEntry);
-        this.isPreview = false;
       }
     } catch (err) {
       console.error('Failed to create file:', err);
@@ -385,11 +382,6 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  async toggleEditMode(): Promise<void> {
-    if (!this.selectedFileName.endsWith('.md')) return; // Non-editable
-    this.isPreview = !this.isPreview;
-  }
-
   private isImageFile(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase();
     return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'avif'].includes(ext || '');
@@ -519,9 +511,14 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     };
 
     if (this.selectedFileName.endsWith('.md')) {
-      const markdownBroadcast = await this.buildBroadcastMarkdown(this.selectedFileContent);
+      const embeddedFiles: BroadcastEmbeddedFile[] = [];
+      const tokenCache = new Map<string, string>();
+      const htmlContent = this.buildBroadcastHtmlFromEditor();
+      const markdownBroadcast = await this.buildBroadcastMarkdown(this.selectedFileContent, embeddedFiles, tokenCache);
       data.text = markdownBroadcast.markdown;
       data.embeddedFiles = markdownBroadcast.embeddedFiles;
+      data.htmlContent = htmlContent;
+      data.preferTextForBroadcast = true;
     } else {
       const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, this.selectedFileRelativePath);
       data.file = new File([blob], this.selectedFileName, { type: blob.type });
@@ -589,6 +586,14 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     });
 
     return true;
+  }
+
+  private buildBroadcastHtmlFromEditor(): string | undefined {
+    const editorContent = this.hostRef.nativeElement.querySelector<HTMLElement>(
+      '.milkdown-container .ProseMirror, .milkdown-container'
+    );
+
+    return editorContent?.innerHTML;
   }
 
   /**
