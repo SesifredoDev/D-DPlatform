@@ -4,9 +4,10 @@ import { catchError, tap } from 'rxjs/operators';
 import { BehaviorSubject, firstValueFrom, Observable, of } from 'rxjs';
 import { handleApiError } from '../../utils/api-error.util';
 import { environment } from '../../../../environments/environment';
-import { IServer, ServerMember, TemporaryDmDuration, TemporaryDmGrant } from '../../models/server/server.model';
+import { IServer, IServerTheme, ServerMember, TemporaryDmDuration, TemporaryDmGrant } from '../../models/server/server.model';
 import { IChannel } from '../../models/server/channel.model';
 import { FileService } from '../file/file';
+import { ThemeService } from '../theme/theme.service';
 
 @Injectable({
   providedIn: 'root',
@@ -17,7 +18,11 @@ export class ServerService {
   private myServersSubject = new BehaviorSubject<IServer[]>([]);
   private serverDetailsSubject = new BehaviorSubject<IServer | null>(null);
 
-  constructor(private http: HttpClient, private fileService: FileService) {}
+  constructor(
+    private http: HttpClient,
+    private fileService: FileService,
+    private themeService: ThemeService
+  ) {}
 
   getMyServersObservable(): Observable<IServer[]> {
     return this.myServersSubject.asObservable();
@@ -85,7 +90,8 @@ export class ServerService {
       // Resolve icon URLs
       data = data.map(server => ({
         ...server,
-        icon: server.icon ? this.fileService.resolveFileUrl(server.icon) : null
+        icon: server.icon ? this.fileService.resolveFileUrl(server.icon) : null,
+        defaultTheme: this.resolveServerThemeAssets(server.defaultTheme)
       }));
 
       this.myServersSubject.next(data);
@@ -104,9 +110,11 @@ export class ServerService {
       // Resolve icon URL
       data = {
         ...data,
-        icon: data.icon ? this.fileService.resolveFileUrl(data.icon) : null
+        icon: data.icon ? this.fileService.resolveFileUrl(data.icon) : null,
+        defaultTheme: this.resolveServerThemeAssets(data.defaultTheme)
       };
 
+      this.themeService.applyServerTheme(data.defaultTheme);
       this.serverDetailsSubject.next(data);
     } catch (error) {
       console.error('Failed to fetch server details', error);
@@ -119,10 +127,18 @@ export class ServerService {
     if (serverId) await this.getServerDetails(serverId);
   }
 
-  async updateServer(serverId: string, name?: string, iconFile?: File | null): Promise<void> {
+  async updateServer(
+    serverId: string,
+    name?: string,
+    iconFile?: File | null,
+    defaultTheme?: IServerTheme,
+    themeBackgroundImageFile?: File | null
+  ): Promise<void> {
     const formData = new FormData();
     if (name) formData.append('name', name);
     if (iconFile) formData.append('icon', iconFile);
+    if (defaultTheme) formData.append('defaultTheme', JSON.stringify(defaultTheme));
+    if (themeBackgroundImageFile) formData.append('themeBackgroundImage', themeBackgroundImageFile);
 
     // Changed to match the controller logic: /server/:serverId/update
     let updated = await firstValueFrom(
@@ -133,11 +149,35 @@ export class ServerService {
     // Resolve icon URL
     updated = {
       ...updated,
-      icon: updated.icon ? this.fileService.resolveFileUrl(updated.icon) : null
+      icon: updated.icon ? this.fileService.resolveFileUrl(updated.icon) : null,
+      defaultTheme: this.resolveServerThemeAssets(updated.defaultTheme)
     };
 
-    this.serverDetailsSubject.next(updated);
+    this.themeService.applyServerTheme(updated.defaultTheme);
+    const currentServer = this.serverDetailsSubject.value;
+    if (currentServer?._id === serverId) {
+      this.serverDetailsSubject.next({
+        ...currentServer,
+        name: updated.name ?? currentServer.name,
+        icon: updated.icon ?? currentServer.icon,
+        defaultTheme: updated.defaultTheme ?? currentServer.defaultTheme,
+        joinCode: updated.joinCode ?? currentServer.joinCode
+      });
+    }
+
     await this.getMyServers();
+    await this.getServerDetails(serverId);
+  }
+
+  private resolveServerThemeAssets(theme: IServerTheme | undefined): IServerTheme | undefined {
+    if (!theme) return undefined;
+
+    return {
+      ...theme,
+      backgroundImage: theme.backgroundImage
+        ? this.fileService.resolveFileUrl(theme.backgroundImage)
+        : null
+    };
   }
 
   async updateMemberRoles(serverId: string, memberId: string, roles: string[]): Promise<void> {

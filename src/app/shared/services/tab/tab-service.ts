@@ -192,7 +192,7 @@ export class TabService {
   private runTabCloseSideEffects(tab: Tab) {
     if (tab.type === 'call') {
       this.videoService.leaveCall(tab.id);
-      this.themeService.resetToDefault();
+      this.themeService.revertToSaved();
     }
   }
 

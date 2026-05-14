@@ -511,6 +511,46 @@
              <input type="color" [ngModel]="activeColors.background" (ngModelChange)="updateThemeLocally('background', $event)">
            </div>
 
+           <div class="theme-image-field">
+             <div
+               class="theme-image-preview"
+               [class.blurred]="isThemeBackgroundBlurred"
+               [style.background-image]="themeBackgroundImagePreviewStyle">
+               <mat-icon *ngIf="!hasThemeBackgroundImage">image</mat-icon>
+             </div>
+
+             <div class="theme-image-controls">
+               <input
+                 type="file"
+                 #themeBackgroundImageInput
+                 hidden
+                 accept="image/*"
+                 (change)="onThemeBackgroundImageSelected($event)">
+
+               <button class="btn-image-select" type="button" (click)="themeBackgroundImageInput.click()">
+                 <mat-icon>image</mat-icon>
+                 <span>{{ hasThemeBackgroundImage ? 'Change Image' : 'Add Image' }}</span>
+               </button>
+
+               <button
+                 *ngIf="hasThemeBackgroundImage"
+                 class="btn-image-remove"
+                 type="button"
+                 (click)="clearThemeBackgroundImage(themeBackgroundImageInput)">
+                 Remove
+               </button>
+
+               <label class="image-blur-toggle" [class.disabled]="!hasThemeBackgroundImage">
+                 <input
+                   type="checkbox"
+                   [ngModel]="!!activeColors.backgroundImageBlur"
+                   (ngModelChange)="updateThemeLocally('backgroundImageBlur', $event)"
+                   [disabled]="!hasThemeBackgroundImage">
+                 <span>Blur image</span>
+               </label>
+             </div>
+           </div>
+
            <!-- Pinned Themes Section -->
            <div class="pinned-section">
               <div class="section-title">
@@ -528,7 +568,7 @@
 
               <div class="pinned-list">
                  <div *ngFor="let t of pinnedThemes" class="pinned-chip" (click)="selectPinnedTheme(t)">
-                    <div class="chip-preview" [style.background]="t.colors.primary"></div>
+                    <div class="chip-preview" [style.background]="getPinnedThemePreview(t)"></div>
                     <span class="chip-name">{{ t.name }}</span>
                     <mat-icon class="btn-delete-pin" (click)="$event.stopPropagation(); themeService.removePinnedTheme(t.id)">close</mat-icon>
                  </div>
@@ -549,6 +589,10 @@
           <div class="current-swatch-preview">
             <div [style.background]="activeColors.primary"></div>
             <div [style.background]="activeColors.background"></div>
+            <div
+              *ngIf="hasThemeBackgroundImage"
+              [class.blurred]="isThemeBackgroundBlurred"
+              [style.background-image]="themeBackgroundImagePreviewStyle"></div>
           </div>
         </div>
     </div>

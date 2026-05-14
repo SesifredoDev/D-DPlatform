@@ -120,6 +120,79 @@
                 <input matInput formControlName="name" placeholder="Campaign name">
               </mat-form-field>
 
+              <div class="theme-settings-block">
+                <div class="section-title">
+                  <h3>Default Theme</h3>
+                </div>
+
+                <div class="theme-control-grid">
+                  <label class="theme-color-control" for="serverBackgroundColor">
+                    <span>Background Colour</span>
+                    <input id="serverBackgroundColor" type="color" formControlName="themeBackgroundColor">
+                  </label>
+
+                  <label class="theme-color-control" for="serverTextColor">
+                    <span>Text Colour</span>
+                    <input id="serverTextColor" type="color" formControlName="themeTextColor">
+                  </label>
+
+                  <mat-form-field appearance="outline" class="theme-font-field">
+                    <mat-label>Text Font</mat-label>
+                    <mat-select formControlName="themeFontFamily">
+                      @for (font of fontOptions; track font.value) {
+                        <mat-option [value]="font.value" [style.font-family]="font.value">
+                          {{ font.label }}
+                        </mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <div class="theme-image-control">
+                  <div class="theme-image-preview" [style.background-image]="themeBackgroundImagePreviewStyle">
+                    @if (!hasThemeBackgroundImage) {
+                      <mat-icon>image</mat-icon>
+                    }
+                  </div>
+
+                  <div class="theme-image-actions">
+                    <input
+                      type="file"
+                      #themeBackgroundImageInput
+                      hidden
+                      (change)="onThemeBackgroundImageSelected($event)"
+                      accept="image/*">
+
+                    <button
+                      mat-stroked-button
+                      type="button"
+                      (click)="themeBackgroundImageInput.click()">
+                      <mat-icon>image</mat-icon>
+                      <span>{{ hasThemeBackgroundImage ? 'Change Image' : 'Add Image' }}</span>
+                    </button>
+
+                    @if (hasThemeBackgroundImage) {
+                      <button
+                        mat-button
+                        type="button"
+                        color="warn"
+                        (click)="clearThemeBackgroundImage(themeBackgroundImageInput)">
+                        Remove
+                      </button>
+                    }
+
+                    <mat-slide-toggle formControlName="themeBackgroundImageBlur">
+                      Blur image
+                    </mat-slide-toggle>
+                  </div>
+                </div>
+
+                <div class="theme-preview" [ngStyle]="themePreviewStyles">
+                  <strong>{{ settingsForm.get('name')?.value || serverDisplayName }}</strong>
+                  <span>Aa</span>
+                </div>
+              </div>
+
               <div class="join-code-card">
                 <div>
                   <span class="info-label">Join Code</span>
@@ -152,7 +225,7 @@
             </section>
           </div>
 
-          @if (settingsForm.dirty || selectedFile) {
+          @if (settingsForm.dirty || selectedFile || selectedBackgroundImageFile) {
             <div class="save-bar">
               <span>Unsaved changes</span>
               <div class="save-actions">

@@ -11,15 +11,20 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatSelectModule } from '@angular/material/select';
 import { Subject, finalize, takeUntil } from 'rxjs';
 
 import { ServerService } from '../../shared/services/server/server';
 import { ChannelService } from '../../shared/services/channel/channel';
-import { IServer, ServerMember } from '../../shared/models/server/server.model';
+import { IServer, IServerTheme, ServerMember } from '../../shared/models/server/server.model';
 import { ChannelType, IChannel, PermissionOverwrite } from '../../shared/models/server/channel.model';
 import { IRole, RolePermissions } from '../../shared/models/server/role.model';
 import { IRolePayload, Role } from '../../shared/services/role/role';
 import { MATERIAL_ICON_NAMES } from '../../shared/constants/material-icon-names';
+import {
+  SERVER_THEME_FONT_OPTIONS,
+  normalizeServerTheme
+} from '../../shared/services/theme/theme.service';
 
 type SettingsTab = 'overview' | 'roles' | 'members' | 'channels';
 type ServerDangerAction = 'leave' | 'delete';
@@ -64,7 +69,8 @@ interface ChannelPermissionControl {
     MatSnackBarModule,
     MatSlideToggleModule,
     MatCheckboxModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatSelectModule
   ],
   templateUrl: './server-settings-dialog-component.html',
   styleUrls: ['./server-settings-dialog-component.scss'],
@@ -167,6 +173,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   ];
 
   readonly materialIconTotal = MATERIAL_ICON_NAMES.length;
+  readonly fontOptions = SERVER_THEME_FONT_OPTIONS;
   readonly iconSearchLimit = 96;
   readonly unassignedRoleFilterId = '__unassigned__';
   readonly defaultMaterialIconNames = [
@@ -209,6 +216,8 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
 
   iconPreview: string | null = null;
   selectedFile: File | null = null;
+  backgroundImagePreview: string | null = null;
+  selectedBackgroundImageFile: File | null = null;
   selectedRole: IRole | null = null;
   selectedChannel: IChannel | null = null;
 
@@ -234,12 +243,19 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     private snackBar: MatSnackBar,
     protected dialogRef: MatDialogRef<ServerSettingsDialogComponent>
   ) {
+    const initialTheme = normalizeServerTheme(server.defaultTheme);
     this.settingsForm = this.fb.group({
-      name: [server.name, [Validators.required, Validators.maxLength(80)]]
+      name: [server.name, [Validators.required, Validators.maxLength(80)]],
+      themeBackgroundColor: [initialTheme.backgroundColor, [Validators.required, Validators.pattern(/^#[0-9a-fA-F]{6}$/)]],
+      themeTextColor: [initialTheme.textColor, [Validators.required, Validators.pattern(/^#[0-9a-fA-F]{6}$/)]],
+      themeFontFamily: [initialTheme.fontFamily, Validators.required],
+      themeBackgroundImage: [initialTheme.backgroundImage],
+      themeBackgroundImageBlur: [initialTheme.backgroundImageBlur]
     });
     this.roleForm = this.initRoleForm();
     this.channelForm = this.initChannelForm();
     this.iconPreview = server.icon || null;
+    this.backgroundImagePreview = initialTheme.backgroundImage;
   }
 
   ngOnInit() {
@@ -249,6 +265,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
         if (data?._id !== this.server._id) return;
 
         this.serverDetails = data;
+        this.syncOverviewForm(data);
         this.reconcileRoleSelection(data);
         this.reconcileChannelSelection(data);
       });
@@ -391,6 +408,30 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     ).length;
     const visibleCount = Math.min(totalMatches, this.iconSearchLimit);
     return `Showing ${visibleCount} of ${totalMatches} matches`;
+  }
+
+  get themePreviewStyles(): Record<string, string> {
+    const theme = this.getThemeFormValue();
+    const image = this.themeBackgroundImagePreview;
+    return {
+      background: image
+        ? `${theme.backgroundColor} ${this.toCssImageValue(image)} center / cover no-repeat`
+        : theme.backgroundColor,
+      color: theme.textColor,
+      'font-family': theme.fontFamily
+    };
+  }
+
+  get themeBackgroundImagePreview(): string | null {
+    return this.backgroundImagePreview || this.settingsForm.get('themeBackgroundImage')?.value || null;
+  }
+
+  get themeBackgroundImagePreviewStyle(): string {
+    return this.toCssImageValue(this.themeBackgroundImagePreview);
+  }
+
+  get hasThemeBackgroundImage(): boolean {
+    return !!this.themeBackgroundImagePreview;
   }
 
   setTab(tab: SettingsTab) {
@@ -600,6 +641,32 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     reader.readAsDataURL(file);
   }
 
+  onThemeBackgroundImageSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    this.selectedBackgroundImageFile = file;
+    input.value = '';
+    const reader = new FileReader();
+    reader.onload = e => {
+      this.backgroundImagePreview = e.target?.result as string;
+      this.settingsForm.markAsDirty();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  clearThemeBackgroundImage(input?: HTMLInputElement) {
+    this.selectedBackgroundImageFile = null;
+    this.backgroundImagePreview = null;
+    this.settingsForm.get('themeBackgroundImage')?.setValue(null);
+    this.settingsForm.markAsDirty();
+
+    if (input) {
+      input.value = '';
+    }
+  }
+
   async onSaveChanges() {
     if (this.settingsForm.invalid || this.isLoading) {
       this.settingsForm.markAllAsTouched();
@@ -611,11 +678,20 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
       await this.serverService.updateServer(
         this.server._id,
         this.settingsForm.value.name,
-        this.selectedFile
+        this.selectedFile,
+        this.getThemeFormValue(),
+        this.selectedBackgroundImageFile
       );
       this.snackBar.open('Server updated.', 'Close', { duration: 2000 });
       this.selectedFile = null;
-      this.settingsForm.markAsPristine();
+      this.selectedBackgroundImageFile = null;
+      const refreshedServer = this.serverService.getCurrentServer();
+      if (refreshedServer?._id === this.server._id) {
+        this.serverDetails = refreshedServer;
+        this.resetOverviewForm(refreshedServer);
+      } else {
+        this.settingsForm.markAsPristine();
+      }
     } catch {
       this.snackBar.open('Update failed.', 'Close', { duration: 3000 });
     } finally {
@@ -647,12 +723,9 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   }
 
   discardOverviewChanges() {
-    this.settingsForm.reset({
-      name: this.serverDetails?.name ?? this.server.name
-    });
     this.selectedFile = null;
-    this.iconPreview = this.serverDetails?.icon || this.server.icon || null;
-    this.settingsForm.markAsPristine();
+    this.selectedBackgroundImageFile = null;
+    this.resetOverviewForm(this.serverDetails ?? this.server);
   }
 
   selectChannel(channel: IChannel | null) {
@@ -930,6 +1003,53 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
       icon: this.normalizeIconName(value.icon, this.defaultChannelIcon(type)),
       permissionOverwrites: this.normalizePermissionOverwrites(this.channelPermissionOverwrites)
     };
+  }
+
+  private syncOverviewForm(server: IServer) {
+    if (this.settingsForm.dirty || this.selectedFile || this.selectedBackgroundImageFile) return;
+
+    this.resetOverviewForm(server);
+  }
+
+  private resetOverviewForm(server: IServer) {
+    const themeValues = this.getThemeFormResetValue(server.defaultTheme);
+    this.settingsForm.reset({
+      name: server.name,
+      ...themeValues
+    });
+    this.iconPreview = server.icon || null;
+    this.backgroundImagePreview = themeValues.themeBackgroundImage;
+    this.settingsForm.markAsPristine();
+  }
+
+  private getThemeFormValue(): IServerTheme {
+    const value = this.settingsForm.getRawValue();
+    return normalizeServerTheme({
+      backgroundColor: value.themeBackgroundColor,
+      textColor: value.themeTextColor,
+      fontFamily: value.themeFontFamily,
+      backgroundImage: value.themeBackgroundImage,
+      backgroundImageBlur: value.themeBackgroundImageBlur
+    });
+  }
+
+  private getThemeFormResetValue(theme: Partial<IServerTheme> | null | undefined) {
+    const normalizedTheme = normalizeServerTheme(theme);
+    return {
+      themeBackgroundColor: normalizedTheme.backgroundColor,
+      themeTextColor: normalizedTheme.textColor,
+      themeFontFamily: normalizedTheme.fontFamily,
+      themeBackgroundImage: normalizedTheme.backgroundImage,
+      themeBackgroundImageBlur: normalizedTheme.backgroundImageBlur
+    };
+  }
+
+  private toCssImageValue(imageUrl: string | null): string {
+    if (!imageUrl) {
+      return 'none';
+    }
+
+    return `url("${imageUrl.replace(/"/g, '\\"')}")`;
   }
 
   private buildPermissions(permissions: Partial<RolePermissions> | null | undefined): RolePermissions {

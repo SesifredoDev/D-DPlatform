@@ -31,7 +31,14 @@
   --transition-standard: 200ms ease;
   --transition-slow: 300ms ease;
 
-  --font-family-main: "Inter", system-ui, -apple-system, sans-serif;
+  --server-theme-background: #121212;
+  --server-theme-text: #eef0f6;
+  --server-theme-font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --server-theme-background-image: none;
+  --server-theme-background-image-blur: 0px;
+  --server-theme-background-image-scale: scale(1);
+  --server-theme-background-overlay: transparent;
+  --font-family-main: var(--server-theme-font-family);
 
   // Glass Dialog Defaults
   --glass-bg: rgba(30, 31, 34, 0.85);
@@ -53,8 +60,8 @@
   --primary: #7289da;
   --primary-glow: rgba(114, 137, 218, 0.4);
   --surface: #1e1f22;
-  --background: #121212;
-  --on-background: #eef0f6;
+  --background: var(--server-theme-background);
+  --on-background: var(--server-theme-text);
   --outline: rgba(114, 137, 218, 0.25);
   --accent: #4a90e2;
 }

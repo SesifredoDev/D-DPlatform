@@ -12,10 +12,20 @@ export interface TemporaryDmGrant {
   grantedAt?: string | Date | null;
 }
 
+export interface IServerTheme {
+  backgroundColor: string;
+  textColor: string;
+  fontFamily: string;
+  backgroundImage: string | null;
+  backgroundImageBlur: boolean;
+  backgroundImageKey?: string | null;
+}
+
 export interface IServer {
   _id: string;
   name: string;
   icon: string | null;
+  defaultTheme?: IServerTheme;
   joinCode?: string;
   roles: IRole[]; // Can be IDs or populated objects
   channels: IChannel[];

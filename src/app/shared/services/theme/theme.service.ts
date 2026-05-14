@@ -1,9 +1,19 @@
 import { Injectable, Renderer2, RendererFactory2 } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
+import type { IServerTheme } from '../../models/server/server.model';
 
 export interface ThemeColors {
   primary: string;
   background: string;
+  textColor?: string;
+  fontFamily?: string;
+  backgroundImage?: string | null;
+  backgroundImageBlur?: boolean;
+}
+
+export interface ServerThemeFontOption {
+  label: string;
+  value: string;
 }
 
 export interface PinnedTheme {
@@ -12,10 +22,77 @@ export interface PinnedTheme {
   colors: ThemeColors;
 }
 
+export const SERVER_THEME_FONT_OPTIONS: readonly ServerThemeFontOption[] = [
+  {
+    label: 'Inter / System',
+    value: '"Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  },
+  {
+    label: 'Roboto',
+    value: 'Roboto, "Helvetica Neue", Arial, sans-serif'
+  },
+  {
+    label: 'Segoe UI',
+    value: '"Segoe UI", Arial, sans-serif'
+  },
+  {
+    label: 'Georgia',
+    value: 'Georgia, "Times New Roman", serif'
+  },
+  {
+    label: 'Monospace',
+    value: '"Roboto Mono", "Courier New", monospace'
+  }
+];
+
+export const DEFAULT_SERVER_THEME: IServerTheme = {
+  backgroundColor: '#121212',
+  textColor: '#eef0f6',
+  fontFamily: SERVER_THEME_FONT_OPTIONS[0].value,
+  backgroundImage: null,
+  backgroundImageBlur: false
+};
+
 export const DEFAULT_THEME_COLORS: ThemeColors = {
   primary: '#7289da',
-  background: '#121212'
+  background: DEFAULT_SERVER_THEME.backgroundColor,
+  textColor: DEFAULT_SERVER_THEME.textColor,
+  fontFamily: DEFAULT_SERVER_THEME.fontFamily,
+  backgroundImage: DEFAULT_SERVER_THEME.backgroundImage,
+  backgroundImageBlur: DEFAULT_SERVER_THEME.backgroundImageBlur
 };
+
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+export function normalizeHexColor(value: unknown, fallback: string): string {
+  const color = String(value ?? '').trim();
+  return HEX_COLOR_PATTERN.test(color) ? color : fallback;
+}
+
+export function normalizeServerTheme(theme: Partial<IServerTheme> | null | undefined): IServerTheme {
+  const fontFamily = String(theme?.fontFamily ?? '').trim();
+  const knownFont = SERVER_THEME_FONT_OPTIONS.some(option => option.value === fontFamily)
+    ? fontFamily
+    : DEFAULT_SERVER_THEME.fontFamily;
+
+  return {
+    backgroundColor: normalizeHexColor(theme?.backgroundColor, DEFAULT_SERVER_THEME.backgroundColor),
+    textColor: normalizeHexColor(theme?.textColor, DEFAULT_SERVER_THEME.textColor),
+    fontFamily: knownFont,
+    backgroundImage: normalizeThemeBackgroundImage(theme?.backgroundImage),
+    backgroundImageBlur: theme?.backgroundImageBlur === true,
+    backgroundImageKey: normalizeThemeBackgroundImage(theme?.backgroundImageKey)
+  };
+}
+
+function normalizeThemeBackgroundImage(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const image = value.trim();
+  return image.length ? image : null;
+}
 
 @Injectable({
   providedIn: 'root'
@@ -38,31 +115,60 @@ export class ThemeService {
   }
 
   applyTheme(colors: ThemeColors, save: boolean = false) {
+    const normalizedColors = this.normalizeThemeColors(colors);
+
     if (save) {
-      this._savedColors = { ...colors };
+      this._savedColors = { ...normalizedColors };
     }
 
-    this._colors.next(colors);
+    this._colors.next(normalizedColors);
 
     const root = document.documentElement;
-    root.style.setProperty('--primary', colors.primary);
-    root.style.setProperty('--background', colors.background);
+    root.style.setProperty('--primary', normalizedColors.primary);
+    root.style.setProperty('--background', normalizedColors.background);
+    root.style.setProperty('--server-theme-background', normalizedColors.background);
+    root.style.setProperty('--server-theme-text', normalizedColors.textColor ?? DEFAULT_SERVER_THEME.textColor);
+    root.style.setProperty('--server-theme-font-family', normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily);
+    root.style.setProperty('--server-theme-background-image', this.toCssImageValue(normalizedColors.backgroundImage ?? null));
+    root.style.setProperty(
+      '--server-theme-background-image-blur',
+      normalizedColors.backgroundImage && normalizedColors.backgroundImageBlur ? '18px' : '0px'
+    );
+    root.style.setProperty(
+      '--server-theme-background-image-scale',
+      normalizedColors.backgroundImage && normalizedColors.backgroundImageBlur ? 'scale(1.06)' : 'scale(1)'
+    );
+    root.style.setProperty(
+      '--server-theme-background-overlay',
+      normalizedColors.backgroundImage ? 'rgba(0, 0, 0, 0.42)' : 'transparent'
+    );
+    root.style.setProperty('--font-family-main', normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily);
 
-    const primaryRgb = this.hexToRgb(colors.primary);
-    const bgRgb = this.hexToRgb(colors.background);
+    const primaryRgb = this.hexToRgb(normalizedColors.primary);
 
-    const surface = this.adjustBrightness(colors.background, 15);
+    const surface = this.adjustBrightness(normalizedColors.background, 15);
     root.style.setProperty('--surface', surface);
     root.style.setProperty('--outline', `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.25)`);
     root.style.setProperty('--primary-glow', `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.4)`);
 
-    const luminance = (0.299 * bgRgb.r + 0.587 * bgRgb.g + 0.114 * bgRgb.b) / 255;
-    const onBackground = luminance > 0.5 ? '#121212' : '#eef0f6';
-    root.style.setProperty('--on-background', onBackground);
-    root.style.setProperty('--accent', colors.primary);
+    root.style.setProperty('--on-background', normalizedColors.textColor ?? DEFAULT_SERVER_THEME.textColor);
+    root.style.setProperty('--accent', normalizedColors.primary);
 
-    document.body.style.backgroundColor = colors.background;
-    document.body.style.color = onBackground;
+    document.body.style.backgroundColor = normalizedColors.background;
+    document.body.style.color = normalizedColors.textColor ?? DEFAULT_SERVER_THEME.textColor;
+    document.body.style.fontFamily = normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily;
+  }
+
+  applyServerTheme(theme: Partial<IServerTheme> | null | undefined) {
+    const normalizedTheme = normalizeServerTheme(theme);
+    this.applyTheme({
+      ...this._savedColors,
+      background: normalizedTheme.backgroundColor,
+      textColor: normalizedTheme.textColor,
+      fontFamily: normalizedTheme.fontFamily,
+      backgroundImage: normalizedTheme.backgroundImage,
+      backgroundImageBlur: normalizedTheme.backgroundImageBlur
+    }, true);
   }
 
   revertToSaved() {
@@ -91,7 +197,7 @@ export class ThemeService {
     const newTheme: PinnedTheme = {
       id: Date.now().toString(),
       name,
-      colors: { ...colors }
+      colors: this.normalizeThemeColors(colors)
     };
     const updated = [...current, newTheme];
     this._pinnedThemes.next(updated);
@@ -129,5 +235,45 @@ export class ThemeService {
 
   getColors(): ThemeColors {
     return this._colors.value;
+  }
+
+  getFactoryColors(): ThemeColors {
+    return { ...DEFAULT_THEME_COLORS };
+  }
+
+  private normalizeThemeColors(colors: ThemeColors): ThemeColors {
+    const background = normalizeHexColor(colors?.background, DEFAULT_THEME_COLORS.background);
+    const fallbackTextColor = this.getReadableTextColor(background);
+    const textColor = normalizeHexColor(colors?.textColor, fallbackTextColor);
+    const fontFamily = normalizeServerTheme({
+      backgroundColor: background,
+      textColor,
+      fontFamily: colors?.fontFamily,
+      backgroundImage: colors?.backgroundImage,
+      backgroundImageBlur: colors?.backgroundImageBlur
+    }).fontFamily;
+
+    return {
+      primary: normalizeHexColor(colors?.primary, DEFAULT_THEME_COLORS.primary),
+      background,
+      textColor,
+      fontFamily,
+      backgroundImage: normalizeThemeBackgroundImage(colors?.backgroundImage),
+      backgroundImageBlur: colors?.backgroundImageBlur === true
+    };
+  }
+
+  private getReadableTextColor(background: string): string {
+    const bgRgb = this.hexToRgb(background);
+    const luminance = (0.299 * bgRgb.r + 0.587 * bgRgb.g + 0.114 * bgRgb.b) / 255;
+    return luminance > 0.5 ? '#121212' : '#eef0f6';
+  }
+
+  private toCssImageValue(imageUrl: string | null): string {
+    if (!imageUrl) {
+      return 'none';
+    }
+
+    return `url("${imageUrl.replace(/"/g, '\\"')}")`;
   }
 }

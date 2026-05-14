@@ -26,6 +26,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { PinnedTheme, ThemeColors, ThemeService } from '../../../shared/services/theme/theme.service';
 import { MatMenuModule } from '@angular/material/menu';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer, TemporaryDmDuration } from '../../../shared/models/server/server.model';
 import { MarkdownComponent } from 'ngx-markdown';
@@ -91,7 +92,7 @@ interface PriorityGridPlacement {
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MarkdownComponent]
+  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   private static readonly mediaPreferencesStorageKey = 'd-d-platform.call.media-preferences';
@@ -105,6 +106,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private static readonly sceneMainMinAspectRatio = 1 / 1;
   private static readonly sceneDefaultMainAreaRatio = 0.5;
   private static readonly sceneExpandedMainAreaRatio = 0.8;
+  private static readonly maxThemeSyncPayloadBytes = 60_000;
   private static readonly desktopVideoConstraints: MediaTrackConstraints = {
     width: { ideal: 1920, max: 1920 },
     height: { ideal: 1080, max: 1080 },
@@ -223,6 +225,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Theme state
   activeColors: ThemeColors;
   pinnedThemes: PinnedTheme[] = [];
+  private lastValidThemeBackgroundImage: string | null = null;
+  private lastValidThemeBackgroundImageBlur = false;
 
   // VTT Session state
   vttSession: { active: boolean, roomId: string | null, hostId: string | null } = { active: false, roomId: null, hostId: null };
@@ -315,9 +319,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     public themeService: ThemeService,
     private serverService: ServerService,
     private authService: AuthService,
-    private deviceService: DeviceService
+    private deviceService: DeviceService,
+    private snackBar: MatSnackBar
   ) {
     this.activeColors = this.themeService.getColors();
+    this.rememberValidThemeBackground(this.activeColors);
   }
 
   async ngOnInit() {
@@ -529,7 +535,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         }
 
         if (this.activeColors) {
-          this.videoService.sendThemeUpdate(this.activeColors);
+          this.safeSendThemeUpdate(this.activeColors);
         }
       }
     });
@@ -546,6 +552,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.themeSyncSub = this.videoService.themeSync$.subscribe(colors => {
       this.activeColors = colors;
+      this.rememberValidThemeBackground(colors);
       this.themeService.applyTheme(colors, false); // DO NOT save call atmosphere to local player preference
     });
 
@@ -1663,7 +1670,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     async leaveCall() {
     this.resetMicTestForCaptureChange();
     await this.videoService.leaveCall(this.channelId);
-    this.themeService.resetToDefault();
+    this.themeService.revertToSaved();
     this.localStream = null;
     this.remoteStreams = [];
     this.sceneMainCharacterIds = [];
@@ -1744,14 +1751,72 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   // --- THEME PICKER LOGIC ---
 
-  updateThemeLocally(key: keyof ThemeColors, color: string) {
-    this.activeColors = { ...this.activeColors, [key]: color };
-    this.themeService.applyTheme(this.activeColors, false);
+  get hasThemeBackgroundImage(): boolean {
+    return !!this.activeColors.backgroundImage;
+  }
+
+  get themeBackgroundImagePreviewStyle(): string {
+    return this.toCssImageValue(this.activeColors.backgroundImage ?? null);
+  }
+
+  get isThemeBackgroundBlurred(): boolean {
+    return this.hasThemeBackgroundImage && this.activeColors.backgroundImageBlur === true;
+  }
+
+  updateThemeLocally(key: keyof ThemeColors, value: string | boolean | null) {
+    this.applyThemeCandidate({ ...this.activeColors, [key]: value }, key === 'backgroundImage');
+  }
+
+  onThemeBackgroundImageSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+
+    if (!file || !file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = e => {
+      const image = typeof e.target?.result === 'string' ? e.target.result : null;
+      if (image) {
+        const accepted = this.applyThemeCandidate({
+          ...this.activeColors,
+          backgroundImage: image
+        });
+
+        if (!accepted) {
+          this.promptThemeImageCompression(file);
+          this.cdr.detectChanges();
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  clearThemeBackgroundImage(input?: HTMLInputElement) {
+    if (input) {
+      input.value = '';
+    }
+
+    this.applyThemeCandidate({
+      ...this.activeColors,
+      backgroundImage: null,
+      backgroundImageBlur: false
+    });
+  }
+
+  getPinnedThemePreview(theme: PinnedTheme): string {
+    if (theme.colors.backgroundImage) {
+      return `${theme.colors.background} ${this.toCssImageValue(theme.colors.backgroundImage)} center / cover no-repeat`;
+    }
+
+    return theme.colors.primary;
   }
 
   confirmTheme() {
-    this.themeService.applyTheme(this.activeColors, true);
-    this.videoService.sendThemeUpdate(this.activeColors);
+    this.themeService.applyTheme(this.activeColors, false);
+    if (!this.safeSendThemeUpdate(this.activeColors)) {
+      return;
+    }
     this.showThemePicker = false;
   }
 
@@ -1763,14 +1828,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   resetToFactory() {
-    this.themeService.resetToDefault();
-    this.activeColors = this.themeService.getColors();
-    this.videoService.sendThemeUpdate(this.activeColors);
+    this.activeColors = this.themeService.getFactoryColors();
+    this.themeService.applyTheme(this.activeColors, false);
+    this.rememberValidThemeBackground(this.activeColors);
+    this.safeSendThemeUpdate(this.activeColors);
   }
 
   selectPinnedTheme(theme: PinnedTheme) {
-    this.activeColors = { ...theme.colors };
-    this.themeService.applyTheme(this.activeColors, false);
+    this.applyThemeCandidate({ ...theme.colors }, true);
   }
 
   pinCurrentTheme() {
@@ -1852,6 +1917,191 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   startVttHosting() {
     const roomId = this.getVttRoomId();
     this.hostVtt.emit(roomId);
+  }
+
+  private toCssImageValue(imageUrl: string | null): string {
+    if (!imageUrl) {
+      return 'none';
+    }
+
+    return `url("${imageUrl.replace(/"/g, '\\"')}")`;
+  }
+
+  private applyThemeCandidate(candidate: ThemeColors, showSizeError = false): boolean {
+    if (this.isThemeSyncPayloadTooLarge(candidate)) {
+      this.revertThemeBackground(candidate, showSizeError);
+      return false;
+    }
+
+    this.activeColors = candidate;
+    this.rememberValidThemeBackground(candidate);
+    this.themeService.applyTheme(candidate, false);
+    return true;
+  }
+
+  private safeSendThemeUpdate(theme: ThemeColors): boolean {
+    if (this.isThemeSyncPayloadTooLarge(theme)) {
+      const oversizedImage = theme.backgroundImage ?? null;
+      this.revertThemeBackground(theme, false);
+      this.promptThemeImageCompression(oversizedImage);
+      return false;
+    }
+
+    try {
+      this.videoService.sendThemeUpdate(theme);
+      this.rememberValidThemeBackground(theme);
+      return true;
+    } catch (error) {
+      if (this.isThemePayloadSizeError(error)) {
+        const oversizedImage = theme.backgroundImage ?? null;
+        this.revertThemeBackground(theme, false);
+        this.promptThemeImageCompression(oversizedImage);
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private isThemeSyncPayloadTooLarge(theme: ThemeColors): boolean {
+    return this.getThemeSyncPayloadByteLength(theme) > Call.maxThemeSyncPayloadBytes;
+  }
+
+  private getThemeSyncPayloadByteLength(theme: ThemeColors): number {
+    return new TextEncoder().encode(JSON.stringify({ type: 'theme-sync', theme })).byteLength;
+  }
+
+  private revertThemeBackground(theme: ThemeColors, showToast: boolean) {
+    const revertedTheme: ThemeColors = {
+      ...theme,
+      backgroundImage: this.lastValidThemeBackgroundImage,
+      backgroundImageBlur: this.lastValidThemeBackgroundImage
+        ? this.lastValidThemeBackgroundImageBlur
+        : false
+    };
+
+    this.activeColors = revertedTheme;
+    this.themeService.applyTheme(revertedTheme, false);
+
+    if (showToast) {
+      this.snackBar.open('Background image is too large to broadcast. Choose a smaller image.', 'Close', {
+        duration: 2600
+      });
+    }
+  }
+
+  private rememberValidThemeBackground(theme: ThemeColors) {
+    this.lastValidThemeBackgroundImage = theme.backgroundImage ?? null;
+    this.lastValidThemeBackgroundImageBlur = !!theme.backgroundImage && theme.backgroundImageBlur === true;
+  }
+
+  private isThemePayloadSizeError(error: unknown): boolean {
+    return String(error instanceof Error ? error.message : error).toLowerCase().includes('message too large');
+  }
+
+  private promptThemeImageCompression(source: File | string | null) {
+    if (!source) {
+      this.snackBar.open('Background image is too large to broadcast. Choose a smaller image.', 'Close', {
+        duration: 2600
+      });
+      return;
+    }
+
+    const snackRef = this.snackBar.open('Background image is too large to broadcast.', 'Compress', {
+      duration: 7000
+    });
+
+    snackRef.onAction().subscribe(() => {
+      void this.compressAndApplyThemeBackgroundImage(source);
+    });
+  }
+
+  private async compressAndApplyThemeBackgroundImage(source: File | string) {
+    try {
+      const compressedImage = await this.compressThemeBackgroundImage(source);
+      const accepted = this.applyThemeCandidate({
+        ...this.activeColors,
+        backgroundImage: compressedImage
+      });
+
+      if (!accepted) {
+        this.snackBar.open('Compressed image is still too large. Choose a smaller image.', 'Close', {
+          duration: 2800
+        });
+        return;
+      }
+
+      this.snackBar.open('Compressed background image applied.', 'Close', {
+        duration: 1800
+      });
+    } catch {
+      this.snackBar.open('Could not compress image enough. Choose a smaller image.', 'Close', {
+        duration: 2800
+      });
+    }
+  }
+
+  private async compressThemeBackgroundImage(source: File | string): Promise<string> {
+    const image = await this.loadImageForCompression(source);
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+
+    if (!context) {
+      throw new Error('Canvas is unavailable');
+    }
+
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    const maxDimensions = [1280, 960, 720, 540, 420, 320, 256];
+    const qualities = [0.82, 0.72, 0.62, 0.52, 0.42, 0.34, 0.28];
+
+    for (const maxDimension of maxDimensions) {
+      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+
+      canvas.width = width;
+      canvas.height = height;
+      context.clearRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+
+      for (const quality of qualities) {
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        const candidate = {
+          ...this.activeColors,
+          backgroundImage: compressed
+        };
+
+        if (!this.isThemeSyncPayloadTooLarge(candidate)) {
+          return compressed;
+        }
+      }
+    }
+
+    throw new Error('Compressed image is too large');
+  }
+
+  private loadImageForCompression(source: File | string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      const objectUrl = source instanceof File ? URL.createObjectURL(source) : null;
+
+      image.onload = () => {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+        resolve(image);
+      };
+
+      image.onerror = () => {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+        }
+        reject(new Error('Image could not be loaded'));
+      };
+
+      image.src = objectUrl ?? source as string;
+    });
   }
 
   startVttJoining() {
@@ -2009,7 +2259,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private async handleCallKickout(reason: string) {
-    this.themeService.resetToDefault();
+    this.themeService.revertToSaved();
     this.localStream = null;
     this.remoteStreams = [];
     this.closeRemoteContextMenu();
