@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, OnDestroy, Output, ViewChild} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, EventEmitter, Input, OnDestroy, Output, ViewChild} from '@angular/core';
 
 import {ICharacter} from '../../../shared/models/user/character.model';
 
@@ -62,9 +62,103 @@ type ServerManagementPermission = Extract<
 
 export class SidePanel implements AfterViewInit, OnDestroy {
 
+  @Input() collapsed = false;
+  @Input() collapsible = false;
   @Output() whisperInitiated = new EventEmitter<any>();
   @Output() actionPerformed = new EventEmitter<void>();
+  @Output() collapsedChange = new EventEmitter<boolean>();
   @ViewChild('memberContextMenuTrigger') memberContextMenuTrigger!: MatMenuTrigger;
+
+  readonly collapsedContainerStyles: Readonly<Record<string, string>> = {
+    width: '76px',
+    'min-width': '76px',
+    'max-width': '76px'
+  };
+  readonly collapsedHeaderStyles: Readonly<Record<string, string>> = {
+    height: 'auto',
+    padding: '8px 0',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'center'
+  };
+  readonly collapsedServerButtonStyles: Readonly<Record<string, string>> = {
+    width: '44px',
+    'min-width': '44px',
+    flex: '0 0 44px',
+    'justify-content': 'center'
+  };
+  readonly collapsedIconStyles: Readonly<Record<string, string>> = {'margin-right': '0'};
+  readonly collapsedContentStyles: Readonly<Record<string, string>> = {padding: '12px 0'};
+  readonly collapsedSectionStyles: Readonly<Record<string, string>> = {
+    'margin-bottom': '16px',
+    padding: '0'
+  };
+  readonly collapsedSectionHeaderStyles: Readonly<Record<string, string>> = {
+    'justify-content': 'center',
+    padding: '0 0 8px'
+  };
+  readonly collapsedEmptyStateStyles: Readonly<Record<string, string>> = {padding: '0'};
+  readonly collapsedEmptyStateContentStyles: Readonly<Record<string, string>> = {
+    'max-width': 'none',
+    width: '100%'
+  };
+  readonly collapsedEmptyIconStyles: Readonly<Record<string, string>> = {
+    width: '36px',
+    height: '36px',
+    'font-size': '36px',
+    'margin-bottom': '12px'
+  };
+  readonly collapsedEmptyButtonStyles: Readonly<Record<string, string>> = {
+    width: '44px',
+    'min-width': '44px',
+    padding: '0'
+  };
+  readonly collapsedIdentityCardStyles: Readonly<Record<string, string>> = {
+    'justify-content': 'center',
+    gap: '0',
+    margin: '0 8px',
+    padding: '0'
+  };
+  readonly collapsedNavItemStyles: Readonly<Record<string, string>> = {
+    'justify-content': 'center',
+    margin: '0 8px',
+    padding: '0'
+  };
+  readonly collapsedMemberCardStyles: Readonly<Record<string, string>> = {
+    display: 'flex',
+    'align-items': 'center',
+    'justify-content': 'center',
+    margin: '0 auto 4px',
+    padding: '0'
+  };
+  readonly collapsedMemberMainStyles: Readonly<Record<string, string>> = {
+    'justify-content': 'center',
+    gap: '0'
+  };
+  readonly collapsedMemberCharsStyles: Readonly<Record<string, string>> = {
+    margin: '0',
+    padding: '0',
+    display: 'flex',
+    'flex-direction': 'column',
+    'align-items': 'center',
+    'justify-content': 'center',
+    gap: '10px'
+  };
+  readonly collapsedCharacterIconStyles: Readonly<Record<string, string>> = {
+    width: '34px',
+    height: '34px',
+    'border-radius': '10px'
+  };
+  readonly collapsedRoleCategoryStyles: Readonly<Record<string, string>> = {
+    'margin-bottom': '8px'
+  };
+  readonly collapsedFooterStyles: Readonly<Record<string, string>> = {padding: '12px 0'};
+  readonly collapsedFooterActionsStyles: Readonly<Record<string, string>> = {
+    'flex-direction': 'column',
+    'align-items': 'center',
+    gap: '8px',
+    'margin-bottom': '0'
+  };
 
   characters: ICharacter[] = [];
   selectedCharacter: ICharacter | null = null;
@@ -217,6 +311,10 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     this.selectedCharacter = char;
     this.charService.setActiveCharacter(this.selectedCharacter);
 
+  }
+
+  toggleCollapsed() {
+    this.collapsedChange.emit(!this.collapsed);
   }
 
 

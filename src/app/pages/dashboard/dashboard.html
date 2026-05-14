@@ -4,8 +4,12 @@
 
 <app-side-panel
   class="sidebar"
+  [collapsed]="isSidePanelCollapsed && !isMobile"
+  [collapsible]="!isMobile"
+  [class.desktop-collapsed]="!isMobile && isSidePanelCollapsed"
   [class.mobile-open]="isMobile && showSidePanel"
   [class.mobile-hidden]="isMobile && !showSidePanel"
+  (collapsedChange)="onSidePanelCollapsedChange($event)"
   (actionPerformed)="onSidePanelAction()">
 </app-side-panel>
 

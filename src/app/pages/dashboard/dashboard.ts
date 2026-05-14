@@ -62,6 +62,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   isMobile: boolean = window.innerWidth <= 768;
   showSidePanel: boolean = !this.isMobile;
+  isSidePanelCollapsed = false;
   private readonly minPaneWidth = 280;
   private pendingLeftWidth: number | null = null;
   private animationFrameId: number | null = null;
@@ -199,6 +200,9 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     this.syncLayoutBounds();
     if (wasMobile !== this.isMobile) {
       this.showSidePanel = !this.isMobile;
+      if (this.isMobile) {
+        this.isSidePanelCollapsed = false;
+      }
       this.updatePaneTabs();
     }
   }
@@ -211,6 +215,16 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     if (this.isMobile) {
       this.showSidePanel = false;
     }
+  }
+
+  onSidePanelCollapsedChange(collapsed: boolean) {
+    if (this.isMobile) {
+      this.isSidePanelCollapsed = false;
+      return;
+    }
+
+    this.isSidePanelCollapsed = collapsed;
+    this.syncLayoutBounds();
   }
 
   closeTab(event: Event, id: string) {

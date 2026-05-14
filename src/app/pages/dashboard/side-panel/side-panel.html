@@ -1,14 +1,36 @@
-<div class="sidebar-container">
+<div
+  class="sidebar-container"
+  [class.collapsed]="collapsed"
+  [ngStyle]="collapsed ? collapsedContainerStyles : null">
 
   <!-- 1. SERVER HEADER (Switcher now at top for better UX) -->
-  <header class="server-header" *ngIf="selectedServer">
-    <button mat-button class="server-dropdown-btn" [matMenuTriggerFor]="serverMenu">
+  <header class="server-header" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
+    <button
+      mat-button
+      class="server-dropdown-btn"
+      [matMenuTriggerFor]="serverMenu"
+      [matTooltip]="collapsed ? selectedServer.name : ''"
+      matTooltipPosition="right"
+      [ngStyle]="collapsed ? collapsedServerButtonStyles : null">
       <img
         class="server-icon-mini"
         [src]="selectedServer.icon || 'https://www.gravatar.com/avatar/'+selectedServer._id+'?d=identicon'"
-        (error)="$any($event.target).src = 'assets/default-avatar.png'">
-      <span class="server-name-text">{{ selectedServer.name }}</span>
-      <mat-icon class="chevron-icon">expand_more</mat-icon>
+        (error)="$any($event.target).src = 'assets/default-avatar.png'"
+        [ngStyle]="collapsed ? collapsedIconStyles : null">
+      <span class="server-name-text" *ngIf="!collapsed">{{ selectedServer.name }}</span>
+      <mat-icon class="chevron-icon" *ngIf="!collapsed">expand_more</mat-icon>
+    </button>
+
+    <button
+      mat-icon-button
+      type="button"
+      class="collapse-toggle-btn"
+      *ngIf="collapsible"
+      (click)="toggleCollapsed()"
+      [attr.aria-label]="collapsed ? 'Expand side menu' : 'Collapse side menu'"
+      [matTooltip]="collapsed ? 'Expand menu' : 'Collapse menu'"
+      matTooltipPosition="right">
+      <mat-icon>{{ collapsed ? 'chevron_right' : 'chevron_left' }}</mat-icon>
     </button>
 
     <mat-menu #serverMenu="matMenu" xPosition="after" yPosition="below" class="custom-glass-menu">
@@ -27,31 +49,56 @@
     </mat-menu>
   </header>
 
-  <header class="server-header" *ngIf="!selectedServer">
-    <div class="empty-server-header">
+  <header class="server-header" *ngIf="!selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
+    <div class="empty-server-header" *ngIf="!collapsed">
       <span class="server-name-text">No Realms Found</span>
     </div>
+    <button
+      mat-icon-button
+      type="button"
+      class="collapse-toggle-btn"
+      *ngIf="collapsible"
+      (click)="toggleCollapsed()"
+      [attr.aria-label]="collapsed ? 'Expand side menu' : 'Collapse side menu'"
+      [matTooltip]="collapsed ? 'Expand menu' : 'Collapse menu'"
+      matTooltipPosition="right">
+      <mat-icon>{{ collapsed ? 'chevron_right' : 'chevron_left' }}</mat-icon>
+    </button>
   </header>
 
   <!-- 2. SCROLLABLE CONTENT AREA -->
-  <div class="main-content-scroll">
+  <div class="main-content-scroll" [ngStyle]="collapsed ? collapsedContentStyles : null">
 
     <!-- NO SERVERS STATE -->
-    <div class="empty-state-container" *ngIf="servers.length === 0">
-      <div class="empty-state-content">
-        <mat-icon class="empty-icon">fort</mat-icon>
-        <h3>Your journey awaits</h3>
-        <p>You haven't joined any realms yet. Create your own world or join a friend's campaign to begin.</p>
-        <button mat-flat-button color="primary" (click)="openAddServerDialog()">
+    <div
+      class="empty-state-container"
+      *ngIf="servers.length === 0"
+      [ngStyle]="collapsed ? collapsedEmptyStateStyles : null">
+      <div class="empty-state-content" [ngStyle]="collapsed ? collapsedEmptyStateContentStyles : null">
+        <mat-icon class="empty-icon" [ngStyle]="collapsed ? collapsedEmptyIconStyles : null">fort</mat-icon>
+        <h3 *ngIf="!collapsed">Your journey awaits</h3>
+        <p *ngIf="!collapsed">You haven't joined any realms yet. Create your own world or join a friend's campaign to begin.</p>
+        <button
+          mat-flat-button
+          color="primary"
+          (click)="openAddServerDialog()"
+          [ngStyle]="collapsed ? collapsedEmptyButtonStyles : null">
           <mat-icon>add</mat-icon>
-          Create Realm
+          <span *ngIf="!collapsed">Create Realm</span>
         </button>
       </div>
     </div>
 
     <!-- CHARACTER SECTION (Your Identity) -->
-    <section class="identity-section" *ngIf="selectedCharacter && servers.length > 0">
-      <div class="identity-card" (click)="goToManageCharacters()" matTooltip="Manage Characters">
+    <section
+      class="identity-section"
+      *ngIf="selectedCharacter && servers.length > 0"
+      [ngStyle]="collapsed ? collapsedSectionStyles : null">
+      <div
+        class="identity-card"
+        (click)="goToManageCharacters()"
+        matTooltip="Manage Characters"
+        [ngStyle]="collapsed ? collapsedIdentityCardStyles : null">
         <div class="avatar-container">
           <img
             class="identity-avatar"
@@ -59,15 +106,15 @@
             (error)="$any($event.target).src = 'assets/default-avatar.png'">
           <div class="status-indicator online"></div>
         </div>
-        <div class="identity-info">
+        <div class="identity-info" *ngIf="!collapsed">
           <div class="char-name">{{ selectedCharacter.name }}</div>
           <div class="char-race">{{ selectedCharacter.race }}</div>
         </div>
-        <mat-icon class="edit-hint">settings</mat-icon>
+        <mat-icon class="edit-hint" *ngIf="!collapsed">settings</mat-icon>
       </div>
 
       <!-- Character Switcher -->
-      <div class="char-switcher-row" *ngIf="selectedServer">
+      <div class="char-switcher-row" *ngIf="selectedServer && !collapsed">
         <mat-form-field appearance="outline" class="char-select-field">
           <mat-select [value]="selectedCharacter" (selectionChange)="onCharacterChange($event.value)">
             @for (char of characters; track char) {
@@ -81,9 +128,9 @@
     </section>
 
     <!-- NAVIGATION: CHANNELS -->
-    <section class="nav-section" *ngIf="selectedServer">
-      <div class="section-header">
-        <span class="title">Channels</span>
+    <section class="nav-section" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedSectionStyles : null">
+      <div class="section-header" [ngStyle]="collapsed ? collapsedSectionHeaderStyles : null">
+        <span class="title" *ngIf="!collapsed">Channels</span>
         <button
           mat-icon-button
           class="mini-btn"
@@ -96,18 +143,24 @@
 
       <nav class="side-nav">
         @for (channel of channels; track channel) {
-          <a class="nav-item" (click)="selectChannel(channel)" [class.active]="channelService.currentChannel?._id === channel._id">
-            <mat-icon class="item-icon">{{ channel.icon || 'tag' }}</mat-icon>
-            <span class="item-label">{{ channel.name }}</span>
+          <a
+            class="nav-item"
+            (click)="selectChannel(channel)"
+            [class.active]="channelService.currentChannel?._id === channel._id"
+            [matTooltip]="collapsed ? channel.name : ''"
+            matTooltipPosition="right"
+            [ngStyle]="collapsed ? collapsedNavItemStyles : null">
+            <mat-icon class="item-icon" [ngStyle]="collapsed ? collapsedIconStyles : null">{{ channel.icon || 'tag' }}</mat-icon>
+            <span class="item-label" *ngIf="!collapsed">{{ channel.name }}</span>
           </a>
         }
       </nav>
     </section>
 
     <!-- NAVIGATION: DM WHISPERS -->
-    <section class="nav-section" *ngIf="selectedServer">
-      <div class="section-header">
-        <span class="title">Direct Whispers</span>
+    <section class="nav-section" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedSectionStyles : null">
+      <div class="section-header" [ngStyle]="collapsed ? collapsedSectionHeaderStyles : null">
+        <span class="title" *ngIf="!collapsed">Direct Whispers</span>
       </div>
 
       <nav class="side-nav">
@@ -116,9 +169,17 @@
           @for (group of groupedMembers; track group) {
             @for (member of group.members; track member) {
               @if (member.user._id !== currentUserId) {
-                <a class="nav-item whisper-item" (click)="whisperUser(member)">
-                  <img class="mini-avatar" [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
-                  <span class="item-label">{{ member.user.username }}</span>
+                <a
+                  class="nav-item whisper-item"
+                  (click)="whisperUser(member)"
+                  [matTooltip]="collapsed ? member.user.username : ''"
+                  matTooltipPosition="right"
+                  [ngStyle]="collapsed ? collapsedNavItemStyles : null">
+                  <img
+                    class="mini-avatar"
+                    [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'"
+                    [ngStyle]="collapsed ? collapsedIconStyles : null">
+                  <span class="item-label" *ngIf="!collapsed">{{ member.user.username }}</span>
                 </a>
               }
             }
@@ -127,42 +188,59 @@
 
         <!-- Player View: Just the DM -->
         <ng-container *ngIf="!isServerOwner">
-          <a class="nav-item whisper-item" (click)="whisperDM()">
-            <mat-icon class="item-icon">security</mat-icon>
-            <span class="item-label">Whisper the DM</span>
+          <a
+            class="nav-item whisper-item"
+            (click)="whisperDM()"
+            [matTooltip]="collapsed ? 'Whisper the DM' : ''"
+            matTooltipPosition="right"
+            [ngStyle]="collapsed ? collapsedNavItemStyles : null">
+            <mat-icon class="item-icon" [ngStyle]="collapsed ? collapsedIconStyles : null">security</mat-icon>
+            <span class="item-label" *ngIf="!collapsed">Whisper the DM</span>
           </a>
         </ng-container>
       </nav>
     </section>
 
     <!-- SOCIAL: MEMBER LIST -->
-    <section class="members-section" *ngIf="selectedServer">
-      <div class="section-header">
-        <span class="title">In This Realm</span>
+    <section class="members-section" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedSectionStyles : null">
+      <div class="section-header" [ngStyle]="collapsed ? collapsedSectionHeaderStyles : null">
+        <span class="title" *ngIf="!collapsed">In This Realm</span>
       </div>
 
       <div class="member-list">
         @for (group of groupedMembers; track group) {
-          <div class="role-category">
-            <div class="category-name">{{ group.role.name }} — {{ group.members.length }}</div>
+          <div class="role-category" [ngStyle]="collapsed ? collapsedRoleCategoryStyles : null">
+            <div class="category-name" *ngIf="!collapsed">{{ group.role.name }} — {{ group.members.length }}</div>
 
             @for (member of group.members; track member) {
-              <div class="member-card" (contextmenu)="onRightClickMember($event, member)">
-                <div class="member-main">
-                  <img class="member-avatar" [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
-                  <div class="member-details">
+              <div
+                class="member-card"
+                (contextmenu)="onRightClickMember($event, member)"
+                [matTooltip]="collapsed ? member.user.username : ''"
+                matTooltipPosition="right"
+                [ngStyle]="collapsed ? collapsedMemberCardStyles : null">
+                <div class="member-main" [ngStyle]="collapsed ? collapsedMemberMainStyles : null">
+                  <img
+                    class="member-avatar"
+                    *ngIf="!collapsed"
+                    [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
+                  <div class="member-details" *ngIf="!collapsed">
                     <span class="username">{{ member.user.username }}</span>
                     <span class="member-role-badge" *ngIf="isMemberTemporaryDm(member)">Temporary DM</span>
                   </div>
                 </div>
 
                 <!-- Display Member's Characters as small icons -->
-                <div class="member-chars" *ngIf="member.characters?.length">
+                <div
+                  class="member-chars"
+                  *ngIf="member.characters?.length"
+                  [ngStyle]="collapsed ? collapsedMemberCharsStyles : null">
                   @for (char of member.characters; track char) {
                     <img
                       class="tiny-char-icon"
                       [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
                       [matTooltip]="char.name"
+                      [ngStyle]="collapsed ? collapsedCharacterIconStyles : null"
                       (click)="openCharacter(char)"
                       (contextmenu)="onRightClickCharacter($event, char)">
                   }
@@ -177,8 +255,8 @@
   </div>
 
   <!-- 3. FOOTER: USER & SYSTEM CONTROLS -->
-  <footer class="sidebar-footer">
-    <div class="footer-actions">
+  <footer class="sidebar-footer" [ngStyle]="collapsed ? collapsedFooterStyles : null">
+    <div class="footer-actions" [ngStyle]="collapsed ? collapsedFooterActionsStyles : null">
       <button mat-icon-button *ngIf="canOpenSettings" (click)="openSettings()" matTooltip="Server Settings">
         <mat-icon>settings</mat-icon>
       </button>
@@ -191,7 +269,7 @@
 
     </div>
 
-    <div class="footer-brand">
+    <div class="footer-brand" *ngIf="!collapsed">
       <span class="brand-text">D&D PLATFORM</span>
       <span class="version-text">v1.2.0</span>
     </div>

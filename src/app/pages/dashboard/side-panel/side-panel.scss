@@ -40,6 +40,7 @@
   padding: 0 var(--space-m);
   display: flex;
   align-items: center;
+  gap: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.02);
 
@@ -48,6 +49,8 @@
     height: 44px;
     display: flex;
     align-items: center;
+    flex: 1;
+    min-width: 0;
     padding: 0 var(--space-s) !important;
     border-radius: var(--radius-m);
     transition: background 0.2s ease;
@@ -86,6 +89,8 @@
   .empty-server-header {
     width: 100%;
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: center;
     padding: 0 var(--space-s);
     color: rgba(255, 255, 255, 0.3);
@@ -396,6 +401,11 @@
     .brand-text { font-size: 10px; font-weight: 900; letter-spacing: 2px; color: rgba(255, 255, 255, 0.2); }
     .version-text { font-size: 9px; color: rgba(255, 255, 255, 0.1); }
   }
+}
+
+.sidebar-container.collapsed {
+  .server-dropdown-btn { padding: 0 !important; }
+  .nav-item.active { border-left: 0; background: rgba(var(--primary-rgb, 114, 137, 218), 0.18); }
 }
 
 /* -----------------------------------------------------------------------------

@@ -26,6 +26,12 @@
   z-index: 1000;
   transition: transform 0.3s ease-in-out, width 0.3s ease;
 
+  &.desktop-collapsed {
+    width: 76px;
+    min-width: 76px;
+    max-width: 76px;
+  }
+
   &.mobile-hidden {
     display: none;
   }
