@@ -22,7 +22,7 @@ class Token {
       id: this.id,
       x: x,
       y: y,
-      draggable: this.checkPermissions()
+      draggable: this.canDrag()
     });
 
     this.group.tokenReference = this;
@@ -36,6 +36,10 @@ class Token {
     return isDM ||
       (this.isPlayer && this.engine.playersCanControlAllPlayerTokens) ||
       (this.ownerId === currentUserId);
+  }
+
+  canDrag() {
+    return this.checkPermissions() && !this.engine.isMeasuring?.();
   }
 
   async initVisuals() {
@@ -114,7 +118,7 @@ class Token {
     if (config.isPlayer !== undefined) this.isPlayer = !!config.isPlayer;
 
     this.initVisuals();
-    this.group.draggable(this.checkPermissions());
+    this.group.draggable(this.canDrag());
     this.snapToGrid(emitMove);
   }
 

@@ -254,6 +254,35 @@
   &:last-child { border-bottom: none; padding-bottom: 0; }
 }
 
+.measure-control {
+  position: relative;
+}
+
+.cone-angle-chip-row {
+  position: absolute;
+  left: 54px;
+  top: 7px;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+
+.angle-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--on-background);
+
+  &.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+  }
+}
+
 /* --- Buttons --- */
 button[mat-icon-button] {
   width: 44px !important;
@@ -299,7 +328,7 @@ button[mat-icon-button] {
   position: absolute;
   top: 16px;
   right: 16px;
-  width: 280px;
+  width: min-content;
   z-index: 1001;
   border-radius: var(--radius-l);
   border: 2px solid var(--outline);

@@ -257,3 +257,134 @@ body {
     }
   }
 }
+
+.vtt-action-menu {
+  &.mat-mdc-menu-panel {
+    min-width: 250px;
+    overflow: hidden;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-l);
+    background: var(--surface);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.55), 0 0 18px var(--primary-glow);
+    backdrop-filter: var(--glass-blur);
+  }
+
+  .mat-mdc-menu-content {
+    padding: 0;
+  }
+
+  .vtt-menu-content {
+    width: 250px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .vtt-menu-header,
+  .vtt-menu-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .vtt-menu-header {
+    justify-content: flex-start;
+    color: var(--primary);
+
+    h3 {
+      margin: 0;
+      color: var(--on-background);
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    mat-icon {
+      width: 20px;
+      height: 20px;
+      font-size: 20px;
+    }
+  }
+
+  .vtt-menu-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .vtt-menu-action.mat-mdc-menu-item {
+    min-height: 42px;
+    padding: 0 10px;
+    border-radius: var(--radius-s);
+    color: var(--on-background);
+
+    mat-icon {
+      margin-right: 10px;
+      color: var(--primary);
+    }
+
+    &.active {
+      background: rgba(var(--primary-rgb), 0.22);
+      color: #fff;
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+
+    &.danger {
+      color: var(--warn);
+
+      mat-icon {
+        color: var(--warn);
+      }
+    }
+  }
+
+  .vtt-menu-control {
+    min-height: 42px;
+    padding: 9px 10px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-s);
+    background: rgba(255,255,255,0.06);
+    color: var(--on-background);
+    font-size: 12px;
+    font-weight: 700;
+
+    input[type="color"] {
+      width: 42px;
+      height: 30px;
+      padding: 0;
+      border: 1px solid var(--outline);
+      border-radius: var(--radius-s);
+      background: transparent;
+      cursor: pointer;
+    }
+  }
+
+  .checkbox-control {
+    justify-content: flex-start;
+  }
+
+  .menu-chip-row {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .menu-chip-row .angle-chip {
+    min-width: 44px;
+    padding: 6px 8px;
+    border: 1px solid var(--outline);
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--on-background);
+    cursor: pointer;
+
+    &.active {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+  }
+}

@@ -8,7 +8,8 @@ export class MeasurementManager {
     this.engine.stage.add(this.layer);
     this.layer.setZIndex(10); // Ensure measurements are always on top
 
-    this.mode = 'none'; // 'none', 'line', 'radius'
+    this.mode = 'none'; // 'none', 'line', 'radius', 'cone'
+    this.coneAngle = 53;
     this.isDrawing = false;
     this.startPos = null;
 
@@ -31,8 +32,11 @@ export class MeasurementManager {
     return `hsl(${hue}, 80%, 50%)`;
   }
 
-  setMode(mode) {
+  setMode(mode, options = {}) {
     this.mode = mode;
+    if (options.coneAngle !== undefined) {
+      this.coneAngle = this.normalizeConeAngle(options.coneAngle);
+    }
     const container = this.engine.stage.container();
 
     if (mode !== 'none') {
@@ -50,6 +54,15 @@ export class MeasurementManager {
     return transform.point(this.engine.stage.getPointerPosition());
   }
 
+  normalizeConeAngle(angle) {
+    const parsedAngle = Number(angle);
+    return Number.isFinite(parsedAngle) ? Math.min(359, Math.max(1, parsedAngle)) : 53;
+  }
+
+  getMeasureOptions(mode) {
+    return mode === 'cone' ? { coneAngle: this.coneAngle } : {};
+  }
+
   initEvents() {
     const stage = this.engine.stage;
 
@@ -58,7 +71,13 @@ export class MeasurementManager {
       this.isDrawing = true;
       this.startPos = this.getRelativePointerPosition();
 
-      this.localGroup = this.createMeasureGroup(this.startPos, this.startPos, this.mode, this.userColor);
+      this.localGroup = this.createMeasureGroup(
+        this.startPos,
+        this.startPos,
+        this.mode,
+        this.userColor,
+        this.getMeasureOptions(this.mode)
+      );
       this.layer.add(this.localGroup);
       this.layer.batchDraw();
 
@@ -69,7 +88,13 @@ export class MeasurementManager {
       if (!this.isDrawing) return;
       const currentPos = this.getRelativePointerPosition();
 
-      this.updateMeasureGroup(this.localGroup, this.startPos, currentPos, this.mode);
+      this.updateMeasureGroup(
+        this.localGroup,
+        this.startPos,
+        currentPos,
+        this.mode,
+        this.getMeasureOptions(this.mode)
+      );
       this.layer.batchDraw();
 
       this.broadcast('update', this.startPos, currentPos, this.mode);
@@ -93,14 +118,15 @@ export class MeasurementManager {
     this.engine.stage.fire('measureAction', {
       userId: this.engine.currentUserId,
       action: action,     // 'start', 'update', or 'end'
-      measureType: mode,    // CRITICAL: Ensure this is sending 'line' or 'radius'
+      measureType: mode,
+      ...this.getMeasureOptions(mode),
       color: this.userColor,
       start: start,
       current: current
     });
   }
 
-  createMeasureGroup(start, current, type, color) {
+  createMeasureGroup(start, current, type, color, options = {}) {
     const group = new Konva.Group();
     let shape;
 
@@ -111,6 +137,19 @@ export class MeasurementManager {
         strokeWidth: 3,
         dash: [10, 5],
         lineCap: 'round'
+      });
+    } else if (type === 'cone') {
+      const coneAngle = this.normalizeConeAngle(options.coneAngle ?? this.coneAngle);
+      shape = new Konva.Wedge({
+        x: start.x,
+        y: start.y,
+        radius: 0,
+        angle: coneAngle,
+        rotation: -coneAngle / 2,
+        stroke: color,
+        strokeWidth: 2,
+        fill: color,
+        opacity: 0.2
       });
     } else {
       shape = new Konva.Circle({
@@ -133,11 +172,12 @@ export class MeasurementManager {
     // Save references directly on the group so the update function can find them
     group.measureShape = shape;
     group.measureLabel = label;
+    group.measureOptions = options;
 
     return group;
   }
 
-  updateMeasureGroup(group, start, current, type) {
+  updateMeasureGroup(group, start, current, type, options = {}) {
     if (!group || !group.measureShape || !group.measureLabel) return;
 
     const dx = current.x - start.x;
@@ -150,6 +190,16 @@ export class MeasurementManager {
 
     if (type === 'line') {
       group.measureShape.points([start.x, start.y, current.x, current.y]);
+      group.measureLabel.position({ x: current.x, y: current.y - 20 });
+    } else if (type === 'cone') {
+      const coneAngle = this.normalizeConeAngle(options.coneAngle ?? group.measureOptions?.coneAngle ?? this.coneAngle);
+      const directionDegrees = Math.atan2(dy, dx) * 180 / Math.PI;
+
+      group.measureShape.position({ x: start.x, y: start.y });
+      group.measureShape.radius(distancePx);
+      group.measureShape.angle(coneAngle);
+      group.measureShape.rotation(directionDegrees - coneAngle / 2);
+      group.measureLabel.getText().text(`${ft} ft / ${coneAngle} deg`);
       group.measureLabel.position({ x: current.x, y: current.y - 20 });
     } else {
       group.measureShape.radius(distancePx);
@@ -166,14 +216,18 @@ export class MeasurementManager {
       if (this.remoteMeasures[userId]) this.remoteMeasures[userId].destroy();
 
       // Use data.measureType here
-      const group = this.createMeasureGroup(data.start, data.current, data.measureType, data.color);
+      const group = this.createMeasureGroup(data.start, data.current, data.measureType, data.color, {
+        coneAngle: data.coneAngle
+      });
       this.remoteMeasures[userId] = group;
       this.layer.add(group);
       this.layer.batchDraw();
     }
     else if (data.action === 'update' && this.remoteMeasures[userId]) {
       // Use data.measureType here
-      this.updateMeasureGroup(this.remoteMeasures[userId], data.start, data.current, data.measureType);
+      this.updateMeasureGroup(this.remoteMeasures[userId], data.start, data.current, data.measureType, {
+        coneAngle: data.coneAngle
+      });
       this.layer.batchDraw();
     }
     else if (data.action === 'end' && this.remoteMeasures[userId]) {

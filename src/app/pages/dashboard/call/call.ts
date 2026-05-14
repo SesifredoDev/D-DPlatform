@@ -1851,7 +1851,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   startVttHosting() {
     const roomId = this.getVttRoomId();
-    this.videoService.sendVttCommand('start', roomId);
     this.hostVtt.emit(roomId);
   }
 
@@ -1862,7 +1861,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   stopVttSession() {
     const roomId = this.vttSession.roomId || this.getVttRoomId();
-    this.videoService.sendVttCommand('stop', roomId);
     this.stopVtt.emit({ roomId, endSession: true });
   }
 
@@ -1882,6 +1880,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   canJoinVttSession(): boolean {
     return this.vttSession.active && this.vttSession.hostId !== this.videoService.getCurrentParticipantIdentity();
+  }
+
+  canHostVttSession(): boolean {
+    return this.isServerOwner && !this.vttSession.active;
+  }
+
+  canStopVttSession(): boolean {
+    return this.vttSession.active && this.vttSession.hostId === this.videoService.getCurrentParticipantIdentity();
   }
 
   private getVttRoomId(): string {

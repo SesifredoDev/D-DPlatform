@@ -31,12 +31,24 @@
     <mat-divider></mat-divider>
 
     <div class="sidebar-danger-zone">
-      <button mat-button type="button" color="warn" class="nav-btn danger" (click)="onLeaveServer()">
+      <button
+        mat-button
+        type="button"
+        color="warn"
+        class="nav-btn danger"
+        [disabled]="isLoading"
+        (click)="onLeaveServer()">
         <mat-icon>logout</mat-icon>
         <span>Leave Server</span>
       </button>
 
-      <button mat-button type="button" color="warn" class="nav-btn danger" (click)="onDeleteServer()">
+      <button
+        mat-button
+        type="button"
+        color="warn"
+        class="nav-btn danger"
+        [disabled]="isLoading"
+        (click)="onDeleteServer()">
         <mat-icon>delete</mat-icon>
         <span>Delete Server</span>
       </button>
@@ -95,28 +107,7 @@
                 <p>{{ selectedFile ? 'New icon selected' : 'Icon and name shown across the dashboard.' }}</p>
               </div>
 
-              <div class="server-stat-grid">
-                <div class="server-stat">
-                  <mat-icon>groups</mat-icon>
-                  <strong>{{ memberCount }}</strong>
-                  <span>Members</span>
-                </div>
-                <div class="server-stat">
-                  <mat-icon>security</mat-icon>
-                  <strong>{{ roleCount }}</strong>
-                  <span>Roles</span>
-                </div>
-                <div class="server-stat">
-                  <mat-icon>tag</mat-icon>
-                  <strong>{{ textChannelCount }}</strong>
-                  <span>Text</span>
-                </div>
-                <div class="server-stat">
-                  <mat-icon>volume_up</mat-icon>
-                  <strong>{{ voiceChannelCount }}</strong>
-                  <span>Voice</span>
-                </div>
-              </div>
+
             </section>
 
             <section class="server-details-card">
@@ -707,6 +698,66 @@
     }
 
   </main>
+
+  @if (pendingServerAction) {
+    <div class="danger-confirmation-backdrop" (click)="closeServerDangerOverlay()">
+      <section
+        class="danger-confirmation"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-label]="dangerActionTitle"
+        (click)="$event.stopPropagation()">
+        <button
+          mat-icon-button
+          type="button"
+          class="danger-confirmation-close"
+          [disabled]="isLoading"
+          (click)="closeServerDangerOverlay()"
+          matTooltip="Cancel">
+          <mat-icon>close</mat-icon>
+        </button>
+
+        <div class="danger-confirmation-icon">
+          <mat-icon>{{ dangerActionIcon }}</mat-icon>
+        </div>
+
+        <div class="danger-confirmation-copy">
+          <span class="eyebrow">
+            {{ pendingServerAction === 'delete' ? 'Destructive action' : 'Server membership' }}
+          </span>
+          <h2>{{ dangerActionTitle }}</h2>
+          <p>{{ dangerActionDescription }}</p>
+        </div>
+
+        @if (pendingServerAction === 'delete') {
+          <mat-form-field appearance="outline" class="full-width delete-confirm-field">
+            <mat-label>Type delete to confirm</mat-label>
+            <input
+              matInput
+              autocomplete="off"
+              [value]="deleteConfirmationText"
+              [disabled]="isLoading"
+              (input)="setDeleteConfirmationText($any($event.target).value)">
+          </mat-form-field>
+        }
+
+        <footer class="danger-confirmation-actions">
+          <button mat-button type="button" [disabled]="isLoading" (click)="closeServerDangerOverlay()">
+            Cancel
+          </button>
+          <button
+            mat-raised-button
+            color="warn"
+            type="button"
+            [disabled]="!canConfirmServerDangerAction"
+            (click)="confirmServerDangerAction()">
+            <mat-icon>{{ pendingServerAction === 'delete' ? 'delete' : 'logout' }}</mat-icon>
+            <span>{{ isLoading ? 'Working...' : dangerActionConfirmLabel }}</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+  }
 
   <button mat-icon-button type="button" class="close-btn" mat-dialog-close matTooltip="Close">
     <mat-icon>close</mat-icon>

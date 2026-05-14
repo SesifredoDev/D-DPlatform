@@ -15,7 +15,11 @@
   --settings-muted-strong: var(--on-surface-variant);
   --settings-shadow: var(--shadow-2);
 }
-
+.panel{
+  border: none !important;
+  box-shadow: none !important;
+  background: none !important;
+}
 .settings-container {
   position: relative;
   display: grid;
@@ -195,7 +199,7 @@
   border: 1px solid var(--settings-border);
   border-radius: var(--radius-m, 10px);
   background: var(--settings-surface-muted);
-  text-align: right;
+  text-align: center;
 
   strong {
     color: var(--settings-text);
@@ -1243,6 +1247,98 @@
   font-size: 13px;
 }
 
+.danger-confirmation-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.danger-confirmation {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  width: min(100%, 460px);
+  padding: 24px;
+  border: 1px solid rgba(240, 71, 71, 0.38);
+  border-radius: var(--radius-l, 12px);
+  background: rgba(30, 31, 34, 0.98);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+  color: #fff;
+}
+
+.danger-confirmation-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: rgba(255, 255, 255, 0.54);
+
+  &:hover:not(:disabled) {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.danger-confirmation-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgba(240, 71, 71, 0.35);
+  border-radius: var(--radius-m, 10px);
+  background: rgba(240, 71, 71, 0.14);
+  color: var(--danger);
+
+  mat-icon {
+    width: 30px;
+    height: 30px;
+    font-size: 30px;
+  }
+}
+
+.danger-confirmation-copy {
+  display: grid;
+  gap: 8px;
+  padding-right: 32px;
+
+  h2 {
+    margin: 0;
+    color: #fff;
+    font-size: 24px;
+    font-weight: 800;
+    line-height: 1.15;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+}
+
+.delete-confirm-field {
+  margin-top: 2px;
+}
+
+.danger-confirmation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+
+  button[mat-raised-button] {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
 .close-btn {
   position: absolute;
   top: 10px;
@@ -1372,5 +1468,18 @@
   .save-bar.inline {
     width: 100%;
     margin-left: 0;
+  }
+
+  .danger-confirmation {
+    width: 100%;
+  }
+
+  .danger-confirmation-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+
+    button {
+      width: 100%;
+    }
   }
 }

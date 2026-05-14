@@ -1,8 +1,8 @@
-import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter, OnInit, Inject } from '@angular/core';
 import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
-import { MatDialog } from '@angular/material/dialog';
+import { MAT_DIALOG_DATA, MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
-import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions, GridSettings} from '../../../shared/services/vttsync/vttsync';
+import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions, GridSettings, SessionStatus} from '../../../shared/services/vttsync/vttsync';
 import {ICharacter} from '../../../shared/models/user/character.model';
 import {MatIconButton, MatButton} from '@angular/material/button';
 import {MatIcon} from '@angular/material/icon';
@@ -15,9 +15,72 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
-import {Subscription, Observable} from 'rxjs';
+import {Subscription, Observable, firstValueFrom} from 'rxjs';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {ServerService} from '../../../shared/services/server/server';
+
+type HostTakeoverChoice = 'take-control' | 'player';
+type FxShapeTool = 'polygon' | 'square' | 'circle' | 'erase';
+type ActiveTool =
+  'select' | 'draw' | 'delete' |
+  'line' | 'radius' | 'cone' |
+  'fx-polygon' | 'fx-square' | 'fx-circle' | 'fx-erase' |
+  'none';
+
+@Component({
+  selector: 'app-vtt-host-takeover-dialog',
+  imports: [MatDialogModule, MatButton, MatIcon],
+  template: `
+    <div class="vtt-takeover-dialog">
+      <h2 mat-dialog-title>Take control of the VTT?</h2>
+      <mat-dialog-content>
+        <p>Someone else is currently hosting this map. You can take control as DM, or join as a player.</p>
+      </mat-dialog-content>
+      <mat-dialog-actions align="end">
+        <button mat-button (click)="dialogRef.close('player')">Join as Player</button>
+        <button mat-raised-button color="primary" (click)="dialogRef.close('take-control')">
+          <mat-icon>podcasts</mat-icon>
+          Take Control
+        </button>
+      </mat-dialog-actions>
+    </div>
+  `,
+  styles: [`
+    .vtt-takeover-dialog {
+      background: #313338;
+      color: #dbdee1;
+      padding: 16px;
+      border-radius: 8px;
+      max-width: 420px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    p {
+      margin: 0;
+      color: #b5bac1;
+      line-height: 1.5;
+    }
+
+    mat-dialog-actions {
+      gap: 8px;
+      padding: 16px 0 0;
+    }
+
+    button mat-icon {
+      margin-right: 6px;
+    }
+  `]
+})
+export class VttHostTakeoverDialog {
+  constructor(
+    public dialogRef: MatDialogRef<VttHostTakeoverDialog, HostTakeoverChoice>,
+    @Inject(MAT_DIALOG_DATA) public data: { hostId: string | null }
+  ) {}
+}
 
 @Component({
   selector: 'app-vtt-canvas',
@@ -49,7 +112,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private resizeObserver!: ResizeObserver;
   public engine!: VttEngine;
   public lightingEnabled = false;
-  public activeTool: 'select' | 'draw' | 'delete' | 'line' | 'radius' | 'none' = 'select';
+  public activeTool: ActiveTool = 'select';
+  public coneAngle = 53;
+  public coneAngleOptions = [53, 30, 45, 60, 90];
+  public fxColor = '#6fd6ff';
 
   public mapLibrary: MapLibraryEntry[] = [];
   public currentMapName: string = '';
@@ -80,12 +146,16 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private sessionEndedSub!: Subscription;
   private turnOrderStateSub!: Subscription; // Subscription for turn order state
   private playerTokenControlSub!: Subscription;
+  private playerFxPermissionSub!: Subscription;
   private gridSettingsSub!: Subscription;
   private syncStateRun = 0;
   private noHostedGameClosed = false;
+  private hostTakeoverPrompt: Promise<boolean> | null = null;
+  private declinedTakeoverHostId: string | null = null;
   private destroyed = false;
   private readonly maxContainerReadyFrames = 30;
   public playersCanControlAllPlayerTokens = false;
+  public playersCanUseFx = false;
   public gridSettings: GridSettings = {
     size: 50,
     color: '#cccccc',
@@ -101,8 +171,14 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private lastAddedEntryId: string | null = null; // To track the last added entry for clearing inputs
 
   // Expose sync state to UI
-  get isSyncing() { return this.syncService.isConnected; }
+  get isSyncing() { return this.isInCurrentSession; }
   get isHosting() { return this.syncService.isHosting; }
+  get isInCurrentSession() {
+    return this.syncService.isConnected && this.syncService.currentRoomId === this.serverId;
+  }
+  get canUseFx() {
+    return !this.isInCurrentSession || this.syncService.isHosting || this.playersCanUseFx;
+  }
 
   constructor(
     private dialog: MatDialog,
@@ -169,6 +245,13 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       this.playersCanControlAllPlayerTokens = enabled;
     });
 
+    this.playerFxPermissionSub = this.syncService.playersCanUseFx$.subscribe(enabled => {
+      this.playersCanUseFx = enabled;
+      if (!this.canUseFx && this.activeTool.startsWith('fx-')) {
+        this.setTool('select');
+      }
+    });
+
     this.gridSettingsSub = this.syncService.gridSettings$.subscribe(settings => {
       this.gridSettings = { ...settings };
     });
@@ -196,15 +279,33 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.isCheckingSession = true;
 
     if (this.isHostVttSession && !this.syncService.isHosting) {
+      const status = await this.getHostedSessionStatus();
+      if (runId !== this.syncStateRun) return;
+
+      if (status?.active === false) {
+        this.startHostingSession();
+        return;
+      }
+
       const resumed = await this.joinExistingSession();
       if (runId !== this.syncStateRun) return;
       this.startHostingSession(resumed ? { preserveExistingState: true } : {});
       return;
     }
 
-    if (this.syncService.currentRoomId === this.serverId && this.syncService.isConnected) {
+    if (this.isInCurrentSession) {
       if (!this.syncService.isHosting && await this.canCurrentUserDm()) {
-        this.startHostingSession({ preserveExistingState: true });
+        const status = await this.getHostedSessionStatus();
+        if (runId !== this.syncStateRun) return;
+
+        if (await this.shouldTakeControlHostedSession(status)) {
+          if (runId !== this.syncStateRun) return;
+          this.startHostingSession({ preserveExistingState: true });
+          return;
+        }
+
+        this.applyPermissions(false);
+        this.isCheckingSession = false;
         return;
       }
 
@@ -213,15 +314,18 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       return;
     }
 
-    if (this.isJoiningVttSession && !this.syncService.isConnected) {
-      const joined = await this.joinExistingSession();
+    if (this.isJoiningVttSession && !this.isInCurrentSession) {
+      const status = await this.getHostedSessionStatus();
+      if (runId !== this.syncStateRun) return;
+      if (status?.active === false) {
+        this.closeNoHostedGame();
+        return;
+      }
+
+      const joined = await this.joinExistingSessionWithHostChoice(status);
       if (runId !== this.syncStateRun) return;
       if (!joined) {
         this.closeNoHostedGame();
-      } else if (await this.canCurrentUserDm()) {
-        this.startHostingSession({ preserveExistingState: true });
-      } else {
-        this.isCheckingSession = false;
       }
       return;
     }
@@ -230,6 +334,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
       !this.isHostVttSession &&
       !this.isJoiningVttSession &&
       this.syncService.isConnected &&
+      !!this.syncService.currentRoomId &&
       this.syncService.currentRoomId !== this.serverId
     ) {
       this.syncService.stopSyncing(true);
@@ -237,16 +342,30 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
     if (!this.isHostVttSession && !this.isJoiningVttSession) {
       if (await this.canCurrentUserDm()) {
-        const resumed = await this.joinExistingSession();
+        const status = await this.getHostedSessionStatus();
         if (runId !== this.syncStateRun) return;
 
-        if (resumed) {
-          this.startHostingSession({ preserveExistingState: true });
+        if (status?.active === false) {
+          this.syncService.stopSyncing(true);
+          this.applyPermissions(true);
+          this.isCheckingSession = false;
           return;
         }
 
-        this.applyPermissions(true);
-        this.isCheckingSession = false;
+        const resumed = await this.joinExistingSessionWithHostChoice(status);
+        if (runId !== this.syncStateRun) return;
+
+        if (!resumed) {
+          this.applyPermissions(true);
+          this.isCheckingSession = false;
+        }
+        return;
+      }
+
+      const status = await this.getHostedSessionStatus();
+      if (runId !== this.syncStateRun) return;
+      if (status?.active === false) {
+        this.closeNoHostedGame();
         return;
       }
 
@@ -265,19 +384,63 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   async joinSession(): Promise<boolean> {
-    const joined = await this.joinExistingSession();
+    const status = await this.getHostedSessionStatus();
+    if (status?.active === false) {
+      this.closeNoHostedGame();
+      return false;
+    }
+
+    const joined = await this.joinExistingSessionWithHostChoice(status);
     if (!joined) {
       this.closeNoHostedGame();
-    } else if (await this.canCurrentUserDm()) {
-      this.startHostingSession({ preserveExistingState: true });
     }
     return joined;
+  }
+
+  async requestHostingSession() {
+    this.isCheckingSession = true;
+    const status = await this.getHostedSessionStatus();
+
+    if (status?.active && status.hasHost && !this.syncService.isHosting) {
+      if (!(await this.canCurrentUserDm())) {
+        const joined = await this.joinExistingSession();
+        if (!joined) {
+          this.closeNoHostedGame();
+        } else {
+          this.isCheckingSession = false;
+        }
+        return;
+      }
+
+      const takeControl = await this.promptForHostTakeover(status);
+      if (!takeControl) {
+        const joined = await this.joinExistingSession();
+        if (!joined) {
+          this.closeNoHostedGame();
+        } else {
+          this.isCheckingSession = false;
+        }
+        return;
+      }
+
+      const joined = await this.joinExistingSession();
+      if (!joined) {
+        this.closeNoHostedGame();
+        return;
+      }
+
+      this.startHostingSession({ preserveExistingState: true });
+      return;
+    }
+
+    this.startHostingSession(status?.active ? { preserveExistingState: true } : {});
   }
 
   startHostingSession(options: StartHostingOptions = {}) {
       this.syncService.startHosting(this.engine, this.serverId, options);
       this.applyPermissions(true);
       this.showHostTakeover = false;
+      this.declinedTakeoverHostId = null;
       this.isCheckingSession = false;
   }
 
@@ -297,6 +460,68 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     return joined;
   }
 
+  private async joinExistingSessionWithHostChoice(status: SessionStatus | null): Promise<boolean> {
+    const takeControl = await this.shouldTakeControlHostedSession(status);
+    const joined = await this.joinExistingSession();
+
+    if (!joined) {
+      return false;
+    }
+
+    if (takeControl) {
+      this.startHostingSession({ preserveExistingState: true });
+    } else {
+      this.isCheckingSession = false;
+    }
+
+    return true;
+  }
+
+  private async shouldTakeControlHostedSession(status: SessionStatus | null): Promise<boolean> {
+    if (!(await this.canCurrentUserDm())) {
+      return false;
+    }
+
+    if (!status?.active) {
+      return false;
+    }
+
+    if (!status.hasHost) {
+      return true;
+    }
+
+    return this.promptForHostTakeover(status);
+  }
+
+  private async promptForHostTakeover(status: SessionStatus): Promise<boolean> {
+    if (!status.hostId || this.declinedTakeoverHostId === status.hostId) {
+      return false;
+    }
+
+    if (!this.hostTakeoverPrompt) {
+      this.isCheckingSession = false;
+      const dialogRef = this.dialog.open(VttHostTakeoverDialog, {
+        width: '430px',
+        disableClose: true,
+        data: { hostId: status.hostId },
+        panelClass: 'custom-dialog-container'
+      });
+
+      this.hostTakeoverPrompt = firstValueFrom(dialogRef.afterClosed())
+        .then(choice => choice === 'take-control')
+        .finally(() => {
+          this.hostTakeoverPrompt = null;
+        });
+    }
+
+    const takeControl = await this.hostTakeoverPrompt;
+    if (!takeControl) {
+      this.declinedTakeoverHostId = status.hostId;
+    }
+
+    return takeControl;
+  }
+
   private async handleHostDisconnected(disconnected: boolean) {
     if (!disconnected || this.isHosting) {
       this.showHostTakeover = false;
@@ -313,7 +538,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
   private applyPermissions(isHost: boolean) {
     this.engine.setPermissions(isHost);
-    this.engine.isDM = isHost;
   }
 
   private async canCurrentUserDm(): Promise<boolean> {
@@ -324,6 +548,11 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
 
     return this.serverService.canUserDm(server, this.userId);
+  }
+
+  private async getHostedSessionStatus(): Promise<SessionStatus | null> {
+    const status = await this.syncService.getSessionStatus(this.serverId);
+    return status.ok ? status : null;
   }
 
   private closeNoHostedGame() {
@@ -351,6 +580,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.sessionEndedSub) this.sessionEndedSub.unsubscribe();
     if (this.turnOrderStateSub) this.turnOrderStateSub.unsubscribe(); // Unsubscribe
     if (this.playerTokenControlSub) this.playerTokenControlSub.unsubscribe();
+    if (this.playerFxPermissionSub) this.playerFxPermissionSub.unsubscribe();
     if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
     if (this.syncService.currentRoomId !== this.serverId) {
       this.syncService.stopSyncing(true);
@@ -462,20 +692,50 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.engine.addToken(100, 100, options);
   }
 
-  setMeasureTool(tool: 'line' | 'radius' | 'none') {
+  setMeasureTool(tool: 'line' | 'radius' | 'cone' | 'none', coneAngle = this.coneAngle) {
     this.activeTool = tool;
+    if (tool === 'cone') {
+      this.coneAngle = coneAngle;
+    }
     this.engine.wallManager.setMode('none');
-    this.engine.setMeasurementMode(tool);
+    this.engine.setFxMode('none');
+    this.engine.setMeasurementMode(tool, tool === 'cone' ? { coneAngle: this.coneAngle } : {});
   }
 
   setTool(mode: 'select' | 'draw' | 'delete') {
     this.activeTool = mode;
+    this.engine.setFxMode('none');
     this.engine.setMeasurementMode('none');
     if (mode === 'select') {
       this.engine.wallManager.setMode('none');
     } else {
       this.engine.wallManager.setMode(mode);
     }
+  }
+
+  setFxTool(tool: FxShapeTool) {
+    if (!this.canUseFx) return;
+
+    this.activeTool = `fx-${tool}` as ActiveTool;
+    this.engine.setMeasurementMode('none');
+    this.engine.setFxMode(tool, { color: this.fxColor });
+  }
+
+  onFxColorChange() {
+    this.engine.setFxColor(this.fxColor);
+    if (this.activeTool.startsWith('fx-')) {
+      const tool = this.activeTool.replace('fx-', '') as FxShapeTool;
+      this.engine.setFxMode(tool, { color: this.fxColor });
+    }
+  }
+
+  setPlayersCanUseFx(enabled: boolean) {
+    this.syncService.setPlayersCanUseFx(enabled);
+  }
+
+  clearFxEffects() {
+    if (!this.canUseFx) return;
+    this.engine.clearFxEffects(false);
   }
 
   toggleLighting() {

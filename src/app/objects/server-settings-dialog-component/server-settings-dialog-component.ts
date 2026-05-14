@@ -22,6 +22,7 @@ import { IRolePayload, Role } from '../../shared/services/role/role';
 import { MATERIAL_ICON_NAMES } from '../../shared/constants/material-icon-names';
 
 type SettingsTab = 'overview' | 'roles' | 'members' | 'channels';
+type ServerDangerAction = 'leave' | 'delete';
 type EditableChannelType = ChannelType.Text | ChannelType.Call;
 type ChannelPermissionKey = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
 type ChannelPermissionState = 'inherit' | 'allow' | 'deny';
@@ -196,6 +197,8 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   ];
 
   activeTab: SettingsTab = 'overview';
+  pendingServerAction: ServerDangerAction | null = null;
+  deleteConfirmationText = '';
 
   settingsForm: FormGroup;
   roleForm: FormGroup;
@@ -272,6 +275,39 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
 
   get roleCount(): number {
     return this.serverDetails?.roles?.length ?? 0;
+  }
+
+  get serverDisplayName(): string {
+    return this.serverDetails?.name || this.server.name;
+  }
+
+  get dangerActionTitle(): string {
+    return this.pendingServerAction === 'delete' ? 'Delete this server?' : 'Leave this server?';
+  }
+
+  get dangerActionDescription(): string {
+    if (this.pendingServerAction === 'delete') {
+      return `This permanently deletes ${this.serverDisplayName} and removes access for every member. This cannot be undone.`;
+    }
+
+    return `You will leave ${this.serverDisplayName} and lose access unless someone invites you back.`;
+  }
+
+  get dangerActionIcon(): string {
+    return this.pendingServerAction === 'delete' ? 'delete_forever' : 'logout';
+  }
+
+  get dangerActionConfirmLabel(): string {
+    return this.pendingServerAction === 'delete' ? 'Delete Server' : 'Leave Server';
+  }
+
+  get canConfirmServerDangerAction(): boolean {
+    if (!this.pendingServerAction || this.isLoading) return false;
+    if (this.pendingServerAction === 'delete') {
+      return this.deleteConfirmationText.trim().toLowerCase() === 'delete';
+    }
+
+    return true;
   }
 
   get assignableRoles(): IRole[] {
@@ -788,16 +824,55 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     }
   }
 
-  async onDeleteServer() {
-    if (!confirm(`Delete ${this.server.name}?`)) return;
-    await this.serverService.deleteServer(this.server._id);
-    this.dialogRef.close(true);
+  onDeleteServer() {
+    this.openServerDangerOverlay('delete');
   }
 
-  async onLeaveServer() {
-    if (!confirm(`Leave ${this.server.name}?`)) return;
-    await this.serverService.leaveServer(this.server._id);
-    this.dialogRef.close(true);
+  onLeaveServer() {
+    this.openServerDangerOverlay('leave');
+  }
+
+  openServerDangerOverlay(action: ServerDangerAction) {
+    if (this.isLoading) return;
+
+    this.pendingServerAction = action;
+    this.deleteConfirmationText = '';
+  }
+
+  closeServerDangerOverlay() {
+    if (this.isLoading) return;
+
+    this.pendingServerAction = null;
+    this.deleteConfirmationText = '';
+  }
+
+  setDeleteConfirmationText(value: string) {
+    this.deleteConfirmationText = value;
+  }
+
+  async confirmServerDangerAction() {
+    if (!this.pendingServerAction || !this.canConfirmServerDangerAction) return;
+
+    const action = this.pendingServerAction;
+    this.isLoading = true;
+
+    try {
+      if (action === 'delete') {
+        await this.serverService.deleteServer(this.server._id);
+      } else {
+        await this.serverService.leaveServer(this.server._id);
+      }
+
+      this.dialogRef.close(true);
+    } catch {
+      this.snackBar.open(
+        action === 'delete' ? 'Server delete failed.' : 'Could not leave server.',
+        'Close',
+        { duration: 3000 }
+      );
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   private initRoleForm(role?: IRole | null): FormGroup {

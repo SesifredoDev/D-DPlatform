@@ -455,6 +455,14 @@
             <mat-icon>dvr</mat-icon>
           </button>
 
+          <button *ngIf="canHostVttSession()" (click)="startVttHosting()" class="btn-action" matTooltip="Host VTT">
+            <mat-icon>podcasts</mat-icon>
+          </button>
+
+          <button *ngIf="canStopVttSession()" (click)="stopVttSession()" class="btn-action btn-danger" matTooltip="Stop VTT">
+            <mat-icon>stop_circle</mat-icon>
+          </button>
+
           <button *ngIf="canJoinVttSession()" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
             <mat-icon>group_add</mat-icon>
           </button>

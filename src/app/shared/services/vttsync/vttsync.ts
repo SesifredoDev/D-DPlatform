@@ -49,6 +49,15 @@ export interface StartHostingOptions {
   preserveExistingState?: boolean;
 }
 
+export interface SessionStatus {
+  ok: boolean;
+  active: boolean;
+  hasHost: boolean;
+  hostId: string | null;
+  version: number;
+  reason?: string;
+}
+
 interface SyncActionPayload {
   action: string;
   data: any;
@@ -80,6 +89,7 @@ export class VttSync {
     activeIndex: 0
   });
   public playersCanControlAllPlayerTokens$ = new BehaviorSubject<boolean>(false);
+  public playersCanUseFx$ = new BehaviorSubject<boolean>(false);
   public gridSettings$ = new BehaviorSubject<GridSettings>({
     size: 50,
     color: '#cccccc',
@@ -197,6 +207,71 @@ export class VttSync {
       this.requestResync();
   }
 
+  private waitForConnection(timeoutMs: number = 3000): Promise<boolean> {
+    const socket = this.getSocket();
+    if (socket.connected) {
+      return Promise.resolve(true);
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      const settle = (connected: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        socket.off('connect', onConnect);
+        resolve(connected);
+      };
+
+      const onConnect = () => settle(true);
+      const timer = window.setTimeout(() => settle(socket.connected), timeoutMs);
+
+      socket.on('connect', onConnect);
+    });
+  }
+
+  async getSessionStatus(roomId: string, timeoutMs: number = 2000): Promise<SessionStatus> {
+    const connected = await this.waitForConnection(timeoutMs);
+    if (!connected) {
+      return {
+        ok: false,
+        active: false,
+        hasHost: false,
+        hostId: null,
+        version: 0,
+        reason: 'socket-not-connected'
+      };
+    }
+
+    const socket = this.getSocket();
+
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => {
+        resolve({
+          ok: false,
+          active: false,
+          hasHost: false,
+          hostId: null,
+          version: 0,
+          reason: 'timeout'
+        });
+      }, timeoutMs);
+
+      socket.emit('session-status', { roomId }, (response?: Partial<SessionStatus>) => {
+        window.clearTimeout(timer);
+        resolve({
+          ok: response?.ok === true,
+          active: !!response?.active,
+          hasHost: !!response?.hasHost,
+          hostId: response?.hostId ?? null,
+          version: typeof response?.version === 'number' ? response.version : 0,
+          reason: response?.reason
+        });
+      });
+    });
+  }
+
   requestResync() {
       if (!this.currentRoomId || this.resyncing) return;
       console.log('Requesting resync for room:', this.currentRoomId);
@@ -208,7 +283,8 @@ export class VttSync {
       return {
           ...engine.getRawConfig(),
           turnOrder: this.turnOrder$.value,
-          playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens$.value
+          playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens$.value,
+          playersCanUseFx: this.playersCanUseFx$.value
       };
   }
 
@@ -219,6 +295,7 @@ export class VttSync {
     this.needsSessionRestore = false;
 
     const socket = this.getSocket();
+    let announcedHosting = false;
     this.hostClaimedAt = Date.now();
 
     socket.off('remote-action');
@@ -234,16 +311,19 @@ export class VttSync {
     socket.off('map-update');
     socket.on('map-update', (config: any) => {
       this.applyMapState(engine, config);
+      if (!announcedHosting && this.isHosting && this.currentRoomId === roomId) {
+        announcedHosting = true;
+        this.callService.sendVttCommand('start', roomId);
+      }
     });
 
     this.attachEngineListeners(engine);
 
     socket.emit('host-session', {
       roomId,
-      initialState: this.createHostState(engine)
+      initialState: options.preserveExistingState ? null : this.createHostState(engine)
     });
 
-    this.callService.sendVttCommand("start", roomId);
     this.hostDisconnected$.next(false);
   }
 
@@ -338,6 +418,7 @@ export class VttSync {
       this.turnOrder$.next(config.turnOrder);
     }
     this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
+    this.applyPlayerFxPermissionMode(engine, !!config.playersCanUseFx);
   }
 
   endSession() {
@@ -347,12 +428,14 @@ export class VttSync {
   stopSyncing(force: boolean = false, endHostedSession: boolean = false) {
     if (!force) return;
 
-    if (this.socket && this.currentRoomId) {
+    if (this.socket) {
       const socket = this.socket;
       const roomId = this.currentRoomId;
       this.isStopping = true;
 
-      if (this.isHosting && endHostedSession) {
+      if (!roomId) {
+        socket.disconnect();
+      } else if (this.isHosting && endHostedSession) {
         this.callService.sendVttCommand("stop", roomId);
         socket.emit('stop-hosting', roomId);
         window.setTimeout(() => socket.disconnect(), 250);
@@ -375,6 +458,7 @@ export class VttSync {
     this.localVersion = 0;
     this.turnOrder$.next({ isActive: false, isConfirmed: false, entries: [], activeIndex: 0 });
     this.playersCanControlAllPlayerTokens$.next(false);
+    this.playersCanUseFx$.next(false);
     this.gridSettings$.next({ size: 50, color: '#cccccc', thickness: 1, type: 'square' });
   }
 
@@ -396,6 +480,7 @@ export class VttSync {
   private attachEngineListeners(engine: VttEngine) {
     engine.stage.off('tokenMoved');
     engine.stage.on('tokenMoved', (e: any) => {
+      if (engine.isMeasuring?.()) return;
       this.broadcastAction('token-move', e);
     });
 
@@ -407,6 +492,22 @@ export class VttSync {
     engine.stage.off('ping');
     engine.stage.on('ping', (data: any) => {
       this.broadcastAction('ping', data);
+    });
+
+    engine.stage.off('fxAdded');
+    engine.stage.on('fxAdded', (event: any) => {
+      const effect = event?.effect;
+      if (effect) this.broadcastAction('fx-added', effect);
+    });
+
+    engine.stage.off('fxDeleted');
+    engine.stage.on('fxDeleted', (event: any) => {
+      if (event?.id) this.broadcastAction('fx-deleted', { id: event.id });
+    });
+
+    engine.stage.off('fxCleared');
+    engine.stage.on('fxCleared', () => {
+      this.broadcastAction('fx-cleared', {});
     });
 
     engine.stage.off('mapLoadingStarted');
@@ -568,6 +669,9 @@ export class VttSync {
         if (data.playersCanControlAllPlayerTokens !== undefined) {
           this.applyPlayerTokenControlMode(engine, data.playersCanControlAllPlayerTokens);
         }
+        if (data.playersCanUseFx !== undefined) {
+          this.applyPlayerFxPermissionMode(engine, data.playersCanUseFx);
+        }
         break;
 
       case 'measure-sync':
@@ -582,6 +686,22 @@ export class VttSync {
 
       case 'player-token-control-change':
         this.applyPlayerTokenControlMode(engine, data.enabled);
+        break;
+
+      case 'fx-added':
+        engine.addFxEffect(data, true);
+        break;
+
+      case 'fx-deleted':
+        engine.removeFxEffect(data.id, true);
+        break;
+
+      case 'fx-cleared':
+        engine.clearFxEffects(true);
+        break;
+
+      case 'player-fx-permission-change':
+        this.applyPlayerFxPermissionMode(engine, data.enabled);
         break;
 
       case 'turn-order-sync':
@@ -680,10 +800,25 @@ export class VttSync {
     }
   }
 
+  public setPlayersCanUseFx(enabled: boolean) {
+    if (!this.engine) return;
+
+    this.applyPlayerFxPermissionMode(this.engine, enabled);
+    if (this.isHosting) {
+      this.broadcastAction('player-fx-permission-change', { enabled });
+    }
+  }
+
   private applyPlayerTokenControlMode(engine: VttEngine, enabled: boolean) {
     const normalized = !!enabled;
     engine.setPlayerTokenControlMode(normalized);
     this.playersCanControlAllPlayerTokens$.next(normalized);
+  }
+
+  private applyPlayerFxPermissionMode(engine: VttEngine, enabled: boolean) {
+    const normalized = !!enabled;
+    engine.setPlayerFxPermissionMode(normalized);
+    this.playersCanUseFx$.next(normalized);
   }
 
   public updateGridSettings(settings: Partial<GridSettings>) {

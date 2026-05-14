@@ -1,4 +1,4 @@
-<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!syncService.isConnected || syncService.isHosting">
+<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!isInCurrentSession || syncService.isHosting">
   <div class="drawer-toggle" (click)="showLibraryOverlay = !showLibraryOverlay">
     <mat-icon>{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</mat-icon>
     <span class="toggle-text">{{ showLibraryOverlay ? 'CLOSE LIBRARY' : 'OPEN MAP LIBRARY' }}</span>
@@ -64,22 +64,14 @@
 <div id="toolbar-wrapper">
   <div id="toolbar" class="glass">
     <!-- Map Management Tools -->
-    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
+    <div class="tool-group" *ngIf="!isInCurrentSession || syncService.isHosting">
 <!--      <button mat-icon-button (click)="saveCurrentMap(false)" matTooltip="Save to Library">-->
 <!--        <mat-icon>save</mat-icon>-->
 <!--      </button>-->
-      <button mat-icon-button (click)="exportMapJson()" matTooltip="Download/Export Map JSON">
-        <mat-icon>file_download</mat-icon>
+      <button mat-icon-button [matMenuTriggerFor]="saveMenu" matTooltip="Save/Load Map JSON">
+        <mat-icon>save</mat-icon>
       </button>
-      <button mat-icon-button (click)="mapJsonInput.click()" matTooltip="Upload/Import Map JSON">
-        <mat-icon>file_upload</mat-icon>
-      </button>
-      <input #mapJsonInput type="file" (change)="onMapJsonUpload($event)" accept=".json" style="display: none" />
 
-      <button mat-icon-button (click)="fileInput.click()" matTooltip="Set Background Image">
-        <mat-icon>image</mat-icon>
-      </button>
-      <input #fileInput type="file" (change)="onMapUpload($event)" accept="image/*" style="display: none" />
     </div>
 
     <!-- Core Interaction Tools -->
@@ -87,21 +79,49 @@
       <button mat-icon-button [class.active]="activeTool === 'select'" (click)="setTool('select')" matTooltip="Select/Move">
         <mat-icon>near_me</mat-icon>
       </button>
-      <button mat-icon-button [class.active]="activeTool === 'line'" (click)="setMeasureTool('line')" matTooltip="Measure Line">
-        <mat-icon>straighten</mat-icon>
-      </button>
-      <button mat-icon-button [class.active]="activeTool === 'radius'" (click)="setMeasureTool('radius')" matTooltip="Measure Radius">
-        <mat-icon>blur_circular</mat-icon>
+      <div class="measure-control">
+        <button
+          mat-icon-button
+          [matMenuTriggerFor]="measureMenu"
+          [class.active]="activeTool === 'line' || activeTool === 'radius' || activeTool === 'cone'"
+          matTooltip="Measure Tools">
+          <mat-icon>{{ activeTool === 'radius' ? 'blur_circular' : activeTool === 'cone' ? 'change_history' : 'straighten' }}</mat-icon>
+        </button>
+
+        <div class="cone-angle-chip-row glass" *ngIf="activeTool === 'cone'">
+          <button
+            type="button"
+            class="angle-chip"
+            *ngFor="let angle of coneAngleOptions"
+            [class.active]="coneAngle === angle"
+            [attr.aria-pressed]="coneAngle === angle"
+            (click)="setMeasureTool('cone', angle)">
+            {{ angle }}&deg;
+          </button>
+        </div>
+      </div>
+      <button
+        mat-icon-button
+        *ngIf="canUseFx"
+        [matMenuTriggerFor]="fxMenu"
+        [class.active]="activeTool === 'fx-polygon' || activeTool === 'fx-square' || activeTool === 'fx-circle' || activeTool === 'fx-erase'"
+        matTooltip="FX">
+        <mat-icon>
+          {{ activeTool === 'fx-square' ? 'crop_square' : activeTool === 'fx-circle' ? 'radio_button_unchecked' : activeTool === 'fx-erase' ? 'auto_fix_off' : 'auto_awesome' }}
+        </mat-icon>
       </button>
     </div>
 
     <!-- Wall/Drawing Tools (DM Only) -->
-    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting" >
+    <div class="tool-group" *ngIf="!isInCurrentSession || syncService.isHosting" >
       <button mat-icon-button [class.active]="activeTool === 'draw'" (click)="setTool('draw')" matTooltip="Draw Walls">
         <mat-icon>edit_road</mat-icon>
       </button>
       <button mat-icon-button [class.active]="activeTool === 'delete'" (click)="setTool('delete')" matTooltip="Erase Walls">
         <mat-icon>auto_fix_off</mat-icon>
+      </button>
+      <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" matTooltip="Toggle Lighting">
+        <mat-icon>{{ lightingEnabled ? 'lightbulb' : 'lightbulb_outline' }}</mat-icon>
       </button>
     </div>
 
@@ -117,14 +137,12 @@
         [matTooltip]="playersCanControlAllPlayerTokens ? 'Players can move any player token' : 'Players can move only their tokens'">
         <mat-icon>{{ playersCanControlAllPlayerTokens ? 'groups' : 'person_pin_circle' }}</mat-icon>
       </button>
-      <button mat-icon-button (click)="toggleLighting()" [class.active-light]="lightingEnabled" matTooltip="Toggle Lighting">
-        <mat-icon>{{ lightingEnabled ? 'lightbulb' : 'lightbulb_outline' }}</mat-icon>
-      </button>
+
     </div>
 
     <!-- Session Management -->
     <div class="tool-group">
-      <button mat-icon-button *ngIf="!syncService.isConnected" (click)="startHostingSession()" matTooltip="Host Session">
+      <button mat-icon-button *ngIf="!isInCurrentSession" (click)="requestHostingSession()" matTooltip="Host Session">
         <mat-icon>podcasts</mat-icon>
       </button>
       <button mat-icon-button *ngIf="syncService.isConnected && syncService.isHosting" (click)="stopSession()" matTooltip="Stop Session" color="warn">
@@ -138,13 +156,125 @@
     </div>
 
     <!-- Settings/Utilities -->
-    <div class="tool-group" *ngIf="!syncService.isConnected || syncService.isHosting">
+    <div class="tool-group" *ngIf="!isInCurrentSession || syncService.isHosting">
       <button mat-icon-button [matMenuTriggerFor]="gridMenu" matTooltip="Grid Settings">
         <mat-icon>grid_on</mat-icon>
       </button>
+
+      <button mat-icon-button (click)="fileInput.click()" matTooltip="Set Background Image">
+        <mat-icon>image</mat-icon>
+      </button>
+      <input #fileInput type="file" (change)="onMapUpload($event)" accept="image/*" style="display: none" />
     </div>
   </div>
 </div>
+
+<input #mapJsonInput type="file" (change)="onMapJsonUpload($event)" accept=".json" style="display: none" />
+
+<mat-menu #saveMenu="matMenu" class="save-map-menu vtt-action-menu">
+  <div class="vtt-menu-content">
+    <div class="vtt-menu-header">
+      <mat-icon>save</mat-icon>
+      <h3>Map JSON</h3>
+    </div>
+
+    <div class="vtt-menu-section">
+      <button mat-menu-item class="vtt-menu-action" (click)="exportMapJson()">
+        <mat-icon>file_download</mat-icon>
+        <span>Download</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" (click)="mapJsonInput.click()">
+        <mat-icon>file_upload</mat-icon>
+        <span>Upload</span>
+      </button>
+    </div>
+  </div>
+</mat-menu>
+
+<mat-menu #measureMenu="matMenu" class="measure-tool-menu vtt-action-menu">
+  <div class="vtt-menu-content">
+    <div class="vtt-menu-header">
+      <mat-icon>straighten</mat-icon>
+      <h3>Measure</h3>
+    </div>
+
+    <div class="vtt-menu-section">
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'line'" (click)="setMeasureTool('line')">
+        <mat-icon>straighten</mat-icon>
+        <span>Line</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'radius'" (click)="setMeasureTool('radius')">
+        <mat-icon>blur_circular</mat-icon>
+        <span>Radius</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'cone'" (click)="setMeasureTool('cone')">
+        <mat-icon>change_history</mat-icon>
+        <span>Cone</span>
+      </button>
+    </div>
+
+    <div class="vtt-menu-control" (click)="$event.stopPropagation()">
+      <span>Cone Angle</span>
+      <div class="menu-chip-row">
+        <button
+          type="button"
+          class="angle-chip"
+          *ngFor="let angle of coneAngleOptions"
+          [class.active]="coneAngle === angle"
+          [attr.aria-pressed]="coneAngle === angle"
+          (click)="setMeasureTool('cone', angle)">
+          {{ angle }}&deg;
+        </button>
+      </div>
+    </div>
+  </div>
+</mat-menu>
+
+<mat-menu #fxMenu="matMenu" class="fx-tool-menu vtt-action-menu">
+  <div class="vtt-menu-content">
+    <div class="vtt-menu-header">
+      <mat-icon>auto_awesome</mat-icon>
+      <h3>FX Fog</h3>
+    </div>
+
+    <div class="vtt-menu-section">
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-polygon'" (click)="setFxTool('polygon')">
+        <mat-icon>gesture</mat-icon>
+        <span>Polygon</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-square'" (click)="setFxTool('square')">
+        <mat-icon>crop_square</mat-icon>
+        <span>Square</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-circle'" (click)="setFxTool('circle')">
+        <mat-icon>radio_button_unchecked</mat-icon>
+        <span>Circle</span>
+      </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-erase'" (click)="setFxTool('erase')">
+        <mat-icon>auto_fix_off</mat-icon>
+        <span>Erase</span>
+      </button>
+    </div>
+
+    <div class="vtt-menu-control" (click)="$event.stopPropagation()">
+      <span>Colour</span>
+      <input type="color" [(ngModel)]="fxColor" (change)="onFxColorChange()" aria-label="FX colour">
+    </div>
+
+    <div class="vtt-menu-control checkbox-control" *ngIf="syncService.isHosting" (click)="$event.stopPropagation()">
+      <mat-checkbox
+        [ngModel]="playersCanUseFx"
+        (change)="setPlayersCanUseFx($event.checked)">
+        Player FX
+      </mat-checkbox>
+    </div>
+
+    <button mat-menu-item class="vtt-menu-action danger" (click)="clearFxEffects()">
+      <mat-icon>delete_sweep</mat-icon>
+      <span>Clear FX</span>
+    </button>
+  </div>
+</mat-menu>
 
 <mat-menu #gridMenu="matMenu" class="grid-config-menu">
   <div class="grid-menu-content" (click)="$event.stopPropagation()">

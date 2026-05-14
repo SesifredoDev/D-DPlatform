@@ -3,6 +3,7 @@ import Token from './Token.js';
 import { WallManager} from "./WallManager.js";
 import { LightingManager } from './LightManager.js';
 import {MeasurementManager} from "./MeasurementManagement";
+import {FxManager} from "./FxManager.js";
 
 export class VttEngine {
   constructor(containerId, currentUserId, gridSize = 50) {
@@ -19,6 +20,7 @@ export class VttEngine {
 
     this.isDM = false
     this.playersCanControlAllPlayerTokens = false;
+    this.playersCanUseFx = false;
     this.backgroundViewportLimitMultiplier = 1.5;
     const containerSize = this.resolveContainerSize(containerId);
     this.stage = new Konva.Stage({
@@ -32,6 +34,7 @@ export class VttEngine {
     this.mapLayer = new Konva.Layer();
     this.gridLayer = new Konva.Layer();
     this.wallLayer = new Konva.Layer({ visible: false });
+    this.fxLayer = new Konva.Layer();
     this.tokenLayer = new Konva.Layer();
     this.overlayLayer = new Konva.Layer({ listening: false }); // Layer for pings and temp effects
 
@@ -40,10 +43,11 @@ export class VttEngine {
       visible: false,
       listening: false
     });
-    this.stage.add(this.mapLayer, this.gridLayer, this.wallLayer, this.tokenLayer, this.lightLayer, this.overlayLayer);
+    this.stage.add(this.mapLayer, this.gridLayer, this.fxLayer, this.wallLayer, this.tokenLayer, this.lightLayer, this.overlayLayer);
 
     this.lightingManager = new LightingManager(this);
     this.wallManager = new WallManager(this);
+    this.fxManager = new FxManager(this);
     this.measurementManager = new MeasurementManager(this);
 
     this.initDefaultMap();
@@ -55,6 +59,7 @@ export class VttEngine {
     const containerSize = this.resolveContainerSize(container);
     this.containerId = container;
     this.stage.container(container);
+    this.fxManager?.setContainer(container);
     this.stage.width(containerSize.width);
     this.stage.height(containerSize.height);
     this.stage.batchDraw();
@@ -73,6 +78,7 @@ export class VttEngine {
 
   initInteraction() {
     this.stage.on('dblclick dbltap', (e) => {
+      if (this.fxManager?.isActive?.() || this.isMeasuring()) return;
       // Don't ping if clicking a token
       if (e.target.getParent()?.tokenReference) return;
 
@@ -152,7 +158,9 @@ export class VttEngine {
 
   setPermissions(isDM) {
     this.isDM = isDM;
+    this.fxManager?.setPermissionMode(this.playersCanUseFx);
     this.refreshTokenPermissions();
+    this.updateLighting();
   }
 
   setPlayerTokenControlMode(playersCanControlAllPlayerTokens) {
@@ -160,19 +168,33 @@ export class VttEngine {
     this.refreshTokenPermissions();
   }
 
+  setPlayerFxPermissionMode(playersCanUseFx) {
+    this.playersCanUseFx = !!playersCanUseFx;
+    this.fxManager?.setPermissionMode(this.playersCanUseFx);
+  }
+
   refreshTokenPermissions() {
     this.tokenLayer.getChildren().forEach(group => {
       const token = group.tokenReference;
       if (token) {
-        group.draggable(token.checkPermissions());
+        group.draggable((typeof token.canDrag === 'function' ? token.canDrag() : token.checkPermissions()) && !this.isFxActive());
       }
     });
     this.tokenLayer.batchDraw();
   }
 
+  isMeasuring() {
+    return !!this.measurementManager && this.measurementManager.mode !== 'none';
+  }
+
+  isFxActive() {
+    return !!this.fxManager && this.fxManager.isActive();
+  }
+
   clearAll() {
     this.tokenLayer.destroyChildren();
     this.overlayLayer.destroyChildren();
+    this.fxManager?.clearAll(true);
     if (this.wallManager && typeof this.wallManager.clearAll === 'function') {
       this.wallManager.clearAll();
     } else {
@@ -614,6 +636,7 @@ export class VttEngine {
     }
   }
   toggleWallMode(active) {
+    if (active) this.fxManager?.setMode('none');
     this.wallManager.toggleMode(active);
     this.updateLighting();
   }
@@ -635,7 +658,9 @@ export class VttEngine {
       gridThickness: this.gridThickness,
       gridType: this.gridType,
       playersCanControlAllPlayerTokens: this.playersCanControlAllPlayerTokens,
+      playersCanUseFx: this.playersCanUseFx,
       lightingEnabled: this.lightLayer.visible(),
+      fxEffects: this.fxManager?.getEffectsData() || [],
       tokens: this.tokenLayer.getChildren().map(group => {
         const ref = group.tokenReference;
         return {
@@ -657,6 +682,9 @@ export class VttEngine {
       this.clearAll();
       if (config.playersCanControlAllPlayerTokens !== undefined) {
         this.playersCanControlAllPlayerTokens = !!config.playersCanControlAllPlayerTokens;
+      }
+      if (config.playersCanUseFx !== undefined) {
+        this.setPlayerFxPermissionMode(!!config.playersCanUseFx);
       }
       if (config.lightingEnabled !== undefined) {
         this.lightLayer.visible(!!config.lightingEnabled);
@@ -684,15 +712,58 @@ export class VttEngine {
         this.wallManager.loadWalls(config.walls);
       }
 
+      this.fxManager.loadEffects(config.fxEffects || []);
+
       this.stage.batchDraw();
     } catch (e) {
       console.error("Failed to load config object", e);
     }
   }
 
-  setMeasurementMode(mode) {
+  setMeasurementMode(mode, options = {}) {
     if (mode !== 'none') this.wallManager.setMode('none');
-    this.measurementManager.setMode(mode);
+    if (mode !== 'none') this.fxManager?.setMode('none');
+    this.measurementManager.setMode(mode, options);
+    this.refreshTokenPermissions();
+  }
+
+  setFxMode(mode, options = {}) {
+    if (mode !== 'none') {
+      this.wallManager.setMode('none');
+      this.measurementManager.setMode('none');
+    }
+    this.fxManager.setMode(mode, options);
+    this.refreshTokenPermissions();
+  }
+
+  setFxColor(color) {
+    this.fxManager.setColor(color);
+  }
+
+  publishFxAdded(effect) {
+    if (!effect) return;
+    this.stage.fire('fxAdded', { effect });
+  }
+
+  publishFxDeleted(effectId) {
+    if (!effectId) return;
+    this.stage.fire('fxDeleted', { id: effectId });
+  }
+
+  publishFxCleared() {
+    this.stage.fire('fxCleared', {});
+  }
+
+  addFxEffect(effect, remote = false) {
+    return this.fxManager.addEffect(effect, remote);
+  }
+
+  removeFxEffect(effectId, remote = false) {
+    return this.fxManager.removeEffect(effectId, remote);
+  }
+
+  clearFxEffects(remote = false) {
+    return this.fxManager.clearAll(remote);
   }
 
   updateLighting() {
