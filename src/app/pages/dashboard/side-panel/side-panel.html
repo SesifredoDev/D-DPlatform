@@ -44,7 +44,7 @@
       <mat-divider></mat-divider>
       <button mat-menu-item (click)="openAddServerDialog()">
         <mat-icon>add_circle</mat-icon>
-        <span>Create Server</span>
+        <span>Create or Join Server</span>
       </button>
     </mat-menu>
   </header>
@@ -167,7 +167,7 @@
         <!-- Owner View: List of all users to whisper -->
         <ng-container *ngIf="isServerOwner">
           @for (group of groupedMembers; track group) {
-            @for (member of group.members; track member) {
+            @for (member of group.members; track member.user._id) {
               @if (member.user._id !== currentUserId) {
                 <a
                   class="nav-item whisper-item"
@@ -212,7 +212,7 @@
           <div class="role-category" [ngStyle]="collapsed ? collapsedRoleCategoryStyles : null">
             <div class="category-name" *ngIf="!collapsed">{{ group.role.name }} — {{ group.members.length }}</div>
 
-            @for (member of group.members; track member) {
+            @for (member of group.members; track member.user._id) {
               <div
                 class="member-card"
                 (contextmenu)="onRightClickMember($event, member)"
@@ -235,13 +235,14 @@
                   class="member-chars"
                   *ngIf="member.characters?.length"
                   [ngStyle]="collapsed ? collapsedMemberCharsStyles : null">
-                  @for (char of member.characters; track char) {
+                  @for (char of member.characters; track char._id) {
                     <img
                       class="tiny-char-icon"
                       [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
                       [matTooltip]="char.name"
                       [ngStyle]="collapsed ? collapsedCharacterIconStyles : null"
-                      (click)="openCharacter(char)"
+                      draggable="false"
+                      (click)="$event.stopPropagation(); openCharacter(char)"
                       (contextmenu)="onRightClickCharacter($event, char)">
                   }
                 </div>

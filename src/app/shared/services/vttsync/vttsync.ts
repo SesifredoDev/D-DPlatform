@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, OnDestroy } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import {TokenService} from '../auth/token';
 import {ICharacter} from '../../models/user/character.model';
@@ -8,6 +8,7 @@ import {environment} from '../../../../environments/environment';
 import { BehaviorSubject, firstValueFrom, Subject } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { FileService } from '../file/file';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 
 export interface TurnOrderEntry {
   id: string;
@@ -65,13 +66,69 @@ interface SyncActionPayload {
   sourceId?: string;
 }
 
+interface VttCharacterTokenPayload {
+  name: string;
+  icon: string | null;
+  ownerId: string | null;
+}
+
+interface VttWindowCommand {
+  type: 'add-character-token';
+  requestId: string;
+  sourceId: string;
+  targetWindowLabel?: string | null;
+  roomId?: string | null;
+  token: VttCharacterTokenPayload;
+  x?: number;
+  y?: number;
+}
+
+interface VttWindowCommandResult {
+  type: 'add-character-token-result';
+  requestId: string;
+  sourceId: string;
+  handled: boolean;
+  roomId: string | null;
+  reason?: string;
+}
+
+type VttWindowMessage = VttWindowCommand | VttWindowCommandResult;
+
+interface VttWindowTarget {
+  sourceId: string;
+  attachmentId: string;
+  roomId: string;
+  windowLabel: string;
+  updatedAt: number;
+}
+
 @Injectable({ providedIn: 'root' })
-export class VttSync {
+export class VttSync implements OnDestroy {
+  private static readonly windowCommandChannelName = 'dd-platform-vtt-window-commands';
+  private static readonly windowCommandEventName = 'dd-platform-vtt-window-command';
+  private static readonly commandClaimStoragePrefix = 'dd-platform-vtt-command-claim:';
+  private static readonly windowTargetStorageKey = 'dd-platform-vtt-window-targets';
+  private static readonly windowTargetTtlMs = 5000;
+  private static readonly windowTargetHeartbeatMs = 1000;
+
   private socket: Socket | null = null;
   public currentRoomId: string | null = null;
   public isHosting = false;
   public isConnected = false;
   private engine: VttEngine| null = null;
+  private readonly windowInstanceId = this.createWindowInstanceId();
+  private currentWindowLabel = this.getFallbackWindowLabel();
+  private readonly windowCommandChannel?: BroadcastChannel;
+  private windowCommandUnlisten?: UnlistenFn;
+  private pendingWindowCommands = new Map<string, {
+    resolve: (handled: boolean) => void;
+    timeoutId: number;
+  }>();
+  private handledWindowCommandIds = new Set<string>();
+  private activeEngineRoomId: string | null = null;
+  private activeEngineAttachmentId: string | null = null;
+  private activeEngineTarget: VttWindowTarget | null = null;
+  private engineTargetHeartbeatId: number | null = null;
 
   private localVersion = 0;
   private resyncing = false;
@@ -111,6 +168,18 @@ export class VttSync {
     private http: HttpClient,
     private fileService: FileService
   ) {
+    this.windowCommandChannel = this.createWindowCommandChannel();
+    void this.resolveCurrentWindowLabel();
+    void this.setupTauriWindowCommands();
+  }
+
+  ngOnDestroy() {
+    this.clearActiveEngineTarget();
+    this.windowCommandChannel?.close();
+    this.windowCommandUnlisten?.();
+    this.pendingWindowCommands.forEach(pending => window.clearTimeout(pending.timeoutId));
+    this.pendingWindowCommands.clear();
+    this.handledWindowCommandIds.clear();
   }
 
   private getSocket(): Socket {
@@ -292,6 +361,7 @@ export class VttSync {
     this.currentRoomId = roomId;
     this.isHosting = true;
     this.engine = engine;
+    this.activeEngineRoomId = roomId;
     this.needsSessionRestore = false;
 
     const socket = this.getSocket();
@@ -331,6 +401,7 @@ export class VttSync {
     this.currentRoomId = roomId;
     this.isHosting = false;
     this.engine = engine;
+    this.activeEngineRoomId = roomId;
     this.localCharacter = character;
     this.needsSessionRestore = false;
 
@@ -451,7 +522,10 @@ export class VttSync {
     this.isHosting = false;
     this.isConnected = false;
     this.hostDisconnected$.next(false);
+    this.clearActiveEngineTarget();
     this.engine = null;
+    this.activeEngineRoomId = null;
+    this.activeEngineAttachmentId = null;
     this.localCharacter = null;
     this.needsSessionRestore = false;
     this.isStopping = false;
@@ -719,19 +793,92 @@ export class VttSync {
     engine.stage.batchDraw();
   }
 
+  attachEngine(engine: VttEngine, roomId: string): string {
+    const attachmentId = this.createWindowInstanceId();
+    this.engine = engine;
+    this.activeEngineRoomId = roomId;
+    this.activeEngineAttachmentId = attachmentId;
+    this.activeEngineTarget = {
+      sourceId: this.windowInstanceId,
+      attachmentId,
+      roomId,
+      windowLabel: this.currentWindowLabel,
+      updatedAt: Date.now()
+    };
+    this.publishActiveEngineTarget();
+    this.startEngineTargetHeartbeat();
+    void this.resolveCurrentWindowLabel();
+    return attachmentId;
+  }
+
+  detachEngine(engine: VttEngine, roomId: string, attachmentId?: string | null) {
+    if (attachmentId && this.activeEngineAttachmentId !== attachmentId) return;
+    if (this.engine !== engine) return;
+    if (this.activeEngineRoomId && this.activeEngineRoomId !== roomId) return;
+
+    this.clearActiveEngineTarget(attachmentId);
+    this.engine = null;
+    this.activeEngineRoomId = null;
+    this.activeEngineAttachmentId = null;
+  }
+
+  async addCharacterTokenToActiveVtt(
+    character: ICharacter,
+    roomId?: string | null,
+    x?: number,
+    y?: number
+  ): Promise<boolean> {
+    const token = this.createCharacterTokenPayload(character);
+    const engine = this.getEngine();
+    if (engine && this.canHandleVttWindowCommand(roomId ?? null)) {
+      this.addCharacterTokenPayload(engine, token, x, y);
+      return true;
+    }
+
+    return this.requestRemoteCharacterTokenAdd(token, roomId, x, y);
+  }
+
   addCharacterToken(engine: VttEngine, character: ICharacter, x?: number, y?: number) {
+    this.addCharacterTokenPayload(engine, this.createCharacterTokenPayload(character), x, y);
+  }
+
+  private addCharacterTokenPayload(engine: VttEngine, token: VttCharacterTokenPayload, x?: number, y?: number) {
     const posX = x ?? 100;
     const posY = y ?? 100;
 
     const tokenOptions = {
       id: crypto.randomUUID(),
-      name: character.name,
-      icon: character.icon,
-      ownerId: character.ownerId,
+      name: token.name,
+      icon: token.icon,
+      ownerId: token.ownerId,
       isPlayer: true
     };
 
     engine.addToken(posX, posY, tokenOptions, false);
+  }
+
+  private createCharacterTokenPayload(character: ICharacter): VttCharacterTokenPayload {
+    return {
+      name: typeof character?.name === 'string' && character.name.trim() ? character.name : 'Hero',
+      icon: typeof character?.icon === 'string' && character.icon.trim() ? character.icon : null,
+      ownerId: this.resolveCharacterOwnerId(character)
+    };
+  }
+
+  private resolveCharacterOwnerId(character: ICharacter): string | null {
+    const ownerId = (character as any)?.ownerId;
+    if (typeof ownerId === 'string' && ownerId.trim()) {
+      return ownerId;
+    }
+
+    if (ownerId && typeof ownerId === 'object') {
+      const nestedId = (ownerId as any)._id ?? (ownerId as any).id;
+      if (typeof nestedId === 'string' && nestedId.trim()) {
+        return nestedId;
+      }
+    }
+
+    return null;
   }
 
   async setMap(mapSource: File | string, onProgress?: (progress: number) => void): Promise<void> {
@@ -923,6 +1070,360 @@ export class VttSync {
     } else {
       this.broadcastAction('turn-order-remove', { id: entryId });
     }
+  }
+
+  private requestRemoteCharacterTokenAdd(
+    token: VttCharacterTokenPayload,
+    roomId?: string | null,
+    x?: number,
+    y?: number
+  ): Promise<boolean> {
+    const requestId = this.createWindowInstanceId();
+    const target = this.getWindowTarget(roomId ?? null);
+    const command: VttWindowCommand = {
+      type: 'add-character-token',
+      requestId,
+      sourceId: this.windowInstanceId,
+      targetWindowLabel: target?.windowLabel ?? null,
+      roomId: roomId ?? null,
+      token,
+      x,
+      y
+    };
+
+    return new Promise(resolve => {
+      const timeoutId = window.setTimeout(() => {
+        this.pendingWindowCommands.delete(requestId);
+        this.releaseCommandClaim(requestId);
+        resolve(false);
+      }, 1500);
+
+      this.pendingWindowCommands.set(requestId, { resolve, timeoutId });
+      this.broadcastWindowMessage(command, target?.windowLabel ?? null);
+    });
+  }
+
+  private handleWindowMessage(message: VttWindowMessage | null | undefined) {
+    if (!message || message.sourceId === this.windowInstanceId) return;
+
+    if (message.type === 'add-character-token-result') {
+      this.resolvePendingWindowCommand(message.requestId, message.handled);
+      return;
+    }
+
+    if (message.type === 'add-character-token') {
+      if (message.targetWindowLabel && message.targetWindowLabel !== this.currentWindowLabel) {
+        return;
+      }
+
+      this.handleAddCharacterTokenCommand(message);
+    }
+  }
+
+  private handleAddCharacterTokenCommand(command: VttWindowCommand) {
+    if (!this.engine || !this.canHandleVttWindowCommand(command.roomId ?? null)) {
+      return;
+    }
+
+    window.setTimeout(() => this.tryHandleAddCharacterTokenCommand(command), this.isHosting ? 0 : 50);
+  }
+
+  private tryHandleAddCharacterTokenCommand(command: VttWindowCommand) {
+    if (!this.engine || !this.canHandleVttWindowCommand(command.roomId ?? null)) {
+      return;
+    }
+
+    if (this.handledWindowCommandIds.has(command.requestId)) {
+      return;
+    }
+
+    if (!this.claimCommand(command.requestId)) {
+      return;
+    }
+
+    this.handledWindowCommandIds.add(command.requestId);
+    window.setTimeout(() => this.handledWindowCommandIds.delete(command.requestId), 10000);
+
+    try {
+      this.addCharacterTokenPayload(this.engine, command.token, command.x, command.y);
+      this.broadcastWindowMessage({
+        type: 'add-character-token-result',
+        requestId: command.requestId,
+        sourceId: this.windowInstanceId,
+        handled: true,
+        roomId: this.currentRoomId
+      });
+    } catch (error) {
+      console.error('Failed to handle VTT token add command', error);
+      this.releaseCommandClaim(command.requestId);
+      this.broadcastWindowMessage({
+        type: 'add-character-token-result',
+        requestId: command.requestId,
+        sourceId: this.windowInstanceId,
+        handled: false,
+        roomId: this.currentRoomId,
+        reason: 'handler-error'
+      });
+    }
+  }
+
+  private canHandleVttWindowCommand(roomId: string | null): boolean {
+    if (!this.engine || !this.isEngineMounted(this.engine)) {
+      return false;
+    }
+
+    if (!roomId) {
+      return true;
+    }
+
+    return this.activeEngineRoomId === roomId || this.currentRoomId === roomId;
+  }
+
+  private isEngineMounted(engine: VttEngine): boolean {
+    const container = this.getEngineContainer(engine);
+    if (!container) return true;
+
+    return container.isConnected !== false;
+  }
+
+  private getEngineContainer(engine: VttEngine): HTMLElement | null {
+    if (typeof HTMLElement === 'undefined') return null;
+
+    const stageContainer = (engine as any).stage?.container?.();
+    if (stageContainer instanceof HTMLElement) {
+      return stageContainer;
+    }
+
+    const engineContainer = (engine as any).containerId;
+    return engineContainer instanceof HTMLElement ? engineContainer : null;
+  }
+
+  private resolvePendingWindowCommand(requestId: string, handled: boolean) {
+    const pending = this.pendingWindowCommands.get(requestId);
+    if (!pending) return;
+
+    window.clearTimeout(pending.timeoutId);
+    this.pendingWindowCommands.delete(requestId);
+    this.releaseCommandClaim(requestId);
+    pending.resolve(handled);
+  }
+
+  private broadcastWindowMessage(message: VttWindowMessage, targetWindowLabel?: string | null) {
+    try {
+      this.windowCommandChannel?.postMessage(message);
+    } catch (error) {
+      console.warn('Failed to post VTT window command', error);
+    }
+
+    if (!this.isTauriRuntime()) return;
+    void this.emitTauriWindowMessage(message, targetWindowLabel)
+      .catch(error => console.warn('Failed to broadcast VTT window command', error));
+  }
+
+  private async emitTauriWindowMessage(message: VttWindowMessage, targetWindowLabel?: string | null) {
+    const { emit, emitTo } = await import('@tauri-apps/api/event');
+
+    if (targetWindowLabel) {
+      try {
+        await emitTo(targetWindowLabel, VttSync.windowCommandEventName, message);
+        return;
+      } catch (error) {
+        console.warn('Failed to emit VTT command to target window', targetWindowLabel, error);
+        await emit(VttSync.windowCommandEventName, this.clearMessageTarget(message));
+        return;
+      }
+    }
+
+    await emit(VttSync.windowCommandEventName, message);
+  }
+
+  private clearMessageTarget(message: VttWindowMessage): VttWindowMessage {
+    if (message.type !== 'add-character-token') {
+      return message;
+    }
+
+    return {
+      ...message,
+      targetWindowLabel: null
+    };
+  }
+
+  private createWindowCommandChannel(): BroadcastChannel | undefined {
+    if (typeof BroadcastChannel === 'undefined') return undefined;
+
+    const channel = new BroadcastChannel(VttSync.windowCommandChannelName);
+    channel.onmessage = event => this.handleWindowMessage(event.data as VttWindowMessage);
+    return channel;
+  }
+
+  private async setupTauriWindowCommands() {
+    if (!this.isTauriRuntime()) return;
+
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      this.windowCommandUnlisten = await listen<VttWindowMessage>(
+        VttSync.windowCommandEventName,
+        event => this.handleWindowMessage(event.payload)
+      );
+    } catch (error) {
+      console.warn('Tauri VTT window commands are unavailable', error);
+    }
+  }
+
+  private claimCommand(requestId: string): boolean {
+    try {
+      const claimKey = `${VttSync.commandClaimStoragePrefix}${requestId}`;
+      if (localStorage.getItem(claimKey)) {
+        return false;
+      }
+
+      localStorage.setItem(claimKey, this.windowInstanceId);
+      return localStorage.getItem(claimKey) === this.windowInstanceId;
+    } catch {
+      return true;
+    }
+  }
+
+  private releaseCommandClaim(requestId: string) {
+    try {
+      localStorage.removeItem(`${VttSync.commandClaimStoragePrefix}${requestId}`);
+    } catch {
+      // Best effort cleanup only.
+    }
+  }
+
+  private startEngineTargetHeartbeat() {
+    if (this.engineTargetHeartbeatId !== null) return;
+
+    this.engineTargetHeartbeatId = window.setInterval(() => {
+      if (!this.activeEngineTarget || !this.engine || !this.isEngineMounted(this.engine)) {
+        this.clearActiveEngineTarget();
+        return;
+      }
+
+      this.publishActiveEngineTarget();
+    }, VttSync.windowTargetHeartbeatMs);
+  }
+
+  private stopEngineTargetHeartbeat() {
+    if (this.engineTargetHeartbeatId === null) return;
+
+    window.clearInterval(this.engineTargetHeartbeatId);
+    this.engineTargetHeartbeatId = null;
+  }
+
+  private publishActiveEngineTarget() {
+    if (!this.activeEngineTarget) return;
+
+    this.activeEngineTarget = {
+      ...this.activeEngineTarget,
+      windowLabel: this.currentWindowLabel,
+      updatedAt: Date.now()
+    };
+
+    const nextTargets = this.readWindowTargets()
+      .filter(target =>
+        target.sourceId !== this.activeEngineTarget?.sourceId ||
+        target.attachmentId !== this.activeEngineTarget?.attachmentId
+      );
+
+    nextTargets.push(this.activeEngineTarget);
+    this.writeWindowTargets(nextTargets);
+  }
+
+  private clearActiveEngineTarget(attachmentId?: string | null) {
+    if (attachmentId && this.activeEngineTarget?.attachmentId !== attachmentId) return;
+
+    const target = this.activeEngineTarget;
+    this.activeEngineTarget = null;
+    this.stopEngineTargetHeartbeat();
+
+    if (!target) return;
+
+    const nextTargets = this.readWindowTargets()
+      .filter(existing =>
+        existing.sourceId !== target.sourceId ||
+        existing.attachmentId !== target.attachmentId
+      );
+
+    this.writeWindowTargets(nextTargets);
+  }
+
+  private getWindowTarget(roomId: string | null): VttWindowTarget | null {
+    const matchingTargets = this.readWindowTargets()
+      .filter(target => target.sourceId !== this.windowInstanceId)
+      .filter(target => !roomId || target.roomId === roomId)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    return matchingTargets[0] ?? null;
+  }
+
+  private readWindowTargets(): VttWindowTarget[] {
+    try {
+      const rawTargets = JSON.parse(
+        localStorage.getItem(VttSync.windowTargetStorageKey) ?? '[]'
+      ) as Array<Partial<VttWindowTarget>>;
+      const now = Date.now();
+
+      return rawTargets
+        .filter(target =>
+          typeof target.sourceId === 'string' &&
+          typeof target.attachmentId === 'string' &&
+          typeof target.roomId === 'string' &&
+          typeof target.windowLabel === 'string' &&
+          typeof target.updatedAt === 'number' &&
+          now - target.updatedAt <= VttSync.windowTargetTtlMs
+        )
+        .map(target => ({
+          sourceId: target.sourceId!,
+          attachmentId: target.attachmentId!,
+          roomId: target.roomId!,
+          windowLabel: target.windowLabel!,
+          updatedAt: target.updatedAt!
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private writeWindowTargets(targets: VttWindowTarget[]) {
+    try {
+      localStorage.setItem(VttSync.windowTargetStorageKey, JSON.stringify(targets));
+    } catch (error) {
+      console.warn('Failed to persist VTT window targets', error);
+    }
+  }
+
+  private async resolveCurrentWindowLabel() {
+    if (!this.isTauriRuntime()) return;
+
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      this.currentWindowLabel = getCurrentWindow().label || this.currentWindowLabel;
+      this.publishActiveEngineTarget();
+    } catch (error) {
+      console.warn('Failed to resolve current Tauri window label', error);
+    }
+  }
+
+  private isTauriRuntime(): boolean {
+    return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+  }
+
+  private getFallbackWindowLabel(): string {
+    if (typeof window === 'undefined') {
+      return 'main';
+    }
+
+    return new URLSearchParams(window.location.search).get('tabPanel') ?? 'main';
+  }
+
+  private createWindowInstanceId(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+      return crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   getEngine() {

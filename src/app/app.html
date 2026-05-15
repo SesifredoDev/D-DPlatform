@@ -1,5 +1,5 @@
 @if (tabPanelId; as panelId) {
-  <app-tab-panel [panelId]="panelId"></app-tab-panel>
+  <app-dashboard [externalPanelId]="panelId"></app-dashboard>
 } @else {
   <app-dnd-search-drawer />
   <router-outlet />

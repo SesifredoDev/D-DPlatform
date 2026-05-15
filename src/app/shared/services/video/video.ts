@@ -21,6 +21,7 @@ import { environment } from '../../../../environments/environment';
 import { ThemeColors } from '../theme/theme.service';
 import { DeviceInfo, DeviceService } from '../device/device';
 import { TokenService } from '../auth/token';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 export type CallDeviceRole = 'desktop-main' | 'phone-camera';
 export type CompanionSourceId = 'desktop-local' | string;
@@ -80,6 +81,13 @@ interface LiveKitConnectionInfo {
 
 @Injectable({ providedIn: 'root' })
 export class Video {
+  private static readonly vttSessionStateKey = 'video:vtt-session';
+  private static readonly selectedVideoSourceStateKey = 'video:selected-video-source';
+  private static readonly selectedAudioSourceStateKey = 'video:selected-audio-source';
+  private static readonly remoteVideoQualityStateKey = 'video:remote-video-quality';
+  private static readonly participantVolumesStateKey = 'video:participant-volumes';
+  private static readonly sceneMainCharactersStateKey = 'video:scene-main-characters';
+
   private static readonly maxIceServers = 4;
   private static readonly maxSceneMainCharacters = 4;
   private static readonly defaultParticipantVolumePercent = 100;
@@ -176,10 +184,12 @@ export class Video {
   private companionSyncPromise: Promise<void> | null = null;
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
+  private applyingSharedState = false;
 
   constructor(
     private deviceService: DeviceService,
-    private tokenService: TokenService
+    private tokenService: TokenService,
+    private sharedWindowState: SharedWindowStateService
   ) {
     setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
@@ -187,7 +197,58 @@ export class Video {
       adaptiveStream: true,
       dynacast: true,
     });
+    this.setupSharedWindowState();
     this.setupRoomListeners();
+  }
+
+  private setupSharedWindowState() {
+    this.bindSharedBehaviorSubject(Video.vttSessionStateKey, this.vttSession$);
+    this.bindSharedBehaviorSubject(Video.selectedVideoSourceStateKey, this.selectedVideoSource$, () => {
+      void this.updateSelectedSourcesMetadata();
+    });
+    this.bindSharedBehaviorSubject(Video.selectedAudioSourceStateKey, this.selectedAudioSource$, () => {
+      void this.updateSelectedSourcesMetadata();
+    });
+    this.bindSharedBehaviorSubject(Video.remoteVideoQualityStateKey, this.remoteVideoQualityPreference$, () => {
+      this.applyRemoteVideoSubscriptionPreferences();
+      void this.emitParticipants();
+    });
+    this.bindSharedBehaviorSubject(Video.participantVolumesStateKey, this.participantVolumes$);
+    this.bindSharedBehaviorSubject(Video.sceneMainCharactersStateKey, this.sceneMainCharacters$);
+  }
+
+  private bindSharedBehaviorSubject<T>(
+    key: string,
+    subject: BehaviorSubject<T>,
+    onRemoteValue?: (value: T) => void
+  ) {
+    const snapshot = this.sharedWindowState.getSnapshot<T>(key, null);
+    if (snapshot !== null && !this.isSameSharedState(subject.value, snapshot)) {
+      subject.next(snapshot);
+    }
+
+    this.sharedWindowState.observe<T>(key, subject.value).subscribe(value => {
+      if (value === null || this.isSameSharedState(subject.value, value)) {
+        return;
+      }
+
+      this.applyingSharedState = true;
+      subject.next(value);
+      this.applyingSharedState = false;
+      onRemoteValue?.(value);
+    });
+
+    let hasSeenInitialValue = false;
+    subject.subscribe(value => {
+      if (!hasSeenInitialValue) {
+        hasSeenInitialValue = true;
+        return;
+      }
+
+      if (!this.applyingSharedState) {
+        this.sharedWindowState.publish(key, value);
+      }
+    });
   }
 
   private setupRoomListeners() {
@@ -1421,5 +1482,9 @@ export class Video {
     }
 
     return Math.round((packetsLost / totalPackets) * 1000) / 10;
+  }
+
+  private isSameSharedState(first: unknown, second: unknown): boolean {
+    return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
   }
 }

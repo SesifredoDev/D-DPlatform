@@ -5,31 +5,56 @@ import {
   SimpleChanges,
   OnDestroy,
   ViewChild,
-  ElementRef, OnInit
+  ElementRef,
+  OnInit
 } from '@angular/core';
 import { Subscription } from 'rxjs';
-import { Message, MessageData, Reaction, Attachment } from '../../../shared/services/message/message';
+import { Message, MessageData, Attachment } from '../../../shared/services/message/message';
 import { UserService } from '../../../shared/services/user/user';
-import { DatePipe, NgClass, NgForOf, NgIf } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { MatCardModule } from '@angular/material/card';
-import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
-import { MatIconButton, MatButtonModule } from '@angular/material/button';
-import { MatInput } from '@angular/material/input';
+import { MatIconButton } from '@angular/material/button';
 import { MarkdownComponent, provideMarkdown } from 'ngx-markdown';
 import { TextFieldModule } from '@angular/cdk/text-field';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
-import { HttpClient } from '@angular/common/http';
-import { environment } from '../../../../environments/environment';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
 import { IUser } from '../../../shared/models/user/user.model';
 import { IRole } from '../../../shared/models/server/role.model';
+import { FileService } from '../../../shared/services/file/file';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 
 type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
+type LinkPreviewType = 'website' | 'image' | 'video' | 'audio' | 'embed';
+type LinkPreviewAspect = 'landscape' | 'portrait' | 'square';
+type LinkPreviewProvider = 'YouTube' | 'Instagram' | 'TikTok' | 'Vimeo';
+
+interface LinkPreview {
+  url: string;
+  host: string;
+  displayUrl: string;
+  title: string;
+  description: string;
+  type: LinkPreviewType;
+  icon: string;
+  imageUrl?: string;
+  embedUrl?: SafeResourceUrl;
+  embedAspect?: LinkPreviewAspect;
+  provider?: LinkPreviewProvider;
+}
+
+interface PlayableEmbedPreview {
+  provider: LinkPreviewProvider;
+  embedUrl: string;
+  title: string;
+  description: string;
+  icon: string;
+  aspect: LinkPreviewAspect;
+  imageUrl?: string;
+}
 
 @Component({
   selector: 'app-text-channel',
@@ -38,16 +63,9 @@ type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNE
   standalone: true,
   imports: [
     DatePipe,
-    NgClass,
-    NgForOf,
-    NgIf,
     FormsModule,
-    MatCardModule,
-    MatFormFieldModule,
     MatIconModule,
     MatIconButton,
-    MatButtonModule,
-    MatInput,
     MarkdownComponent,
     TextFieldModule,
     MatTooltipModule,
@@ -70,9 +88,18 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   currentUserId: string | null = null;
   canSendMessages = true;
   sendError = '';
+  isLoadingOlderMessages = false;
+  hasMoreMessages = true;
 
   attachments: Attachment[] = [];
   isUploading = false;
+  uploadProgress = 0;
+  readonly quickReactions = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}'];
+
+  private readonly imageExtensions = ['apng', 'avif', 'gif', 'jpg', 'jpeg', 'png', 'svg', 'webp'];
+  private readonly videoExtensions = ['m4v', 'mov', 'mp4', 'mpeg', 'ogv', 'webm'];
+  private readonly audioExtensions = ['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'webm'];
+  private readonly linkPreviewCache = new Map<string, LinkPreview[]>();
 
   // Whisper state
   isWhisperMode = false;
@@ -88,7 +115,8 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     private messageService: Message,
     private userService: UserService,
     private serverService: ServerService,
-    private http: HttpClient
+    private fileService: FileService,
+    private sanitizer: DomSanitizer
   ) {
     this.userService.getMe().subscribe(user => {
       this.currentUserId = user._id;
@@ -143,12 +171,21 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
   loadChannel() {
     this.msgSub?.unsubscribe();
+    this.linkPreviewCache.clear();
+    this.isLoadingOlderMessages = false;
+    this.hasMoreMessages = true;
+    this.justOpened = true;
+    this.isAtBottom = true;
 
     this.msgSub = this.messageService
       .joinChannel(this.channelId)
       .subscribe(msgs => {
         const hadMessages = this.messages.length > 0;
         this.messages = msgs;
+
+        if (this.isLoadingOlderMessages) {
+          return;
+        }
 
         if (this.isAtBottom || this.justOpened) {
           this.scrollToBottom();
@@ -255,6 +292,46 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     if (this.isAtBottom) {
       this.showNewMessageIndicator = false;
     }
+
+    if (el.scrollTop <= threshold) {
+      this.loadOlderMessages();
+    }
+  }
+
+  private loadOlderMessages() {
+    if (!this.channelId || this.isLoadingOlderMessages || !this.hasMoreMessages) return;
+    if (!this.container || this.messages.length === 0) return;
+
+    const el = this.container.nativeElement;
+    const previousScrollHeight = el.scrollHeight;
+    const previousScrollTop = el.scrollTop;
+
+    this.isLoadingOlderMessages = true;
+
+    this.messageService.loadOlderMessages(this.channelId).subscribe({
+      next: olderMessages => {
+        if (olderMessages.length === 0) {
+          this.hasMoreMessages = false;
+          this.isLoadingOlderMessages = false;
+          return;
+        }
+
+        setTimeout(() => {
+          if (!this.container) {
+            this.isLoadingOlderMessages = false;
+            return;
+          }
+
+          const updatedEl = this.container.nativeElement;
+          updatedEl.scrollTop = updatedEl.scrollHeight - previousScrollHeight + previousScrollTop;
+          this.isLoadingOlderMessages = false;
+        }, 0);
+      },
+      error: err => {
+        console.error('Failed to load older messages', err);
+        this.isLoadingOlderMessages = false;
+      }
+    });
   }
 
   scrollToBottom(force = false) {
@@ -294,36 +371,366 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     }
   }
 
-  onFileSelected(event: any) {
-    const file = event.target.files[0];
-    if (file) {
-      this.isUploading = true;
-      const formData = new FormData();
-      formData.append('file', file);
+  async onFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    if (!files.length) return;
 
-      this.http.post<any>(`${environment.apiURL}files/upload`, formData, { withCredentials: true })
-        .subscribe({
-          next: (res) => {
-            this.attachments.push({
-              url: res.url,
-              id: res.id,
-              key: res.key,
-              name: res.filename,
-              filename: res.filename,
-              contentType: res.contentType
-            });
-            this.isUploading = false;
-          },
-          error: (err) => {
-            console.error('Upload failed', err);
-            this.isUploading = false;
-          }
+    this.isUploading = true;
+    this.uploadProgress = 0;
+    this.sendError = '';
+
+    try {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const uploaded = await this.fileService.uploadFileInChunks(file, progress => {
+          const clampedProgress = Math.max(0, Math.min(progress, 100));
+          this.uploadProgress = Math.round(((index + clampedProgress / 100) / files.length) * 100);
         });
+
+        this.attachments.push({
+          url: uploaded.url,
+          id: uploaded.id,
+          name: uploaded.name || uploaded.filename || file.name,
+          filename: uploaded.filename || file.name,
+          contentType: uploaded.contentType || file.type || 'application/octet-stream'
+        });
+      }
+    } catch (err) {
+      console.error('Upload failed', err);
+      this.sendError = 'Attachment upload failed. Try a smaller file or another format.';
+    } finally {
+      this.isUploading = false;
+      this.uploadProgress = 0;
+      input.value = '';
     }
   }
 
   removeAttachment(index: number) {
     this.attachments.splice(index, 1);
+  }
+
+  handleMessageLinkClick(event: MouseEvent) {
+    const target = event.target as Element | null;
+    const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+    if (!anchor) return;
+
+    const safeUrl = this.toSafeExternalUrl(anchor.getAttribute('href') || anchor.href);
+    if (!safeUrl) return;
+
+    this.openExternalUrl(safeUrl, event);
+  }
+
+  openExternalUrl(url: string | undefined, event?: Event) {
+    const safeUrl = this.toSafeExternalUrl(url);
+    if (!safeUrl) return;
+
+    event?.preventDefault();
+    event?.stopPropagation();
+    window.open(safeUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  getLinkPreviews(content: string | null | undefined): LinkPreview[] {
+    const cacheKey = content ?? '';
+    const cached = this.linkPreviewCache.get(cacheKey);
+    if (cached) return cached;
+
+    const previews = this.extractPreviewUrls(cacheKey)
+      .slice(0, 3)
+      .map(url => this.createLinkPreview(url));
+
+    this.linkPreviewCache.set(cacheKey, previews);
+    return previews;
+  }
+
+  isImageAttachment(attachment: Attachment): boolean {
+    return this.hasContentType(attachment, 'image/') || this.hasFileExtension(attachment, this.imageExtensions);
+  }
+
+  isVideoAttachment(attachment: Attachment): boolean {
+    return this.hasContentType(attachment, 'video/') || this.hasFileExtension(attachment, this.videoExtensions);
+  }
+
+  isAudioAttachment(attachment: Attachment): boolean {
+    return this.hasContentType(attachment, 'audio/') || this.hasFileExtension(attachment, this.audioExtensions);
+  }
+
+  getAttachmentIcon(attachment: Attachment): string {
+    if (this.isImageAttachment(attachment)) return 'image';
+    if (this.isVideoAttachment(attachment)) return 'movie';
+    if (this.isAudioAttachment(attachment)) return 'graphic_eq';
+    return 'insert_drive_file';
+  }
+
+  getAttachmentDisplayName(attachment: Attachment): string {
+    return attachment.name || attachment.filename || 'Attachment';
+  }
+
+  formatAttachmentType(attachment: Attachment): string {
+    const contentType = attachment.contentType?.split(';')[0]?.trim();
+    if (contentType) return contentType;
+
+    const extension = this.getExtension(attachment.url || attachment.filename || attachment.name || '');
+    return extension ? extension.toUpperCase() : 'file';
+  }
+
+  private extractPreviewUrls(content: string): string[] {
+    const markdownImageUrls = new Set<string>();
+    for (const match of content.matchAll(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+      const safeUrl = this.toSafeExternalUrl(this.cleanUrlMatch(match[1]));
+      if (safeUrl) {
+        markdownImageUrls.add(safeUrl);
+      }
+    }
+
+    const matches = content.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? [];
+    const urls: string[] = [];
+    for (const match of matches) {
+      const safeUrl = this.toSafeExternalUrl(this.cleanUrlMatch(match));
+      if (safeUrl && !markdownImageUrls.has(safeUrl) && !urls.includes(safeUrl)) {
+        urls.push(safeUrl);
+      }
+    }
+
+    return urls;
+  }
+
+  private createLinkPreview(url: string): LinkPreview {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./i, '');
+    const playableEmbed = this.getPlayableEmbed(parsed);
+
+    if (playableEmbed) {
+      const safeEmbedUrl = this.toSafeExternalUrl(playableEmbed.embedUrl);
+
+      return {
+        url,
+        host,
+        displayUrl: this.buildDisplayUrl(parsed, host),
+        title: playableEmbed.title,
+        description: playableEmbed.description,
+        type: 'embed',
+        icon: playableEmbed.icon,
+        imageUrl: playableEmbed.imageUrl,
+        embedUrl: safeEmbedUrl
+          ? this.sanitizer.bypassSecurityTrustResourceUrl(safeEmbedUrl)
+          : undefined,
+        embedAspect: playableEmbed.aspect,
+        provider: playableEmbed.provider
+      };
+    }
+
+    const type = this.getPreviewType(parsed.pathname) ?? 'website';
+
+    return {
+      url,
+      host,
+      displayUrl: this.buildDisplayUrl(parsed, host),
+      title: this.buildPreviewTitle(parsed, host, type),
+      description: this.buildPreviewDescription(parsed, type),
+      type,
+      icon: this.getPreviewIcon(type),
+      imageUrl: this.getPreviewImageUrl(url, type)
+    };
+  }
+
+  private cleanUrlMatch(value: string): string {
+    return value.trim().replace(/[.,!?;:)\]}]+$/g, '');
+  }
+
+  private toSafeExternalUrl(value: string | undefined): string | null {
+    if (!value) return null;
+
+    try {
+      const baseUrl = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+      const url = new URL(value, baseUrl);
+      return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private hasContentType(attachment: Attachment, prefix: string): boolean {
+    return (attachment.contentType || '').toLowerCase().startsWith(prefix);
+  }
+
+  private hasFileExtension(attachment: Attachment, extensions: string[]): boolean {
+    return [attachment.url, attachment.name, attachment.filename]
+      .filter((candidate): candidate is string => !!candidate)
+      .some(candidate => extensions.includes(this.getExtension(candidate)));
+  }
+
+  private getExtension(value: string): string {
+    const cleanValue = value.split(/[?#]/)[0].toLowerCase();
+    const match = cleanValue.match(/\.([a-z0-9]+)$/);
+    return match?.[1] ?? '';
+  }
+
+  private getPreviewType(pathname: string): LinkPreviewType | null {
+    const extension = this.getExtension(pathname);
+    if (this.imageExtensions.includes(extension)) return 'image';
+    if (this.videoExtensions.includes(extension)) return 'video';
+    if (this.audioExtensions.includes(extension)) return 'audio';
+    return null;
+  }
+
+  private getPlayableEmbed(url: URL): PlayableEmbedPreview | null {
+    const youtubeId = this.getYoutubeVideoId(url);
+    if (youtubeId) {
+      return {
+        provider: 'YouTube',
+        embedUrl: `https://www.youtube-nocookie.com/embed/${youtubeId}`,
+        title: 'YouTube video',
+        description: 'Playable YouTube preview',
+        icon: 'smart_display',
+        aspect: 'landscape',
+        imageUrl: `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`
+      };
+    }
+
+    const instagramEmbed = this.getInstagramEmbed(url);
+    if (instagramEmbed) return instagramEmbed;
+
+    const tiktokId = this.getTiktokVideoId(url);
+    if (tiktokId) {
+      return {
+        provider: 'TikTok',
+        embedUrl: `https://www.tiktok.com/player/v1/${tiktokId}`,
+        title: 'TikTok video',
+        description: 'Playable TikTok preview',
+        icon: 'smart_display',
+        aspect: 'portrait'
+      };
+    }
+
+    const vimeoId = this.getVimeoVideoId(url);
+    if (vimeoId) {
+      return {
+        provider: 'Vimeo',
+        embedUrl: `https://player.vimeo.com/video/${vimeoId}`,
+        title: 'Vimeo video',
+        description: 'Playable Vimeo preview',
+        icon: 'smart_display',
+        aspect: 'landscape'
+      };
+    }
+
+    return null;
+  }
+
+  private getYoutubeVideoId(url: URL): string | null {
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    let candidate: string | null = null;
+
+    if (host === 'youtu.be') {
+      candidate = url.pathname.split('/').filter(Boolean)[0] ?? null;
+    }
+
+    if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+      candidate = url.searchParams.get('v');
+      if (!candidate) {
+        const pathMatch = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/);
+        candidate = pathMatch?.[1] ?? null;
+      }
+    }
+
+    return this.cleanProviderId(candidate, /^[A-Za-z0-9_-]{6,}$/);
+  }
+
+  private getInstagramEmbed(url: URL): PlayableEmbedPreview | null {
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host !== 'instagram.com' && !host.endsWith('.instagram.com')) return null;
+
+    const match = url.pathname.match(/^\/(p|reel|tv)\/([^/?#]+)/i);
+    if (!match) return null;
+
+    const mediaType = match[1].toLowerCase();
+    const mediaId = this.cleanProviderId(match[2], /^[A-Za-z0-9_-]+$/);
+    if (!mediaId) return null;
+
+    const isVideoShape = mediaType === 'reel' || mediaType === 'tv';
+
+    return {
+      provider: 'Instagram',
+      embedUrl: `https://www.instagram.com/${mediaType}/${mediaId}/embed`,
+      title: `Instagram ${isVideoShape ? 'reel' : 'post'}`,
+      description: 'Playable Instagram preview',
+      icon: isVideoShape ? 'smart_display' : 'photo_camera',
+      aspect: isVideoShape ? 'portrait' : 'square'
+    };
+  }
+
+  private getTiktokVideoId(url: URL): string | null {
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host !== 'tiktok.com' && !host.endsWith('.tiktok.com')) return null;
+
+    const videoMatch = url.pathname.match(/\/video\/(\d+)/);
+    const embedMatch = url.pathname.match(/^\/embed\/(?:v2\/)?(\d+)/);
+    const playerMatch = url.pathname.match(/^\/player\/v1\/(\d+)/);
+    return this.cleanProviderId(videoMatch?.[1] ?? embedMatch?.[1] ?? playerMatch?.[1], /^\d+$/);
+  }
+
+  private getVimeoVideoId(url: URL): string | null {
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host !== 'vimeo.com' && !host.endsWith('.vimeo.com')) return null;
+
+    const playerMatch = url.pathname.match(/^\/video\/(\d+)/);
+    if (playerMatch) return this.cleanProviderId(playerMatch[1], /^\d+$/);
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    const numericSegment = [...segments].reverse().find(segment => /^\d+$/.test(segment));
+    return this.cleanProviderId(numericSegment, /^\d+$/);
+  }
+
+  private cleanProviderId(value: string | null | undefined, pattern: RegExp): string | null {
+    if (!value) return null;
+
+    const candidate = value.trim();
+    return pattern.test(candidate) ? candidate : null;
+  }
+
+  private buildDisplayUrl(url: URL, host: string): string {
+    const path = `${url.pathname}${url.search}`.replace(/\/$/, '');
+    return path ? `${host}${path}` : host;
+  }
+
+  private buildPreviewTitle(url: URL, host: string, type: LinkPreviewType): string {
+    if (type === 'image') return 'Image link';
+    if (type === 'video') return 'Video link';
+    if (type === 'audio') return 'Audio link';
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    const lastSegment = segments[segments.length - 1];
+    if (!lastSegment) return `Open ${host}`;
+
+    const withoutExtension = decodeURIComponent(lastSegment).replace(/\.[a-z0-9]{2,6}$/i, '');
+    const title = withoutExtension.replace(/[-_+]+/g, ' ').trim();
+    return title ? this.toTitleCase(title) : `Open ${host}`;
+  }
+
+  private buildPreviewDescription(url: URL, type: LinkPreviewType): string {
+    if (type === 'image') return 'Open image in a new tab';
+    if (type === 'video') return 'Playable video preview';
+    if (type === 'audio') return 'Playable audio preview';
+
+    return `External link from ${url.hostname.replace(/^www\./i, '')}`;
+  }
+
+  private getPreviewIcon(type: LinkPreviewType): string {
+    if (type === 'image') return 'image';
+    if (type === 'video') return 'movie';
+    if (type === 'audio') return 'graphic_eq';
+    if (type === 'embed') return 'smart_display';
+    return 'language';
+  }
+
+  private getPreviewImageUrl(url: string, type: LinkPreviewType): string | undefined {
+    if (type === 'image') return url;
+    return undefined;
+  }
+
+  private toTitleCase(value: string): string {
+    return value.replace(/\b\w/g, letter => letter.toUpperCase()).slice(0, 90);
   }
 
   ngOnDestroy() {

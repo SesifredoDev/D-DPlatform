@@ -21,13 +21,17 @@ export class MessagingSocketService {
   constructor(private tokenService: TokenService) { }
 
   public connect(): void {
-    if (this.socket && this.socket.connected) {
+    if (this.socket) {
+      if (!this.socket.connected && !this.socket.active) {
+        this.socket.connect();
+      }
       return;
     }
 
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
+      autoConnect: false,
       auth: (cb) => {
         cb({ token: this.tokenService.getAccessToken() });
       }
@@ -62,6 +66,8 @@ export class MessagingSocketService {
     this.socket.on('connect_error', (err) => {
       console.error('Messaging Socket Connection Error:', err.message);
     });
+
+    this.socket.connect();
   }
 
   public disconnect(): void {

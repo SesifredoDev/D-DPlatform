@@ -45,6 +45,7 @@ export class TabService {
   panels$ = this.panels.asObservable();
 
   private readonly instanceId = this.createInstanceId();
+  private readonly externalPanelId = this.getExternalPanelId();
   private readonly broadcastChannel?: BroadcastChannel;
   private tauriUnlisten?: UnlistenFn;
   private panelCounter = 0;
@@ -55,7 +56,17 @@ export class TabService {
     void this.setupTauriSync().finally(() => queueMicrotask(() => this.requestRemoteState()));
   }
 
+  static getPanelSecondaryPaneId(panelId: string): string {
+    return `${panelId}:right`;
+  }
+
+  static panelOwnsPane(panelId: string, pane: TabPane): boolean {
+    const paneId = String(pane);
+    return paneId === panelId || paneId.startsWith(`${panelId}:`);
+  }
+
   openTab(id: string, title: string, type: TabType, pane: TabPane = 'left', data?: any) { // Changed character to data
+    pane = this.resolvePaneForCurrentWindow(pane);
     const current = this.tabs.value;
     const existing = current.find(t => t.id === id);
 
@@ -89,6 +100,7 @@ export class TabService {
   }
 
   moveTab(tabId: string, targetPane: TabPane, targetIndex?: number) {
+    targetPane = this.resolvePaneForCurrentWindow(targetPane);
     const tab = this.tabs.value.find(t => t.id === tabId);
     if (!tab) return;
 
@@ -123,7 +135,7 @@ export class TabService {
   }
 
   dockPanel(panelId: string, targetPane: MainTabPane = 'left') {
-    const panelTabs = this.tabs.value.filter(tab => tab.pane === panelId);
+    const panelTabs = this.tabs.value.filter(tab => TabService.panelOwnsPane(panelId, tab.pane));
     if (panelTabs.length === 0) {
       this.removePanel(panelId);
       return;
@@ -131,7 +143,7 @@ export class TabService {
 
     const activeTabId = panelTabs.find(tab => tab.active)?.id ?? panelTabs[0].id;
     let nextTabs = this.tabs.value
-      .filter(tab => tab.pane !== panelId)
+      .filter(tab => !TabService.panelOwnsPane(panelId, tab.pane))
       .map(tab => tab.pane === targetPane ? { ...tab, active: false } : tab);
 
     panelTabs.forEach(tab => {
@@ -147,11 +159,11 @@ export class TabService {
   }
 
   closePanel(panelId: string) {
-    const panelTabs = this.tabs.value.filter(tab => tab.pane === panelId);
+    const panelTabs = this.tabs.value.filter(tab => TabService.panelOwnsPane(panelId, tab.pane));
     panelTabs.forEach(tab => this.runTabCloseSideEffects(tab));
 
     this.removePanel(panelId, false);
-    this.publishTabs(this.tabs.value.filter(tab => tab.pane !== panelId));
+    this.publishTabs(this.tabs.value.filter(tab => !TabService.panelOwnsPane(panelId, tab.pane)));
   }
 
   closeTab(id: string) {
@@ -186,7 +198,7 @@ export class TabService {
   }
 
   getPanelTabs(panelId: string): Tab[] {
-    return this.tabs.value.filter(tab => tab.pane === panelId);
+    return this.tabs.value.filter(tab => TabService.panelOwnsPane(panelId, tab.pane));
   }
 
   private runTabCloseSideEffects(tab: Tab) {
@@ -247,8 +259,10 @@ export class TabService {
   }
 
   private removeEmptyPanels(tabs: Tab[]) {
-    const activePaneIds = new Set(tabs.map(tab => tab.pane));
-    const nextPanels = this.panels.value.filter(panel => activePaneIds.has(panel.id));
+    const activePaneIds = new Set(tabs.map(tab => String(tab.pane)));
+    const nextPanels = this.panels.value.filter(panel =>
+      Array.from(activePaneIds).some(paneId => TabService.panelOwnsPane(panel.id, paneId))
+    );
     if (nextPanels.length !== this.panels.value.length) {
       this.panels.next(nextPanels);
     }
@@ -321,6 +335,30 @@ export class TabService {
 
   private isTauriRuntime(): boolean {
     return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+  }
+
+  private resolvePaneForCurrentWindow(pane: TabPane): TabPane {
+    if (!this.externalPanelId) {
+      return pane;
+    }
+
+    if (pane === 'left') {
+      return this.externalPanelId;
+    }
+
+    if (pane === 'right') {
+      return TabService.getPanelSecondaryPaneId(this.externalPanelId);
+    }
+
+    return pane;
+  }
+
+  private getExternalPanelId(): string | null {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return new URLSearchParams(window.location.search).get('tabPanel');
   }
 
   private createInstanceId(): string {

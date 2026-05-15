@@ -8,11 +8,15 @@ import { IServer, IServerTheme, ServerMember, TemporaryDmDuration, TemporaryDmGr
 import { IChannel } from '../../models/server/channel.model';
 import { FileService } from '../file/file';
 import { ThemeService } from '../theme/theme.service';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class ServerService {
+  private static readonly myServersStateKey = 'server:list';
+  private static readonly currentServerStateKey = 'server:current';
+
   private baseUrl = `${environment.apiURL}server`;
 
   private myServersSubject = new BehaviorSubject<IServer[]>([]);
@@ -21,8 +25,34 @@ export class ServerService {
   constructor(
     private http: HttpClient,
     private fileService: FileService,
-    private themeService: ThemeService
-  ) {}
+    private themeService: ThemeService,
+    private sharedWindowState: SharedWindowStateService
+  ) {
+    this.myServersSubject.next(
+      this.sharedWindowState.getSnapshot<IServer[]>(ServerService.myServersStateKey, []) ?? []
+    );
+    this.serverDetailsSubject.next(
+      this.sharedWindowState.getSnapshot<IServer>(ServerService.currentServerStateKey, null)
+    );
+
+    this.sharedWindowState.observe<IServer[]>(ServerService.myServersStateKey, [])
+      .subscribe(servers => {
+        const nextServers = servers ?? [];
+        if (!this.isSameState(this.myServersSubject.value, nextServers)) {
+          this.myServersSubject.next(nextServers);
+        }
+      });
+
+    this.sharedWindowState.observe<IServer>(ServerService.currentServerStateKey, null)
+      .subscribe(server => {
+        if (!this.isSameState(this.serverDetailsSubject.value, server)) {
+          this.serverDetailsSubject.next(server);
+          if (server?.defaultTheme) {
+            this.themeService.applyServerTheme(server.defaultTheme);
+          }
+        }
+      });
+  }
 
   getMyServersObservable(): Observable<IServer[]> {
     return this.myServersSubject.asObservable();
@@ -40,7 +70,7 @@ export class ServerService {
     const currentServer = this.serverDetailsSubject.value;
     if (!currentServer) return;
 
-    this.serverDetailsSubject.next({
+    this.setCurrentServer({
       ...currentServer,
       members
     });
@@ -94,7 +124,7 @@ export class ServerService {
         defaultTheme: this.resolveServerThemeAssets(server.defaultTheme)
       }));
 
-      this.myServersSubject.next(data);
+      this.setMyServers(data);
     } catch (error) {
       console.error('Failed to fetch servers', error);
     }
@@ -115,7 +145,7 @@ export class ServerService {
       };
 
       this.themeService.applyServerTheme(data.defaultTheme);
-      this.serverDetailsSubject.next(data);
+      this.setCurrentServer(data);
     } catch (error) {
       console.error('Failed to fetch server details', error);
     }
@@ -156,7 +186,7 @@ export class ServerService {
     this.themeService.applyServerTheme(updated.defaultTheme);
     const currentServer = this.serverDetailsSubject.value;
     if (currentServer?._id === serverId) {
-      this.serverDetailsSubject.next({
+      this.setCurrentServer({
         ...currentServer,
         name: updated.name ?? currentServer.name,
         icon: updated.icon ?? currentServer.icon,
@@ -211,7 +241,7 @@ export class ServerService {
         .pipe(catchError(handleApiError))
     );
     if (this.serverDetailsSubject.value?._id === serverId) {
-      this.serverDetailsSubject.next(null);
+      this.setCurrentServer(null);
     }
     await this.getMyServers();
   }
@@ -222,7 +252,7 @@ export class ServerService {
         .pipe(catchError(handleApiError))
     );
     if (this.serverDetailsSubject.value?._id === serverId) {
-      this.serverDetailsSubject.next(null);
+      this.setCurrentServer(null);
     }
     await this.getMyServers();
   }
@@ -259,7 +289,7 @@ export class ServerService {
     );
     // Refresh local state
     if (this.serverDetailsSubject.value?._id === serverId) {
-      this.serverDetailsSubject.next({
+      this.setCurrentServer({
         ...this.serverDetailsSubject.value,
         joinCode: response.joinCode
       });
@@ -270,6 +300,20 @@ export class ServerService {
   getOrCreateWhisperChannel(serverId: string, recipientId?: string): Observable<IChannel> {
     return this.http.post<IChannel>(`${this.baseUrl}/whisper/create`, { serverId, recipientId }, { withCredentials: true })
       .pipe(catchError(handleApiError));
+  }
+
+  private setMyServers(servers: IServer[]) {
+    this.myServersSubject.next(servers);
+    this.sharedWindowState.publish(ServerService.myServersStateKey, servers);
+  }
+
+  private setCurrentServer(server: IServer | null) {
+    this.serverDetailsSubject.next(server);
+    this.sharedWindowState.publish(ServerService.currentServerStateKey, server);
+  }
+
+  private isSameState(first: unknown, second: unknown): boolean {
+    return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
   }
 
 }

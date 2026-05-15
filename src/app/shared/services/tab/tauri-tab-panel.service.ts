@@ -45,6 +45,9 @@ export class TauriTabPanelService {
   }
 
   private buildPanelUrl(panelId: string): string {
-    return `index.html?tabPanel=${encodeURIComponent(panelId)}`;
+    const url = new URL('index.html', window.location.href);
+    url.search = '';
+    url.searchParams.set('tabPanel', panelId);
+    return url.toString();
   }
 }

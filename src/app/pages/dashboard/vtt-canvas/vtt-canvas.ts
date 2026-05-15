@@ -153,6 +153,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private hostTakeoverPrompt: Promise<boolean> | null = null;
   private declinedTakeoverHostId: string | null = null;
   private destroyed = false;
+  private engineAttachmentId: string | null = null;
   private readonly maxContainerReadyFrames = 30;
   public playersCanControlAllPlayerTokens = false;
   public playersCanUseFx = false;
@@ -211,6 +212,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     } else {
       this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
     }
+    this.engineAttachmentId = this.syncService.attachEngine(this.engine, this.serverId);
     this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
 
     this.engine.stage.on('tokenContextMenu', (data: any) => {
@@ -582,6 +584,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.playerTokenControlSub) this.playerTokenControlSub.unsubscribe();
     if (this.playerFxPermissionSub) this.playerFxPermissionSub.unsubscribe();
     if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
+    if (this.engine) {
+      this.syncService.detachEngine(this.engine, this.serverId, this.engineAttachmentId);
+      this.engineAttachmentId = null;
+    }
     if (this.syncService.currentRoomId !== this.serverId) {
       this.syncService.stopSyncing(true);
     }

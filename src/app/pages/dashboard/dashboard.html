@@ -1,8 +1,9 @@
-<button mat-icon-button class="mobile-toggle" (click)="toggleSidePanel()" *ngIf="isMobile">
+<button mat-icon-button class="mobile-toggle" (click)="toggleSidePanel()" *ngIf="isMobile && !isExternalPanel">
   <mat-icon>{{ showSidePanel ? 'close' : 'menu' }}</mat-icon>
 </button>
 
 <app-side-panel
+  *ngIf="!isExternalPanel"
   class="sidebar"
   [collapsed]="isSidePanelCollapsed && !isMobile"
   [collapsible]="!isMobile"
@@ -13,7 +14,7 @@
   (actionPerformed)="onSidePanelAction()">
 </app-side-panel>
 
-<main #editorArea class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="isMobile && showSidePanel" [class.split-active]="rightTabs.length > 0 && !isMobile">
+<main #editorArea class="editor-area" [class.resizing-active]="isResizing" [class.mobile-hidden]="!isExternalPanel && isMobile && showSidePanel" [class.split-active]="rightTabs.length > 0 && !isMobile" [class.external-panel]="isExternalPanel">
 
   <!-- LEFT PANE -->
   <div class="pane"
@@ -21,7 +22,7 @@
        id="left-pane"
        [style.flex-basis]="leftPaneBasis"
        (dragover)="onNativeTabDragOver($event)"
-       (drop)="onNativeTabDrop($event, 'left')">
+       (drop)="onNativeTabDrop($event, leftPaneId)">
 
     <div class="tab-bar">
       @for (tab of leftTabs; track tab.id) {
@@ -32,7 +33,7 @@
              (dragstart)="onNativeTabDragStart($event, tab)"
              (dragend)="onNativeTabDragEnd(tab)"
              (dragover)="onNativeTabDragOver($event)"
-             (drop)="onNativeTabDrop($event, 'left', tab)"
+             (drop)="onNativeTabDrop($event, leftPaneId, tab)"
              (click)="selectTab(tab)">
           <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
           <span class="tab-title">{{ tab.title }}</span>
@@ -64,7 +65,7 @@
           } @else if(tab.type ==='character'){
             <app-character-viewer [character]="tab.data"></app-character-viewer>
           } @else if (tab.type === 'vtt'){
-            <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+            <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userId"
                             [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
                             [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
@@ -92,7 +93,7 @@
        [class.empty]="rightTabs.length === 0"
        *ngIf="!isMobile || rightTabs.length > 0"
        (dragover)="onNativeTabDragOver($event)"
-       (drop)="onNativeTabDrop($event, 'right')">
+       (drop)="onNativeTabDrop($event, rightPaneId)">
 
     @if (rightTabs.length > 0) {
       <div class="tab-bar">
@@ -104,7 +105,7 @@
                (dragstart)="onNativeTabDragStart($event, tab)"
                (dragend)="onNativeTabDragEnd(tab)"
                (dragover)="onNativeTabDragOver($event)"
-               (drop)="onNativeTabDrop($event, 'right', tab)"
+               (drop)="onNativeTabDrop($event, rightPaneId, tab)"
                (click)="selectTab(tab)">
             <mat-icon class="tab-icon">{{ getAppIcon(tab.type) }}</mat-icon>
             <span class="tab-title">{{ tab.title }}</span>
@@ -136,7 +137,7 @@
             } @else if(tab.type ==='character'){
               <app-character-viewer [character]="tab.data"></app-character-viewer>
             } @else if (tab.type === 'vtt'){
-              <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userInfo._id"
+              <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userId"
                               [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
                               [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {

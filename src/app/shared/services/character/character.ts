@@ -3,15 +3,32 @@ import {BehaviorSubject, Observable} from 'rxjs';
 import {HttpClient} from '@angular/common/http';
 import {environment} from '../../../../environments/environment';
 import {ICharacter} from '../../models/user/character.model';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 @Injectable({
   providedIn: 'root',
 })
 export class CharacterService {
+  private static readonly activeCharacterStateKey = 'character:active';
+
   activeCharacter = new BehaviorSubject<ICharacter | null>(null);
   private readonly apiUrl = `${environment.apiURL}character`;
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private sharedWindowState: SharedWindowStateService
+  ) {
+    this.activeCharacter.next(
+      this.sharedWindowState.getSnapshot<ICharacter>(CharacterService.activeCharacterStateKey, null)
+    );
+
+    this.sharedWindowState.observe<ICharacter>(CharacterService.activeCharacterStateKey, null)
+      .subscribe(character => {
+        if (!this.isSameCharacter(this.activeCharacter.value, character)) {
+          this.activeCharacter.next(character);
+        }
+      });
+  }
 
   getMyCharacters(): Observable<ICharacter[]> {
     return this.http.get<ICharacter[]>(this.apiUrl, { withCredentials: true });
@@ -93,9 +110,15 @@ export class CharacterService {
 
   setActiveCharacter(characterData: ICharacter) {
     this.activeCharacter.next(characterData);
+    this.sharedWindowState.publish(CharacterService.activeCharacterStateKey, characterData);
     return characterData;
   }
   getActiveCharacterObservable(){
     return this.activeCharacter;
+  }
+
+  private isSameCharacter(first: ICharacter | null, second: ICharacter | null): boolean {
+    return (first?._id ?? null) === (second?._id ?? null) &&
+      JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
   }
 }

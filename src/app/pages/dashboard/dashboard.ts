@@ -1,4 +1,4 @@
-import {AfterViewInit, ChangeDetectorRef, Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild} from '@angular/core';
+import {AfterViewInit, ChangeDetectorRef, Component, ElementRef, HostListener, Input, OnDestroy, OnInit, ViewChild} from '@angular/core';
 import {MatButtonModule, MatIconButton} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
 import {CharacterService} from '../../shared/services/character/character';
@@ -19,6 +19,9 @@ import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 import {VttSync} from '../../shared/services/vttsync/vttsync';
 import {TauriTabPanelService} from '../../shared/services/tab/tauri-tab-panel.service';
 import {TabDragTransferService, type TabDragPayload} from '../../shared/services/tab/tab-drag-transfer.service';
+import {Subscription} from 'rxjs';
+import {AuthService} from '../../shared/services/auth/auth';
+import type {UnlistenFn} from '@tauri-apps/api/event';
 
 @Component({
   selector: 'app-dashboard',
@@ -41,6 +44,8 @@ import {TabDragTransferService, type TabDragPayload} from '../../shared/services
   styleUrl: './dashboard.scss',
 })
 export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
+  @Input() externalPanelId: string | null = null;
+
   @ViewChild('editorArea') private editorAreaRef?: ElementRef<HTMLElement>;
   @ViewChild('leftPane') private leftPaneRef?: ElementRef<HTMLElement>;
   @ViewChild('rightPane') private rightPaneRef?: ElementRef<HTMLElement>;
@@ -69,6 +74,12 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
   private suppressNextTabClick = false;
   private hasSeenActiveVttSession = false;
+  private readonly subscriptions = new Subscription();
+  private externalWindowCloseUnlisten?: UnlistenFn;
+  private hasSeenOwnedExternalTabs = false;
+  private closingExternalPanel = false;
+  private destroyingExternalWindow = false;
+  private movingTabToNewPanel = false;
 
   constructor(
     private tabService: TabService,
@@ -79,6 +90,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     private vttSync: VttSync,
     private tauriTabPanelService: TauriTabPanelService,
     private tabDragTransfer: TabDragTransferService,
+    private authService: AuthService,
     private cdr: ChangeDetectorRef,
     private dialog: MatDialog
   ) {
@@ -86,29 +98,42 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnInit() {
+    this.isMobile = this.shouldUseMobileLayout();
+    this.showSidePanel = !this.isExternalPanel && !this.isMobile;
     this.canUseTauriPanels = this.tauriTabPanelService.isAvailable();
 
-    this.tabService.tabs$.subscribe(tabs => {
+    this.subscriptions.add(this.tabService.tabs$.subscribe(tabs => {
       this.allTabs = tabs;
       this.updatePaneTabs();
-    });
+    }));
 
-    this.userService.getMe().subscribe(user => {
-      this.userInfo = user;
-      this.setupActiveCharacterListener();
-    });
+    this.userInfo = this.createFallbackUserInfo();
+    this.setupActiveCharacterListener();
 
-    this.channelService.getChannelObservable().subscribe((channel: any) => {
-      if (channel && channel._id) {
-        if (channel.type === 'obsidian') {
-          this.tabService.openTab(channel._id, channel.name, channel.type, 'left', { serverId: channel.server });
-        } else {
-          this.tabService.openTab(channel._id, channel.name, channel.type);
-        }
+    this.subscriptions.add(this.userService.getMe().subscribe({
+      next: user => {
+        this.userInfo = user;
+        this.ensureDefaultCharacter();
+      },
+      error: error => {
+        console.warn('Failed to load dashboard user info', error);
+        this.ensureDefaultCharacter();
       }
-    });
+    }));
 
-    this.videoService.vttSession$.subscribe(session => {
+    if (!this.isExternalPanel) {
+      this.subscriptions.add(this.channelService.getChannelObservable().subscribe((channel: any) => {
+        if (channel && channel._id) {
+          if (channel.type === 'obsidian') {
+            this.tabService.openTab(channel._id, channel.name, channel.type, this.leftPaneId, { serverId: channel.server });
+          } else {
+            this.tabService.openTab(channel._id, channel.name, channel.type, this.leftPaneId);
+          }
+        }
+      }));
+    }
+
+    this.subscriptions.add(this.videoService.vttSession$.subscribe(session => {
       if (session.active) {
         this.hasSeenActiveVttSession = true;
         return;
@@ -122,7 +147,9 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
           this.clearAllVttTabModes();
         }
       }
-    });
+    }));
+
+    void this.setupExternalWindowCloseHandler();
   }
 
   ngAfterViewInit() {
@@ -134,6 +161,8 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    this.subscriptions.unsubscribe();
+    this.externalWindowCloseUnlisten?.();
     this.resizeObserver?.disconnect();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -142,32 +171,62 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private updatePaneTabs() {
+    const viewTabs = this.getCurrentViewTabs();
+
     if (this.isMobile) {
-      this.leftTabs = this.allTabs;
+      this.leftTabs = viewTabs;
       this.rightTabs = [];
     } else {
-      this.leftTabs = this.allTabs.filter(t => t.pane === 'left');
-      this.rightTabs = this.allTabs.filter(t => t.pane === 'right');
+      this.leftTabs = this.allTabs.filter(t => t.pane === this.leftPaneId);
+      this.rightTabs = this.allTabs.filter(t => t.pane === this.rightPaneId);
     }
+    this.trackExternalPanelLifecycle(viewTabs);
     this.syncLayoutBounds();
     this.cdr.detectChanges();
   }
 
   private setupActiveCharacterListener() {
-    this.characterService.getActiveCharacterObservable().subscribe(character => {
-      if (!character && this.userInfo) {
-        this.activeCharacter = {
-          _id: this.userInfo._id || '0',
-          ownerId: this.userInfo._id,
-          name: this.userInfo.username || 'User',
-          baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
-          classes: []
-        };
-      } else if (character) {
+    this.subscriptions.add(this.characterService.getActiveCharacterObservable().subscribe(character => {
+      if (!character) {
+        this.setDefaultCharacter();
+      } else {
         this.activeCharacter = character;
         this.activeCharacterID = character._id === '0' ? undefined : character._id;
       }
-    });
+    }));
+  }
+
+  private createFallbackUserInfo() {
+    const userId = this.authService.getCurrentUserId();
+    if (!userId) return null;
+
+    return {
+      _id: userId,
+      id: userId,
+      username: 'User',
+      email: '',
+      profileIcon: ''
+    };
+  }
+
+  private ensureDefaultCharacter() {
+    if (!this.activeCharacter || this.activeCharacter._id === '0') {
+      this.setDefaultCharacter();
+    }
+  }
+
+  private setDefaultCharacter() {
+    if (!this.userInfo) return;
+
+    const userId = this.userInfo._id || this.userInfo.id || '0';
+    this.activeCharacter = {
+      _id: '0',
+      ownerId: userId,
+      name: this.userInfo.username || 'User',
+      baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
+      classes: []
+    };
+    this.activeCharacterID = undefined;
   }
 
   startResizing(event: MouseEvent) {
@@ -196,10 +255,10 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   @HostListener('window:resize', ['$event'])
   onResize(event: any) {
     const wasMobile = this.isMobile;
-    this.isMobile = window.innerWidth <= 768;
+    this.isMobile = this.shouldUseMobileLayout();
     this.syncLayoutBounds();
     if (wasMobile !== this.isMobile) {
-      this.showSidePanel = !this.isMobile;
+      this.showSidePanel = !this.isExternalPanel && !this.isMobile;
       if (this.isMobile) {
         this.isSidePanelCollapsed = false;
       }
@@ -208,6 +267,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   toggleSidePanel() {
+    if (this.isExternalPanel) return;
     this.showSidePanel = !this.showSidePanel;
   }
 
@@ -218,6 +278,11 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   onSidePanelCollapsedChange(collapsed: boolean) {
+    if (this.isExternalPanel) {
+      this.isSidePanelCollapsed = false;
+      return;
+    }
+
     if (this.isMobile) {
       this.isSidePanelCollapsed = false;
       return;
@@ -251,12 +316,23 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     }
 
     const previousPane = tab.pane;
-    const panel = this.tabService.createPanelFromTab(tab.id);
-    if (!panel) return;
+    if (this.isExternalPanel) {
+      this.movingTabToNewPanel = true;
+    }
 
-    const opened = await this.tauriTabPanelService.openPanel(panel);
-    if (!opened) {
-      this.tabService.moveTab(tab.id, previousPane);
+    try {
+      const panel = this.tabService.createPanelFromTab(tab.id);
+      if (!panel) return;
+
+      const opened = await this.tauriTabPanelService.openPanel(panel);
+      if (!opened) {
+        this.tabService.moveTab(tab.id, previousPane);
+      }
+    } finally {
+      if (this.isExternalPanel) {
+        this.movingTabToNewPanel = false;
+        this.closeExternalWindowIfEmpty();
+      }
     }
   }
 
@@ -352,7 +428,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   onHostVtt(channelId: string) {
     this.vttHostSessionId = channelId;
     this.vttJoinSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? 'left' : 'right', {
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? this.leftPaneId : this.rightPaneId, {
       vttSessionMode: 'host',
       vttSessionRoomId: channelId
     });
@@ -361,7 +437,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   onJoinVtt(channelId: string) {
     this.vttJoinSessionId = channelId;
     this.vttHostSessionId = null;
-    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? 'left' : 'right', {
+    this.tabService.openTab(channelId, 'VTT Session', 'vtt', this.isMobile ? this.leftPaneId : this.rightPaneId, {
       vttSessionMode: 'join',
       vttSessionRoomId: channelId
     });
@@ -450,6 +526,22 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     return `${this.leftWidth}px`;
   }
 
+  get isExternalPanel(): boolean {
+    return !!this.externalPanelId;
+  }
+
+  get leftPaneId(): TabPane {
+    return this.externalPanelId ?? 'left';
+  }
+
+  get rightPaneId(): TabPane {
+    return this.externalPanelId ? TabService.getPanelSecondaryPaneId(this.externalPanelId) : 'right';
+  }
+
+  get userId(): string {
+    return this.userInfo?._id ?? this.userInfo?.id ?? '0';
+  }
+
   private scheduleLeftWidthUpdate(pointerClientX: number) {
     this.pendingLeftWidth = this.resolveLeftWidthFromPointer(pointerClientX);
     if (this.pendingLeftWidth === null || this.animationFrameId !== null) {
@@ -518,13 +610,13 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private clearAllVttTabModes() {
-    this.allTabs
+    this.getCurrentViewTabs()
       .filter(tab => tab.type === 'vtt' && tab.data?.vttSessionMode)
       .forEach(tab => this.clearVttTabMode(tab.id));
   }
 
   private clearVttTabMode(channelId: string) {
-    const tab = this.allTabs.find(currentTab => currentTab.id === channelId && currentTab.type === 'vtt');
+    const tab = this.getCurrentViewTabs().find(currentTab => currentTab.id === channelId && currentTab.type === 'vtt');
     if (!tab?.data?.vttSessionMode) return;
 
     this.tabService.updateTab(channelId, {
@@ -568,15 +660,84 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private resolvePaneFromDropPoint(event: DragEvent): TabPane {
     if (this.isMobile) {
-      return 'left';
+      return this.leftPaneId;
     }
 
     const rightRect = this.rightPaneRef?.nativeElement.getBoundingClientRect();
     if (rightRect && event.clientX >= rightRect.left && event.clientX <= rightRect.right) {
-      return 'right';
+      return this.rightPaneId;
     }
 
-    return 'left';
+    return this.leftPaneId;
+  }
+
+  private getCurrentViewTabs(): Tab[] {
+    return this.allTabs.filter(tab => this.isPaneInCurrentDashboard(tab.pane));
+  }
+
+  private isPaneInCurrentDashboard(pane: TabPane): boolean {
+    if (this.externalPanelId) {
+      return TabService.panelOwnsPane(this.externalPanelId, pane);
+    }
+
+    return pane === 'left' || pane === 'right';
+  }
+
+  private shouldUseMobileLayout(): boolean {
+    return !this.isExternalPanel && window.innerWidth <= 768;
+  }
+
+  private trackExternalPanelLifecycle(viewTabs: Tab[]) {
+    if (!this.isExternalPanel) return;
+
+    if (viewTabs.length > 0) {
+      this.hasSeenOwnedExternalTabs = true;
+      return;
+    }
+
+    if (this.hasSeenOwnedExternalTabs && !this.movingTabToNewPanel) {
+      void this.destroyExternalWindow();
+    }
+  }
+
+  private closeExternalWindowIfEmpty() {
+    if (!this.isExternalPanel || this.getCurrentViewTabs().length > 0 || !this.hasSeenOwnedExternalTabs) {
+      return;
+    }
+
+    void this.destroyExternalWindow();
+  }
+
+  private async setupExternalWindowCloseHandler() {
+    const panelId = this.externalPanelId;
+    if (!panelId || !this.isTauriRuntime()) return;
+
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    this.externalWindowCloseUnlisten = await getCurrentWindow().onCloseRequested(event => {
+      if (this.closingExternalPanel || this.destroyingExternalWindow) return;
+
+      event.preventDefault();
+      this.closingExternalPanel = true;
+      this.tabService.closePanel(panelId);
+      void this.destroyExternalWindow();
+    });
+  }
+
+  private async destroyExternalWindow() {
+    if (!this.isExternalPanel || !this.isTauriRuntime() || this.destroyingExternalWindow) return;
+
+    this.destroyingExternalWindow = true;
+
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().destroy();
+    } catch (error) {
+      console.warn('Failed to destroy external dashboard window', error);
+    }
+  }
+
+  private isTauriRuntime(): boolean {
+    return typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
   }
 
   private hasDraggedFiles(event: DragEvent): boolean {

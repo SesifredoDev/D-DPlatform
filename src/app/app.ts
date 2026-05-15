@@ -1,14 +1,14 @@
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { ThemeService } from './shared/services/theme/theme.service';
-import { TabPanel } from './pages/dashboard/tab-panel/tab-panel';
+import { Dashboard } from './pages/dashboard/dashboard';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { DndSearchDrawer } from './shared/components/dnd-search-drawer/dnd-search-drawer';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, TabPanel, DndSearchDrawer],
+  imports: [RouterOutlet, Dashboard, DndSearchDrawer],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

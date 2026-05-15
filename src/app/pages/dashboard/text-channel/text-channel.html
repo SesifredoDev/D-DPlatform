@@ -2,7 +2,7 @@
   @if(showNewMessageIndicator){
     <div class="new-message-indicator" (click)="scrollToBottom(true)">
       <mat-icon>arrow_downward</mat-icon>
-      <span>New Messages Below</span>
+      <span>New messages</span>
     </div>
   }
 
@@ -34,20 +34,161 @@
                 <span class="timestamp">{{ msg.createdAt | date:'HH:mm' }}</span>
               </div>
 
-              <div class="message-text">
-                <markdown [data]="msg.content"></markdown>
-              </div>
+              @if(msg.content.trim()) {
+                <div class="message-text" (click)="handleMessageLinkClick($event)">
+                  <markdown [data]="msg.content"></markdown>
+                </div>
+              }
+
+              @let linkPreviews = getLinkPreviews(msg.content);
+              @if(linkPreviews.length > 0) {
+                <div class="link-previews">
+                  @for(preview of linkPreviews; track preview.url) {
+                    @if(preview.embedUrl) {
+                      <div
+                        class="link-preview-card playable-link-preview"
+                        [class.preview-portrait]="preview.embedAspect === 'portrait'"
+                        [class.preview-square]="preview.embedAspect === 'square'">
+                        <div class="preview-media-frame">
+                          <iframe
+                            [src]="preview.embedUrl"
+                            [title]="preview.title"
+                            loading="lazy"
+                            referrerpolicy="strict-origin-when-cross-origin"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowfullscreen>
+                          </iframe>
+                        </div>
+                        <a
+                          class="playable-preview-footer"
+                          [href]="preview.url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          (click)="openExternalUrl(preview.url, $event)">
+                          <span class="link-preview-meta">
+                            <span class="preview-host">{{ preview.host }}</span>
+                            <span class="preview-title">{{ preview.title }}</span>
+                            <span class="preview-description">{{ preview.description }}</span>
+                          </span>
+                          <mat-icon class="open-link-icon">open_in_new</mat-icon>
+                        </a>
+                      </div>
+                    } @else if(preview.type === 'video') {
+                      <div class="link-preview-card media-link-preview">
+                        <video controls preload="metadata" [src]="preview.url"></video>
+                        <a
+                          class="link-preview-meta"
+                          [href]="preview.url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          (click)="openExternalUrl(preview.url, $event)">
+                          <span class="preview-host">{{ preview.host }}</span>
+                          <span class="preview-title">{{ preview.title }}</span>
+                          <span class="preview-description">{{ preview.description }}</span>
+                        </a>
+                      </div>
+                    } @else if(preview.type === 'audio') {
+                      <div class="link-preview-card audio-link-preview">
+                        <div class="preview-icon-box">
+                          <mat-icon>{{ preview.icon }}</mat-icon>
+                        </div>
+                        <div class="audio-preview-body">
+                          <a
+                            class="link-preview-meta"
+                            [href]="preview.url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            (click)="openExternalUrl(preview.url, $event)">
+                            <span class="preview-host">{{ preview.host }}</span>
+                            <span class="preview-title">{{ preview.title }}</span>
+                          </a>
+                          <audio controls preload="metadata" [src]="preview.url"></audio>
+                        </div>
+                      </div>
+                    } @else {
+                      <a
+                        class="link-preview-card"
+                        [href]="preview.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        (click)="openExternalUrl(preview.url, $event)">
+                        @if(preview.imageUrl) {
+                          <img [src]="preview.imageUrl" [alt]="preview.title" class="preview-image">
+                        } @else {
+                          <div class="preview-icon-box">
+                            <mat-icon>{{ preview.icon }}</mat-icon>
+                          </div>
+                        }
+                        <span class="link-preview-meta">
+                          <span class="preview-host">{{ preview.host }}</span>
+                          <span class="preview-title">{{ preview.title }}</span>
+                          <span class="preview-description">{{ preview.description }}</span>
+                          <span class="preview-url">{{ preview.displayUrl }}</span>
+                        </span>
+                        <mat-icon class="open-link-icon">open_in_new</mat-icon>
+                      </a>
+                    }
+                  }
+                </div>
+              }
 
               @if(msg.attachments && msg.attachments.length > 0) {
                 <div class="message-attachments">
                   @for(att of msg.attachments; track att.url) {
                     <div class="attachment-item">
-                      @if(att.contentType?.startsWith('image/')) {
-                        <img [src]="att.url" [alt]="att.name" class="attachment-image">
+                      @if(isImageAttachment(att)) {
+                        <a
+                          [href]="att.url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="attachment-image-link"
+                          (click)="openExternalUrl(att.url, $event)">
+                          <img [src]="att.url" [alt]="getAttachmentDisplayName(att)" class="attachment-image">
+                        </a>
+                      } @else if(isVideoAttachment(att)) {
+                        <div class="attachment-media attachment-video">
+                          <video controls preload="metadata" [src]="att.url"></video>
+                          <a
+                            [href]="att.url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="attachment-caption"
+                            (click)="openExternalUrl(att.url, $event)">
+                            <mat-icon>movie</mat-icon>
+                            <span>{{ getAttachmentDisplayName(att) }}</span>
+                          </a>
+                        </div>
+                      } @else if(isAudioAttachment(att)) {
+                        <div class="attachment-media attachment-audio">
+                          <div class="attachment-audio-header">
+                            <mat-icon>graphic_eq</mat-icon>
+                            <div>
+                              <span>{{ getAttachmentDisplayName(att) }}</span>
+                              <small>{{ formatAttachmentType(att) }}</small>
+                            </div>
+                          </div>
+                          <audio controls preload="metadata" [src]="att.url"></audio>
+                          <a
+                            [href]="att.url"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="attachment-caption"
+                            (click)="openExternalUrl(att.url, $event)">
+                            Open audio
+                          </a>
+                        </div>
                       } @else {
-                        <a [href]="att.url" target="_blank" class="attachment-file">
+                        <a
+                          [href]="att.url"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="attachment-file"
+                          (click)="openExternalUrl(att.url, $event)">
                           <mat-icon>insert_drive_file</mat-icon>
-                          <span>{{ att.name }}</span>
+                          <span class="attachment-file-copy">
+                            <span>{{ getAttachmentDisplayName(att) }}</span>
+                            <small>{{ formatAttachmentType(att) }}</small>
+                          </span>
                         </a>
                       }
                     </div>
@@ -68,16 +209,14 @@
             </div>
 
             <div class="message-actions">
-              <button mat-icon-button class="action-btn" [matMenuTriggerFor]="emojiMenu" matTooltip="Add Reaction">
+              <button mat-icon-button class="action-btn" [matMenuTriggerFor]="emojiMenu" matTooltip="Add reaction">
                 <mat-icon>add_reaction</mat-icon>
               </button>
               <mat-menu #emojiMenu="matMenu">
                 <div class="emoji-picker-mini">
-                  <button mat-menu-item (click)="addReaction(msg._id, '👍')">👍</button>
-                  <button mat-menu-item (click)="addReaction(msg._id, '❤️')">❤️</button>
-                  <button mat-menu-item (click)="addReaction(msg._id, '😂')">😂</button>
-                  <button mat-menu-item (click)="addReaction(msg._id, '😮')">😮</button>
-                  <button mat-menu-item (click)="addReaction(msg._id, '😢')">😢</button>
+                  @for(emoji of quickReactions; track emoji) {
+                    <button mat-menu-item (click)="addReaction(msg._id, emoji)">{{ emoji }}</button>
+                  }
                 </div>
               </mat-menu>
               <button mat-icon-button class="action-btn" (click)="setReply(msg)" matTooltip="Reply">
@@ -91,67 +230,111 @@
           <div class="empty-icon-wrapper">
             <mat-icon>forum</mat-icon>
           </div>
-          <h3>Welcome to the Chronicle</h3>
-          <p>This is the start of your adventure. Scribe your first message below.</p>
+          <h3>No messages yet</h3>
+          <p>Start the conversation below.</p>
         </div>
       }
     </div>
   </div>
 
   <div class="input-container">
-    @if(attachments.length > 0) {
-      <div class="attachment-preview-strip">
-        @for(att of attachments; track att.url; let i = $index) {
-          <div class="attachment-preview">
-             <mat-icon>insert_drive_file</mat-icon>
-             <span>{{ att.name }}</span>
-             <button mat-icon-button (click)="removeAttachment(i)"><mat-icon>close</mat-icon></button>
-          </div>
-        }
-      </div>
-    }
+    <div class="composer-panel" [class.composer-disabled]="!canSendMessages">
+      <input type="file" #fileInput class="file-input" multiple (change)="onFileSelected($event)">
 
-    @if(replyingTo) {
-      <div class="reply-preview">
-        <span>Replying to <strong>{{ replyingTo.character?.name || replyingTo.author?.username }}</strong></span>
-        <button mat-icon-button (click)="cancelReply()"><mat-icon>close</mat-icon></button>
-      </div>
-    }
+      @if(replyingTo) {
+        <div class="reply-preview">
+          <mat-icon>reply</mat-icon>
+          <span>Replying to <strong>{{ replyingTo.character?.name || replyingTo.author?.username }}</strong></span>
+          <button mat-icon-button (click)="cancelReply()" aria-label="Cancel reply" matTooltip="Cancel reply">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      }
 
-    @if(sendError) {
-      <div class="send-error">
-        <mat-icon>error</mat-icon>
-        <span>{{ sendError }}</span>
-      </div>
-    }
+      @if(sendError) {
+        <div class="send-error">
+          <mat-icon>error</mat-icon>
+          <span>{{ sendError }}</span>
+        </div>
+      }
 
-    <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
-      <textarea
-        #messageInput
-        [placeholder]="canSendMessages ? 'Scribe a message to the chronicle...' : 'You can read this channel, but cannot send messages.'"
-        [(ngModel)]="newMessageContent"
-        (keydown)="handleKeyDown($event)"
-        [disabled]="!canSendMessages"
-        cdkTextareaAutosize
-        #autosize="cdkTextareaAutosize"
-        cdkAutosizeMinRows="1"
-        cdkAutosizeMaxRows="10">
-      </textarea>
+      @if(attachments.length > 0 || isUploading) {
+        <div class="attachment-preview-strip">
+          @for(att of attachments; track att.url; let i = $index) {
+            <div class="attachment-preview">
+              @if(isImageAttachment(att)) {
+                <img
+                  [src]="att.url"
+                  [alt]="getAttachmentDisplayName(att)"
+                  class="attachment-preview-thumb">
+              } @else {
+                <mat-icon>{{ getAttachmentIcon(att) }}</mat-icon>
+              }
+              <span class="attachment-preview-copy">
+                <span>{{ getAttachmentDisplayName(att) }}</span>
+                <small>{{ formatAttachmentType(att) }}</small>
+              </span>
+              <button
+                mat-icon-button
+                (click)="removeAttachment(i)"
+                aria-label="Remove attachment"
+                matTooltip="Remove attachment">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+          }
+          @if(isUploading) {
+            <div class="attachment-preview uploading-preview">
+              <mat-icon class="upload-spinner">sync</mat-icon>
+              <span class="attachment-preview-copy">
+                <span>Uploading attachment</span>
+                <small>{{ uploadProgress }}%</small>
+              </span>
+              <span class="upload-progress-track">
+                <span [style.width.%]="uploadProgress"></span>
+              </span>
+            </div>
+          }
+        </div>
+      }
 
-      <div class="input-actions">
-        <button mat-icon-button class="action-btn" (click)="fileInput.click()" [disabled]="isUploading || !canSendMessages">
-          <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
-        </button>
-        <input type="file" #fileInput style="display: none" (change)="onFileSelected($event)">
-
+      <div class="input-box" [class.has-reply]="replyingTo" [class.has-attachments]="attachments.length > 0">
         <button
           mat-icon-button
-          class="send-btn"
-          (click)="sendMessage()"
-          [disabled]="(!newMessageContent.trim() && attachments.length === 0) || isUploading || !canSendMessages"
-          [class.can-send]="newMessageContent.trim() || attachments.length > 0">
-          <mat-icon>send</mat-icon>
+          class="action-btn composer-action attach-action"
+          (click)="fileInput.click()"
+          [disabled]="isUploading || !canSendMessages"
+          aria-label="Attach files"
+          matTooltip="Attach files">
+          <mat-icon>{{ isUploading ? 'sync' : 'attach_file' }}</mat-icon>
         </button>
+
+        <textarea
+          #messageInput
+          [placeholder]="canSendMessages ? 'Message this channel...' : 'You can read this channel, but cannot send messages.'"
+          [(ngModel)]="newMessageContent"
+          (keydown)="handleKeyDown($event)"
+          [disabled]="!canSendMessages"
+          aria-label="Message this channel"
+          spellcheck="true"
+          cdkTextareaAutosize
+          #autosize="cdkTextareaAutosize"
+          cdkAutosizeMinRows="1"
+          cdkAutosizeMaxRows="8">
+        </textarea>
+
+        <div class="input-actions">
+          <button
+            mat-icon-button
+            class="send-btn"
+            (click)="sendMessage()"
+            [disabled]="(!newMessageContent.trim() && attachments.length === 0) || isUploading || !canSendMessages"
+            [class.can-send]="newMessageContent.trim() || attachments.length > 0"
+            aria-label="Send message"
+            matTooltip="Send message">
+            <mat-icon>send</mat-icon>
+          </button>
+        </div>
       </div>
     </div>
   </div>

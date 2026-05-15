@@ -4,6 +4,7 @@ import { BehaviorSubject, firstValueFrom, interval, Subscription, of, Subject, O
 import { startWith, switchMap, catchError, map, tap } from 'rxjs/operators';
 
 import {environment} from '../../../../environments/environment';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 declare global {
   interface Window { onSpotifyWebPlaybackSDKReady: () => void; Spotify: any; }
@@ -45,8 +46,16 @@ interface SpotifyRefreshResponse {
   refresh_token?: string;
 }
 
+interface SpotifyTokenState {
+  accessToken: string | null;
+  refreshToken: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SpotifyService {
+  private static readonly tokensStateKey = 'spotify:tokens';
+  private static readonly pinnedItemsStateKey = 'spotify:pinned-items';
+
   private player: any;
   private sdkDeviceId: string | null = null;
   private accessToken: string | null = null;
@@ -81,9 +90,24 @@ export class SpotifyService {
   private readonly API_BASE = 'https://api.spotify.com/v1';
   private readonly BACKEND_API = `${environment.apiURL}`;
 
-  constructor(private http: HttpClient) {
-    this.accessToken = this.getStoredToken('spotify_access_token');
+  constructor(
+    private http: HttpClient,
+    private sharedWindowState: SharedWindowStateService
+  ) {
+    const sharedTokens = this.sharedWindowState.getSnapshot<SpotifyTokenState>(SpotifyService.tokensStateKey, null);
+    this.accessToken = sharedTokens?.accessToken ?? this.getStoredToken('spotify_access_token');
+    if (sharedTokens?.refreshToken) {
+      localStorage.setItem('spotify_refresh_token', sharedTokens.refreshToken);
+    }
+    if (!sharedTokens?.accessToken && this.accessToken) {
+      this.sharedWindowState.publish(SpotifyService.tokensStateKey, {
+        accessToken: this.accessToken,
+        refreshToken: this.getStoredToken('spotify_refresh_token')
+      });
+    }
+
     this.loadPinned();
+    this.setupSharedWindowState();
     if (this.accessToken) {
       this.isAuthorized$.next(true);
       this.initSDK();
@@ -138,6 +162,11 @@ export class SpotifyService {
     if (refreshToken) {
       localStorage.setItem('spotify_refresh_token', refreshToken);
     }
+
+    this.sharedWindowState.publish(SpotifyService.tokensStateKey, {
+      accessToken,
+      refreshToken: refreshToken ?? this.getStoredToken('spotify_refresh_token')
+    });
   }
 
   private getStoredToken(key: string): string | null {
@@ -155,6 +184,10 @@ export class SpotifyService {
   }
 
   logout() {
+    this.applyLoggedOutState(true);
+  }
+
+  private applyLoggedOutState(broadcast: boolean) {
     this.stopPolling();
     this.killPlayer();
     this.accessToken = null;
@@ -168,6 +201,10 @@ export class SpotifyService {
     this.savedPlaylists$.next([]);
     this.recentPlays$.next([]);
     this.queue$.next([]);
+
+    if (broadcast) {
+      this.sharedWindowState.publish(SpotifyService.tokensStateKey, null);
+    }
   }
 
   private startPolling() {
@@ -288,8 +325,13 @@ export class SpotifyService {
   }
 
   private loadPinned() {
-    const pinned = JSON.parse(localStorage.getItem('spotify_pinned_items') || '[]');
+    const sharedPinned = this.sharedWindowState.getSnapshot<any[]>(SpotifyService.pinnedItemsStateKey, null);
+    const storedPinned = localStorage.getItem('spotify_pinned_items');
+    const pinned = sharedPinned ?? JSON.parse(storedPinned || '[]');
     this.pinnedItems$.next(pinned);
+    if (!sharedPinned && storedPinned) {
+      this.sharedWindowState.publish(SpotifyService.pinnedItemsStateKey, pinned);
+    }
   }
 
   togglePin(item: any) {
@@ -310,6 +352,7 @@ export class SpotifyService {
     }
     this.pinnedItems$.next(updated);
     localStorage.setItem('spotify_pinned_items', JSON.stringify(updated));
+    this.sharedWindowState.publish(SpotifyService.pinnedItemsStateKey, updated);
   }
 
   isPinned(uri: string): boolean {
@@ -345,6 +388,43 @@ export class SpotifyService {
       document.body.appendChild(script);
     }
     window.onSpotifyWebPlaybackSDKReady = () => this.setupPlayer();
+  }
+
+  private setupSharedWindowState() {
+    this.sharedWindowState.observe<SpotifyTokenState>(SpotifyService.tokensStateKey, null)
+      .subscribe(tokens => {
+        if (tokens?.accessToken) {
+          if (this.accessToken === tokens.accessToken) return;
+
+          this.accessToken = tokens.accessToken;
+          localStorage.setItem('spotify_access_token', tokens.accessToken);
+          if (tokens.refreshToken) {
+            localStorage.setItem('spotify_refresh_token', tokens.refreshToken);
+          }
+
+          this.isAuthorized$.next(true);
+          this.error$.next(null);
+          this.initSDK();
+          this.startPolling();
+          this.loadUserData();
+          return;
+        }
+
+        if (this.accessToken) {
+          this.applyLoggedOutState(false);
+        }
+      });
+
+    this.sharedWindowState.observe<any[]>(SpotifyService.pinnedItemsStateKey, this.pinnedItems$.value)
+      .subscribe(items => {
+        const nextItems = items ?? [];
+        if (JSON.stringify(this.pinnedItems$.value) === JSON.stringify(nextItems)) {
+          return;
+        }
+
+        this.pinnedItems$.next(nextItems);
+        localStorage.setItem('spotify_pinned_items', JSON.stringify(nextItems));
+      });
   }
 
   private setupPlayer() {

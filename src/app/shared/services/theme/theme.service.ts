@@ -1,6 +1,7 @@
 import { Injectable, Renderer2, RendererFactory2 } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import type { IServerTheme } from '../../models/server/server.model';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 export interface ThemeColors {
   primary: string;
@@ -98,6 +99,9 @@ function normalizeThemeBackgroundImage(value: unknown): string | null {
   providedIn: 'root'
 })
 export class ThemeService {
+  private static readonly colorsStateKey = 'theme:colors';
+  private static readonly pinnedThemesStateKey = 'theme:pinned';
+
   private renderer: Renderer2;
   private _savedColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
 
@@ -107,14 +111,22 @@ export class ThemeService {
   private _pinnedThemes = new BehaviorSubject<PinnedTheme[]>([]);
   pinnedThemes$ = this._pinnedThemes.asObservable();
 
-  constructor(rendererFactory: RendererFactory2) {
+  constructor(
+    rendererFactory: RendererFactory2,
+    private sharedWindowState: SharedWindowStateService
+  ) {
     this.renderer = rendererFactory.createRenderer(null, null);
+    const sharedColors = this.sharedWindowState.getSnapshot<ThemeColors>(ThemeService.colorsStateKey, null);
+    if (sharedColors) {
+      this._savedColors = this.normalizeThemeColors(sharedColors);
+    }
+
     this.loadPinnedThemes();
-    // Always start with factory defaults on refresh/load
-    this.applyTheme(DEFAULT_THEME_COLORS, true);
+    this.applyTheme(sharedColors ?? DEFAULT_THEME_COLORS, true, false);
+    this.setupSharedThemeState();
   }
 
-  applyTheme(colors: ThemeColors, save: boolean = false) {
+  applyTheme(colors: ThemeColors, save: boolean = false, broadcast: boolean = true) {
     const normalizedColors = this.normalizeThemeColors(colors);
 
     if (save) {
@@ -157,6 +169,10 @@ export class ThemeService {
     document.body.style.backgroundColor = normalizedColors.background;
     document.body.style.color = normalizedColors.textColor ?? DEFAULT_SERVER_THEME.textColor;
     document.body.style.fontFamily = normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily;
+
+    if (broadcast) {
+      this.sharedWindowState.publish(ThemeService.colorsStateKey, normalizedColors);
+    }
   }
 
   applyServerTheme(theme: Partial<IServerTheme> | null | undefined) {
@@ -182,10 +198,18 @@ export class ThemeService {
   // --- PINNED THEMES LOGIC ---
 
   private loadPinnedThemes() {
+    const sharedPinnedThemes = this.sharedWindowState.getSnapshot<PinnedTheme[]>(ThemeService.pinnedThemesStateKey, null);
+    if (sharedPinnedThemes) {
+      this._pinnedThemes.next(sharedPinnedThemes);
+      return;
+    }
+
     const saved = localStorage.getItem('app-pinned-themes');
     if (saved) {
       try {
-        this._pinnedThemes.next(JSON.parse(saved));
+        const pinnedThemes = JSON.parse(saved);
+        this._pinnedThemes.next(pinnedThemes);
+        this.sharedWindowState.publish(ThemeService.pinnedThemesStateKey, pinnedThemes);
       } catch (e) {
         this._pinnedThemes.next([]);
       }
@@ -202,12 +226,34 @@ export class ThemeService {
     const updated = [...current, newTheme];
     this._pinnedThemes.next(updated);
     localStorage.setItem('app-pinned-themes', JSON.stringify(updated));
+    this.sharedWindowState.publish(ThemeService.pinnedThemesStateKey, updated);
   }
 
   removePinnedTheme(id: string) {
     const updated = this._pinnedThemes.value.filter(t => t.id !== id);
     this._pinnedThemes.next(updated);
     localStorage.setItem('app-pinned-themes', JSON.stringify(updated));
+    this.sharedWindowState.publish(ThemeService.pinnedThemesStateKey, updated);
+  }
+
+  private setupSharedThemeState() {
+    this.sharedWindowState.observe<ThemeColors>(ThemeService.colorsStateKey, this._savedColors)
+      .subscribe(colors => {
+        if (colors && !this.isSameState(this._colors.value, colors)) {
+          this.applyTheme(colors, true, false);
+        }
+      });
+
+    this.sharedWindowState.observe<PinnedTheme[]>(ThemeService.pinnedThemesStateKey, this._pinnedThemes.value)
+      .subscribe(themes => {
+        const nextThemes = themes ?? [];
+        if (this.isSameState(this._pinnedThemes.value, nextThemes)) {
+          return;
+        }
+
+        this._pinnedThemes.next(nextThemes);
+        localStorage.setItem('app-pinned-themes', JSON.stringify(nextThemes));
+      });
   }
 
   private hexToRgb(hex: string): { r: number, g: number, b: number } {
@@ -275,5 +321,9 @@ export class ThemeService {
     }
 
     return `url("${imageUrl.replace(/"/g, '\\"')}")`;
+  }
+
+  private isSameState(first: unknown, second: unknown): boolean {
+    return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
   }
 }

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { io, Socket } from 'socket.io-client';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, finalize, map, of, tap } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
 import { UserService } from '../user/user';
@@ -41,6 +41,8 @@ export class Message {
   private socket: Socket;
   private channelMessages = new Map<string, BehaviorSubject<MessageData[]>>();
   private joinedChannels = new Set<string>();
+  private olderHistoryLoading = new Set<string>();
+  private olderHistoryExhausted = new Set<string>();
   private socketAuthReady = false;
 
   constructor(private http: HttpClient, private userService: UserService) {
@@ -105,6 +107,8 @@ export class Message {
     if (!this.channelMessages.has(channelId)) {
       this.channelMessages.set(channelId, new BehaviorSubject<MessageData[]>([]));
     }
+    this.olderHistoryLoading.delete(channelId);
+    this.olderHistoryExhausted.delete(channelId);
 
     this.joinedChannels.add(channelId);
 
@@ -129,12 +133,53 @@ export class Message {
     this.socket.emit('leave_channel', channelId);
     this.joinedChannels.delete(channelId);
     this.channelMessages.delete(channelId);
+    this.olderHistoryLoading.delete(channelId);
+    this.olderHistoryExhausted.delete(channelId);
   }
 
-  getHistory(channelId: string) {
+  getHistory(channelId: string, before?: string) {
+    let params = new HttpParams();
+    if (before) {
+      params = params.set('before', before);
+    }
+
     return this.http.get<MessageData[]>(`${environment.apiURL}message/${channelId}`, {
+      params,
       withCredentials: true
     });
+  }
+
+  loadOlderMessages(channelId: string): Observable<MessageData[]> {
+    const subject = this.channelMessages.get(channelId);
+    if (!subject || this.olderHistoryLoading.has(channelId) || this.olderHistoryExhausted.has(channelId)) {
+      return of([]);
+    }
+
+    const oldestMessage = subject.value[0];
+    if (!oldestMessage?.createdAt) {
+      this.olderHistoryExhausted.add(channelId);
+      return of([]);
+    }
+
+    this.olderHistoryLoading.add(channelId);
+
+    return this.getHistory(channelId, oldestMessage.createdAt).pipe(
+      map(history => history.map(message => this.normalizeMessage(message)).reverse()),
+      tap(olderMessages => {
+        if (olderMessages.length === 0) {
+          this.olderHistoryExhausted.add(channelId);
+          return;
+        }
+
+        const currentMessages = subject.value;
+        const existingIds = new Set(currentMessages.map(message => message._id));
+        const uniqueOlderMessages = olderMessages.filter(message => !existingIds.has(message._id));
+        subject.next([...uniqueOlderMessages, ...currentMessages]);
+      }),
+      finalize(() => {
+        this.olderHistoryLoading.delete(channelId);
+      })
+    );
   }
 
   sendMessage(channelId: string, content: string, characterId?: string, attachments?: Attachment[], replyTo?: string, isWhisper?: boolean, recipientId?: string) {

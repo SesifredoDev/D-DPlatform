@@ -301,9 +301,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.unsubscribe();
-    if (this.selectedServer) {
-      this.messagingSocketService.leaveServerRoom(this.selectedServer._id);
-    }
+    this.messagingSocketService.disconnect();
   }
 
 
@@ -485,26 +483,20 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     }
   }
 
-  onRightClickCharacter(event: MouseEvent, character: ICharacter) {
+  async onRightClickCharacter(event: MouseEvent, character: ICharacter) {
     event.preventDefault(); // Prevent browser context menu
     event.stopPropagation();
 
-    // 1. Check if we are actually in a VTT session
-    if (!this.vttSync.isConnected) {
-      console.warn('Cannot add token: No active VTT session.');
-      return;
-    }
+    const added = await this.vttSync.addCharacterTokenToActiveVtt(
+      character,
+      this.selectedServer?._id ?? null
+    );
 
-    // 2. Obtain the engine instance.
-    // If your engine is stored in a shared service or accessible via a getter:
-    const engine = this.vttSync.getEngine();
-
-    if (engine) {
-      // 3. Call the service method we built earlier
-      this.vttSync.addCharacterToken(engine, character);
+    if (added) {
       console.log(`Added ${character.name} to the map via right-click.`);
     } else {
-      console.error('VTT Engine not found. Is the map tab open?');
+      console.warn('Cannot add token: no active VTT map was found for this server.');
+      this.snackBar.open('Open or join the VTT map first.', 'OK', { duration: 2500 });
     }
   }
 

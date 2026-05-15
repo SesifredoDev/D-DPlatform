@@ -1,21 +1,47 @@
 import { Injectable } from '@angular/core';
+import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 
 const ACCESS_TOKEN_KEY = 'access_token';
+const ACCESS_TOKEN_STATE_KEY = 'auth:access-token';
 
 @Injectable({
   providedIn: 'root',
 })
 export class TokenService {
+  constructor(private sharedWindowState: SharedWindowStateService) {
+    const sharedToken = this.sharedWindowState.getSnapshot<string>(ACCESS_TOKEN_STATE_KEY, null);
+    if (sharedToken) {
+      localStorage.setItem(ACCESS_TOKEN_KEY, sharedToken);
+    } else {
+      const localToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+      if (localToken) {
+        this.sharedWindowState.publish(ACCESS_TOKEN_STATE_KEY, localToken);
+      }
+    }
+
+    this.sharedWindowState.observe<string>(ACCESS_TOKEN_STATE_KEY, null)
+      .subscribe(token => {
+        const currentToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+        if (token && token !== currentToken) {
+          localStorage.setItem(ACCESS_TOKEN_KEY, token);
+        } else if (!token && currentToken) {
+          localStorage.removeItem(ACCESS_TOKEN_KEY);
+        }
+      });
+  }
+
   getAccessToken(): string | null {
     return localStorage.getItem(ACCESS_TOKEN_KEY);
   }
 
   setAccessToken(token: string): void {
     localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    this.sharedWindowState.publish(ACCESS_TOKEN_STATE_KEY, token);
   }
 
   clear(): void {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
+    this.sharedWindowState.publish(ACCESS_TOKEN_STATE_KEY, null);
   }
 
   isLoggedIn(): boolean {
