@@ -225,6 +225,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Theme state
   activeColors: ThemeColors;
   pinnedThemes: PinnedTheme[] = [];
+  private themePickerBaselineColors: ThemeColors | null = null;
   private lastValidThemeBackgroundImage: string | null = null;
   private lastValidThemeBackgroundImageBlur = false;
 
@@ -1763,6 +1764,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return this.hasThemeBackgroundImage && this.activeColors.backgroundImageBlur === true;
   }
 
+  toggleThemePicker() {
+    if (this.showThemePicker) {
+      this.cancelTheme();
+      return;
+    }
+
+    this.themePickerBaselineColors = this.isServerOwner ? this.cloneThemeColors(this.activeColors) : null;
+    this.showThemePicker = true;
+  }
+
   updateThemeLocally(key: keyof ThemeColors, value: string | boolean | null) {
     this.applyThemeCandidate({ ...this.activeColors, [key]: value }, key === 'backgroundImage');
   }
@@ -1817,21 +1828,33 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (!this.safeSendThemeUpdate(this.activeColors)) {
       return;
     }
+    this.themePickerBaselineColors = null;
     this.showThemePicker = false;
   }
 
   cancelTheme() {
-    this.themeService.revertToSaved();
-    this.activeColors = this.themeService.getColors();
+    if (this.isServerOwner && this.themePickerBaselineColors) {
+      this.activeColors = this.cloneThemeColors(this.themePickerBaselineColors);
+      this.themeService.applyTheme(this.activeColors, false);
+      this.rememberValidThemeBackground(this.activeColors);
+    } else if (this.isServerOwner) {
+      this.themeService.revertToSaved();
+      this.activeColors = this.themeService.getColors();
+      this.rememberValidThemeBackground(this.activeColors);
+    }
+
+    this.themePickerBaselineColors = null;
     this.showThemePicker = false;
     this.showPinNaming = false;
   }
 
-  resetToFactory() {
-    this.activeColors = this.themeService.getFactoryColors();
+  resetToServerDefault() {
+    this.activeColors = this.themeService.getServerDefaultColors();
     this.themeService.applyTheme(this.activeColors, false);
     this.rememberValidThemeBackground(this.activeColors);
-    this.safeSendThemeUpdate(this.activeColors);
+    if (this.safeSendThemeUpdate(this.activeColors)) {
+      this.themePickerBaselineColors = this.cloneThemeColors(this.activeColors);
+    }
   }
 
   selectPinnedTheme(theme: PinnedTheme) {
@@ -1925,6 +1948,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     return `url("${imageUrl.replace(/"/g, '\\"')}")`;
+  }
+
+  private cloneThemeColors(colors: ThemeColors): ThemeColors {
+    return { ...colors };
   }
 
   private applyThemeCandidate(candidate: ThemeColors, showSizeError = false): boolean {

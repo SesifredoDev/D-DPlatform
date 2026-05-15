@@ -468,7 +468,7 @@
           </button>
 
           <!-- Custom Theme Picker Toggle -->
-          <button (click)="showThemePicker = !showThemePicker" class="btn-action" [class.active]="showThemePicker" matTooltip="Atmosphere Settings">
+          <button (click)="toggleThemePicker()" class="btn-action" [class.active]="showThemePicker" matTooltip="Atmosphere Settings">
             <mat-icon>palette</mat-icon>
           </button>
 
@@ -492,7 +492,7 @@
         <div class="overlay-header">
             <h3>Atmosphere</h3>
             <div class="header-actions">
-               <button class="btn-reset-factory" (click)="resetToFactory()" matTooltip="Reset to Default">
+               <button class="btn-reset-default" (click)="resetToServerDefault()" matTooltip="Reset to Default">
                   <mat-icon>settings_backup_restore</mat-icon>
                </button>
                <button class="btn-close" (click)="cancelTheme()">

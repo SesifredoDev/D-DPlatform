@@ -104,6 +104,7 @@ export class ThemeService {
 
   private renderer: Renderer2;
   private _savedColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
+  private _serverDefaultColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
 
   private _colors = new BehaviorSubject<ThemeColors>(this._savedColors);
   colors$ = this._colors.asObservable();
@@ -177,14 +178,18 @@ export class ThemeService {
 
   applyServerTheme(theme: Partial<IServerTheme> | null | undefined) {
     const normalizedTheme = normalizeServerTheme(theme);
-    this.applyTheme({
-      ...this._savedColors,
+
+    this._serverDefaultColors = this.normalizeThemeColors({
+      ...this._serverDefaultColors,
+      primary: this._savedColors.primary,
       background: normalizedTheme.backgroundColor,
       textColor: normalizedTheme.textColor,
       fontFamily: normalizedTheme.fontFamily,
       backgroundImage: normalizedTheme.backgroundImage,
       backgroundImageBlur: normalizedTheme.backgroundImageBlur
-    }, true);
+    });
+
+    this.applyTheme(this._serverDefaultColors, true);
   }
 
   revertToSaved() {
@@ -192,7 +197,7 @@ export class ThemeService {
   }
 
   resetToDefault() {
-    this.applyTheme(DEFAULT_THEME_COLORS, true);
+    this.applyTheme(this._serverDefaultColors, true);
   }
 
   // --- PINNED THEMES LOGIC ---
@@ -285,6 +290,10 @@ export class ThemeService {
 
   getFactoryColors(): ThemeColors {
     return { ...DEFAULT_THEME_COLORS };
+  }
+
+  getServerDefaultColors(): ThemeColors {
+    return { ...this._serverDefaultColors };
   }
 
   private normalizeThemeColors(colors: ThemeColors): ThemeColors {
