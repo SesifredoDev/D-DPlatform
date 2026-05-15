@@ -20,12 +20,38 @@ import {TabService} from '../../../shared/services/tab/tab-service';
 import {ServerService} from '../../../shared/services/server/server';
 
 type HostTakeoverChoice = 'take-control' | 'player';
-type FxShapeTool = 'polygon' | 'square' | 'circle' | 'erase';
+type FxShapeTool = 'polygon' | 'square' | 'circle' | 'cone' | 'erase';
+type TokenConfigTab = 'main' | 'style';
 type ActiveTool =
   'select' | 'draw' | 'delete' |
   'line' | 'radius' | 'cone' |
-  'fx-polygon' | 'fx-square' | 'fx-circle' | 'fx-erase' |
+  'fx-polygon' | 'fx-square' | 'fx-circle' | 'fx-cone' | 'fx-erase' |
   'none';
+
+interface TokenEffect {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface TokenEditConfig {
+  name: string;
+  icon: string | null;
+  iconFile: File | null;
+  size: number;
+  forceBorder: boolean;
+  borderColor: string;
+  color: string;
+  notes: string;
+  currentHealth: number | null;
+  maxHealth: number | null;
+  healthDelta: number;
+  effects: TokenEffect[];
+  newEffectName: string;
+  newEffectColor: string;
+}
+
+type TokenConfigPayload = Omit<TokenEditConfig, 'healthDelta' | 'newEffectName' | 'newEffectColor'>;
 
 @Component({
   selector: 'app-vtt-host-takeover-dialog',
@@ -96,6 +122,8 @@ export class VttHostTakeoverDialog {
   styleUrl: './vtt-canvas.scss',
 })
 export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
+  private static nextInstanceId = 0;
+
   @Input() serverId!: string;
   @Input() userId!: string;
   @Input() character!: ICharacter;
@@ -125,15 +153,10 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   // Context Menu State
   public menuTopLeftPosition = { x: '0px', y: '0px' };
   public selectedToken: any = null;
-  public tokenEditConfig: any = {
-    name: '',
-    icon: '',
-    iconFile: null,
-    size: 1,
-    forceBorder: false,
-    borderColor: '#ffffff',
-    color: '#ff0000'
-  };
+  public tokenEditConfig: TokenEditConfig = this.createEmptyTokenEditConfig();
+  public tokenConfigTab: TokenConfigTab = 'main';
+  public tokenIconPreviewUrl: string | null = null;
+  public isSavingTokenConfig = false;
 
   public colorPresets = [
     '#ff4444', '#ffbb33', '#00C851', '#33b5e5', '#2BBBAD', '#4285F4', '#aa66cc',
@@ -154,6 +177,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private declinedTakeoverHostId: string | null = null;
   private destroyed = false;
   private engineAttachmentId: string | null = null;
+  private readonly stageEventNamespace = `.vttCanvas${++VttCanvas.nextInstanceId}`;
+  private readonly tokenContextMenuHandler = (data: any) => this.onTokenContextMenu(data);
   private readonly maxContainerReadyFrames = 30;
   public playersCanControlAllPlayerTokens = false;
   public playersCanUseFx = false;
@@ -179,6 +204,20 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
   get canUseFx() {
     return !this.isInCurrentSession || this.syncService.isHosting || this.playersCanUseFx;
+  }
+  get canEditTokens() {
+    return !!this.engine?.isDM;
+  }
+  get tokenPreviewIcon() {
+    return this.tokenIconPreviewUrl || this.tokenEditConfig.icon || '';
+  }
+  get tokenHealthSummary() {
+    const currentHealth = this.normalizeTokenHealth(this.tokenEditConfig.currentHealth);
+    const maxHealth = this.normalizeTokenHealth(this.tokenEditConfig.maxHealth);
+
+    if (currentHealth === null && maxHealth === null) return 'Not tracked';
+    if (maxHealth === null) return `${currentHealth ?? 0} HP`;
+    return `${currentHealth ?? maxHealth}/${maxHealth} HP`;
   }
 
   constructor(
@@ -215,9 +254,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.engineAttachmentId = this.syncService.attachEngine(this.engine, this.serverId);
     this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
 
-    this.engine.stage.on('tokenContextMenu', (data: any) => {
-      this.onTokenContextMenu(data);
-    });
+    this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
+    this.engine.stage.on(`tokenContextMenu${this.stageEventNamespace}`, this.tokenContextMenuHandler);
 
     this.loadLibrary();
 
@@ -577,6 +615,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
   ngOnDestroy() {
     this.destroyed = true;
+    this.resetTokenEditorState();
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.hostDisconnectedSub) this.hostDisconnectedSub.unsubscribe();
     if (this.sessionEndedSub) this.sessionEndedSub.unsubscribe();
@@ -585,6 +624,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.playerFxPermissionSub) this.playerFxPermissionSub.unsubscribe();
     if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
     if (this.engine) {
+      this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
       this.syncService.detachEngine(this.engine, this.serverId, this.engineAttachmentId);
       this.engineAttachmentId = null;
     }
@@ -638,18 +678,45 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     return !!rect && rect.width > 0 && rect.height > 0;
   }
 
-  onTokenContextMenu({ token, evt }: any) {
-    if (!token.checkPermissions()) return;
+  private createEmptyTokenEditConfig(): TokenEditConfig {
+    return {
+      name: '',
+      icon: null,
+      iconFile: null,
+      size: 1,
+      forceBorder: false,
+      borderColor: '#ffffff',
+      color: '#ff0000',
+      notes: '',
+      currentHealth: null,
+      maxHealth: null,
+      healthDelta: 1,
+      effects: [],
+      newEffectName: '',
+      newEffectColor: '#ffeb3b'
+    };
+  }
 
+  onTokenContextMenu({ token, evt }: any) {
+    if (!this.canEditTokens) return;
+
+    this.resetTokenEditorState();
     this.selectedToken = token;
     this.tokenEditConfig = {
       name: token.name,
-      icon: token.imageUrl,
+      icon: this.normalizeTokenIcon(token.imageUrl),
       iconFile: null,
       size: token.size,
       forceBorder: token.forceBorder,
       borderColor: token.borderColor,
-      color: token.color
+      color: token.color,
+      notes: token.notes || '',
+      currentHealth: this.normalizeTokenHealth(token.currentHealth),
+      maxHealth: this.normalizeTokenHealth(token.maxHealth),
+      healthDelta: 1,
+      effects: this.normalizeTokenEffects(token.effects),
+      newEffectName: '',
+      newEffectColor: this.getNextTokenEffectColor(token.effects?.length ?? 0)
     };
 
     this.menuTopLeftPosition.x = evt.clientX + 'px';
@@ -657,33 +724,297 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.menuTrigger.openMenu();
   }
 
+  async onTokenConfigMenuClosed() {
+    if (this.isSavingTokenConfig) return;
+
+    if (!this.selectedToken || !this.canEditTokens) {
+      this.resetTokenEditorState();
+      return;
+    }
+
+    await this.saveTokenConfig({ closeMenu: false, resetOnFailure: true });
+  }
+
+  setTokenConfigTab(tab: TokenConfigTab) {
+    this.tokenConfigTab = tab;
+  }
+
   onTokenIconUpload(event: any) {
-    const file = event.target.files[0];
+    if (!this.canEditTokens || !this.selectedToken) return;
+
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
     if (!file) return;
 
-    this.tokenEditConfig.iconFile = file;
+    if (!file.type.startsWith('image/')) {
+      this.showVttMessage('Please choose an image file.');
+      return;
+    }
 
-    const reader = new FileReader();
-    reader.onload = (e: any) => {
-      this.tokenEditConfig.icon = e.target.result;
-    };
-    reader.readAsDataURL(file);
+    this.revokeTokenPreviewUrl();
+    this.tokenEditConfig.iconFile = file;
+    this.tokenIconPreviewUrl = URL.createObjectURL(file);
+  }
+
+  onTokenIconUrlChange() {
+    this.tokenEditConfig.iconFile = null;
+    this.revokeTokenPreviewUrl();
+  }
+
+  clearTokenIcon() {
+    if (!this.canEditTokens) return;
+
+    this.tokenEditConfig.iconFile = null;
+    this.tokenEditConfig.icon = null;
+    this.revokeTokenPreviewUrl();
   }
 
   async applyTokenConfig() {
-    if (this.selectedToken) {
+    await this.saveTokenConfig({ closeMenu: true, resetOnFailure: false });
+  }
+
+  private async saveTokenConfig({ closeMenu, resetOnFailure }: { closeMenu: boolean; resetOnFailure: boolean }) {
+    if (!this.selectedToken || !this.canEditTokens || this.isSavingTokenConfig) return;
+
+    this.isSavingTokenConfig = true;
+    let shouldResetEditor = resetOnFailure;
+
+    try {
       const tokenId = this.selectedToken.id;
-      const { iconFile, ...cleanConfig } = this.tokenEditConfig;
-      await this.syncService.updateToken(tokenId, cleanConfig, iconFile);
+      const { iconFile, ...cleanConfig } = this.buildTokenConfigPayload();
+      const updated = await this.syncService.updateToken(tokenId, cleanConfig, iconFile ?? undefined);
+
+      if (!updated) {
+        this.showVttMessage('Token update failed.');
+        return;
+      }
+
       this.tokenEditConfig.iconFile = null;
+      this.revokeTokenPreviewUrl();
+      shouldResetEditor = true;
+
+      if (closeMenu) {
+        this.menuTrigger.closeMenu();
+      }
+    } finally {
+      if (shouldResetEditor) {
+        this.resetTokenEditorState();
+      }
+
+      this.isSavingTokenConfig = false;
     }
   }
 
   deleteSelectedToken() {
-    if (this.selectedToken) {
-      const id = this.selectedToken.id;
-      this.engine.removeToken(id);
+    if (!this.selectedToken || !this.canEditTokens) return;
+
+    const id = this.selectedToken.id;
+    this.engine.removeToken(id);
+    this.revokeTokenPreviewUrl();
+    this.selectedToken = null;
+    this.menuTrigger.closeMenu();
+  }
+
+  duplicateSelectedToken() {
+    if (!this.selectedToken || !this.canEditTokens || this.isSavingTokenConfig) return;
+
+    const source = this.selectedToken;
+    const gridSize = this.engine?.gridSize || 50;
+    const sourceX = source.group?.x?.() ?? 100;
+    const sourceY = source.group?.y?.() ?? 100;
+    const sourceName = source.name?.trim() || 'Token';
+
+    this.engine.addToken(sourceX + gridSize, sourceY, {
+      id: crypto.randomUUID(),
+      name: `${sourceName} Copy`,
+      icon: source.imageUrl,
+      color: source.color,
+      ownerId: source.ownerId,
+      isPlayer: source.isPlayer,
+      size: source.size,
+      forceBorder: source.forceBorder,
+      borderColor: source.borderColor,
+      notes: source.notes,
+      currentHealth: source.currentHealth,
+      maxHealth: source.maxHealth,
+      effects: this.normalizeTokenEffects(source.effects)
+    });
+
+    this.menuTrigger.closeMenu();
+  }
+
+  adjustTokenHealth(direction: -1 | 1) {
+    if (this.isSavingTokenConfig) return;
+
+    const amount = this.normalizeTokenHealth(this.tokenEditConfig.healthDelta) ?? 0;
+    if (amount <= 0) return;
+
+    const maxHealth = this.normalizeTokenHealth(this.tokenEditConfig.maxHealth);
+    const currentHealth = this.normalizeTokenHealth(this.tokenEditConfig.currentHealth) ?? maxHealth ?? 0;
+    this.tokenEditConfig.currentHealth = this.clampTokenHealth(currentHealth + (amount * direction), maxHealth);
+  }
+
+  onTokenHealthInputChange() {
+    this.tokenEditConfig.currentHealth = this.normalizeTokenHealth(this.tokenEditConfig.currentHealth);
+    this.tokenEditConfig.maxHealth = this.normalizeTokenHealth(this.tokenEditConfig.maxHealth);
+    this.tokenEditConfig.healthDelta = this.normalizeTokenHealth(this.tokenEditConfig.healthDelta) ?? 1;
+
+    if (this.tokenEditConfig.healthDelta <= 0) {
+      this.tokenEditConfig.healthDelta = 1;
     }
+
+    if (this.tokenEditConfig.currentHealth !== null) {
+      this.tokenEditConfig.currentHealth = this.clampTokenHealth(
+        this.tokenEditConfig.currentHealth,
+        this.tokenEditConfig.maxHealth
+      );
+    }
+  }
+
+  addTokenEffect() {
+    if (this.isSavingTokenConfig) return;
+
+    const effect = this.createTokenEffect(this.tokenEditConfig.newEffectName, this.tokenEditConfig.newEffectColor);
+    if (!effect) return;
+
+    const effects = this.normalizeTokenEffects(this.tokenEditConfig.effects);
+    if (this.hasTokenEffectNamed(effects, effect.name)) {
+      this.showVttMessage('That effect is already on this token.');
+      return;
+    }
+
+    this.tokenEditConfig.effects = [...effects, effect].slice(0, 12);
+    this.tokenEditConfig.newEffectName = '';
+    this.tokenEditConfig.newEffectColor = this.getNextTokenEffectColor(this.tokenEditConfig.effects.length);
+  }
+
+  removeTokenEffect(effectId: string) {
+    if (this.isSavingTokenConfig) return;
+
+    this.tokenEditConfig.effects = this.normalizeTokenEffects(this.tokenEditConfig.effects)
+      .filter(effect => effect.id !== effectId);
+  }
+
+  private buildTokenConfigPayload(): TokenConfigPayload {
+    const maxHealth = this.normalizeTokenHealth(this.tokenEditConfig.maxHealth);
+    let currentHealth = this.normalizeTokenHealth(this.tokenEditConfig.currentHealth);
+    const effects = this.getTokenEffectsForSave();
+
+    if (currentHealth !== null) {
+      currentHealth = this.clampTokenHealth(currentHealth, maxHealth);
+    }
+
+    return {
+      name: this.tokenEditConfig.name?.trim() || 'Token',
+      icon: this.normalizeTokenIcon(this.tokenEditConfig.icon),
+      iconFile: this.tokenEditConfig.iconFile,
+      size: this.normalizeTokenSize(this.tokenEditConfig.size),
+      forceBorder: !!this.tokenEditConfig.forceBorder,
+      borderColor: this.tokenEditConfig.borderColor || '#ffffff',
+      color: this.tokenEditConfig.color || '#808080',
+      notes: this.tokenEditConfig.notes || '',
+      currentHealth,
+      maxHealth,
+      effects
+    };
+  }
+
+  private normalizeTokenIcon(icon: unknown): string | null {
+    if (typeof icon !== 'string') return null;
+
+    const trimmedIcon = icon.trim();
+    return trimmedIcon ? trimmedIcon : null;
+  }
+
+  private normalizeTokenSize(size: unknown): number {
+    const parsedSize = Number(size);
+    return Number.isFinite(parsedSize) && parsedSize > 0 ? parsedSize : 1;
+  }
+
+  private normalizeTokenHealth(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+
+    const parsedHealth = Number(value);
+    return Number.isFinite(parsedHealth) ? Math.max(0, Math.round(parsedHealth)) : null;
+  }
+
+  private getTokenEffectsForSave(): TokenEffect[] {
+    const effects = this.normalizeTokenEffects(this.tokenEditConfig.effects);
+    const pendingEffect = this.createTokenEffect(
+      this.tokenEditConfig.newEffectName,
+      this.tokenEditConfig.newEffectColor
+    );
+
+    if (!pendingEffect || this.hasTokenEffectNamed(effects, pendingEffect.name)) {
+      return effects;
+    }
+
+    return [...effects, pendingEffect].slice(0, 12);
+  }
+
+  private normalizeTokenEffects(effects: unknown): TokenEffect[] {
+    if (!Array.isArray(effects)) return [];
+
+    return effects
+      .map((effect, index) => this.createTokenEffect(
+        typeof effect === 'string' ? effect : (effect as Partial<TokenEffect>)?.name,
+        typeof effect === 'string' ? this.getNextTokenEffectColor(index) : (effect as Partial<TokenEffect>)?.color,
+        typeof effect === 'string' ? undefined : (effect as Partial<TokenEffect>)?.id,
+        index
+      ))
+      .filter((effect): effect is TokenEffect => !!effect)
+      .slice(0, 12);
+  }
+
+  private createTokenEffect(name: unknown, color: unknown, id?: unknown, fallbackIndex = 0): TokenEffect | null {
+    if (typeof name !== 'string') return null;
+
+    const trimmedName = name.trim();
+    if (!trimmedName) return null;
+
+    return {
+      id: typeof id === 'string' && id.trim() ? id.trim() : crypto.randomUUID(),
+      name: trimmedName,
+      color: this.normalizeTokenEffectColor(color, fallbackIndex)
+    };
+  }
+
+  private normalizeTokenEffectColor(color: unknown, fallbackIndex = 0): string {
+    if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color.trim())) {
+      return color.trim().toLowerCase();
+    }
+
+    return this.getNextTokenEffectColor(fallbackIndex);
+  }
+
+  private getNextTokenEffectColor(index: number): string {
+    const effectColors = ['#f44336', '#ff9800', '#ffeb3b', '#4caf50', '#2196f3', '#9c27b0'];
+    return effectColors[Math.max(0, index) % effectColors.length];
+  }
+
+  private hasTokenEffectNamed(effects: TokenEffect[], name: string): boolean {
+    const normalizedName = name.trim().toLowerCase();
+    return effects.some(effect => effect.name.trim().toLowerCase() === normalizedName);
+  }
+
+  private clampTokenHealth(value: number, maxHealth: number | null): number {
+    const nonNegativeValue = Math.max(0, Math.round(value));
+    return maxHealth === null ? nonNegativeValue : Math.min(nonNegativeValue, maxHealth);
+  }
+
+  private revokeTokenPreviewUrl() {
+    if (this.tokenIconPreviewUrl) {
+      URL.revokeObjectURL(this.tokenIconPreviewUrl);
+      this.tokenIconPreviewUrl = null;
+    }
+  }
+
+  private resetTokenEditorState() {
+    this.revokeTokenPreviewUrl();
+    this.selectedToken = null;
+    this.tokenConfigTab = 'main';
+    this.tokenEditConfig = this.createEmptyTokenEditConfig();
   }
 
   addToken() {
@@ -719,19 +1050,29 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
   }
 
-  setFxTool(tool: FxShapeTool) {
+  setFxTool(tool: FxShapeTool, coneAngle = this.coneAngle) {
     if (!this.canUseFx) return;
 
     this.activeTool = `fx-${tool}` as ActiveTool;
+    if (tool === 'cone') {
+      this.coneAngle = coneAngle;
+    }
+
     this.engine.setMeasurementMode('none');
-    this.engine.setFxMode(tool, { color: this.fxColor });
+    this.engine.setFxMode(tool, {
+      color: this.fxColor,
+      ...(tool === 'cone' ? { coneAngle: this.coneAngle } : {})
+    });
   }
 
   onFxColorChange() {
     this.engine.setFxColor(this.fxColor);
     if (this.activeTool.startsWith('fx-')) {
       const tool = this.activeTool.replace('fx-', '') as FxShapeTool;
-      this.engine.setFxMode(tool, { color: this.fxColor });
+      this.engine.setFxMode(tool, {
+        color: this.fxColor,
+        ...(tool === 'cone' ? { coneAngle: this.coneAngle } : {})
+      });
     }
   }
 

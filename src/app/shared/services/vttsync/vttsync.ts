@@ -129,6 +129,8 @@ export class VttSync implements OnDestroy {
   private activeEngineAttachmentId: string | null = null;
   private activeEngineTarget: VttWindowTarget | null = null;
   private engineTargetHeartbeatId: number | null = null;
+  private pendingEngineDetachId: number | null = null;
+  private readonly engineDetachGraceMs = 2000;
 
   private localVersion = 0;
   private resyncing = false;
@@ -174,6 +176,7 @@ export class VttSync implements OnDestroy {
   }
 
   ngOnDestroy() {
+    this.clearPendingEngineDetach();
     this.clearActiveEngineTarget();
     this.windowCommandChannel?.close();
     this.windowCommandUnlisten?.();
@@ -358,6 +361,7 @@ export class VttSync implements OnDestroy {
   }
 
   startHosting(engine: VttEngine, roomId: string, options: StartHostingOptions = {}) {
+    this.clearPendingEngineDetach();
     this.currentRoomId = roomId;
     this.isHosting = true;
     this.engine = engine;
@@ -398,6 +402,7 @@ export class VttSync implements OnDestroy {
   }
 
   joinSession(engine: VttEngine, roomId: string, character: ICharacter): Promise<boolean> {
+    this.clearPendingEngineDetach();
     this.currentRoomId = roomId;
     this.isHosting = false;
     this.engine = engine;
@@ -498,6 +503,8 @@ export class VttSync implements OnDestroy {
 
   stopSyncing(force: boolean = false, endHostedSession: boolean = false) {
     if (!force) return;
+
+    this.clearPendingEngineDetach();
 
     if (this.socket) {
       const socket = this.socket;
@@ -684,8 +691,30 @@ export class VttSync implements OnDestroy {
       return;
     }
 
+    if (this.isHostOnlyAction(action)) {
+      console.warn(`Ignoring non-host VTT action: ${action}`);
+      return;
+    }
+
     this.applyRemoteAction(engine, action, data);
     this.broadcastAction(action, data);
+  }
+
+  private isHostOnlyAction(action: string): boolean {
+    return [
+      'token-added',
+      'token-deleted',
+      'token-update',
+      'wall-added',
+      'wall-deleted',
+      'lighting-toggle',
+      'grid-size-change',
+      'grid-settings-change',
+      'map-change',
+      'map-load',
+      'player-token-control-change',
+      'player-fx-permission-change'
+    ].includes(action);
   }
 
   private applyRemoteAction(engine: VttEngine, action: string, data: any) {
@@ -794,6 +823,7 @@ export class VttSync implements OnDestroy {
   }
 
   attachEngine(engine: VttEngine, roomId: string): string {
+    this.clearPendingEngineDetach();
     const attachmentId = this.createWindowInstanceId();
     this.engine = engine;
     this.activeEngineRoomId = roomId;
@@ -812,6 +842,34 @@ export class VttSync implements OnDestroy {
   }
 
   detachEngine(engine: VttEngine, roomId: string, attachmentId?: string | null) {
+    if (attachmentId && this.activeEngineAttachmentId !== attachmentId) return;
+    if (this.engine !== engine) return;
+    if (this.activeEngineRoomId && this.activeEngineRoomId !== roomId) return;
+
+    if (this.currentRoomId === roomId) {
+      this.scheduleEngineDetach(engine, roomId, attachmentId);
+      return;
+    }
+
+    this.detachEngineNow(engine, roomId, attachmentId);
+  }
+
+  private scheduleEngineDetach(engine: VttEngine, roomId: string, attachmentId?: string | null) {
+    this.clearPendingEngineDetach();
+    this.pendingEngineDetachId = window.setTimeout(() => {
+      this.pendingEngineDetachId = null;
+      this.detachEngineNow(engine, roomId, attachmentId);
+    }, this.engineDetachGraceMs);
+  }
+
+  private clearPendingEngineDetach() {
+    if (this.pendingEngineDetachId === null) return;
+
+    window.clearTimeout(this.pendingEngineDetachId);
+    this.pendingEngineDetachId = null;
+  }
+
+  private detachEngineNow(engine: VttEngine, roomId: string, attachmentId?: string | null) {
     if (attachmentId && this.activeEngineAttachmentId !== attachmentId) return;
     if (this.engine !== engine) return;
     if (this.activeEngineRoomId && this.activeEngineRoomId !== roomId) return;
@@ -917,8 +975,13 @@ export class VttSync implements OnDestroy {
     }
   }
 
-  async updateToken(tokenId: string, options: any, iconFile?: File): Promise<void> {
-    if (!this.engine) return;
+  async updateToken(tokenId: string, options: any, iconFile?: File): Promise<boolean> {
+    if (!this.engine) return false;
+
+    if (this.currentRoomId && !this.isHosting) {
+      console.warn('Only the host can update token configuration.');
+      return false;
+    }
 
     if (iconFile) {
       try {
@@ -930,12 +993,13 @@ export class VttSync implements OnDestroy {
       } catch (error) {
         this.mapLoading$.next({ loading: false, progress: 0, message: '' });
         console.error('Failed to upload token icon:', error);
-        return;
+        return false;
       }
     }
 
     this.engine.updateTokenConfig(tokenId, options, false);
     this.mapLoading$.next({ loading: false, progress: 0, message: '' });
+    return true;
   }
 
   public setPlayersCanControlAllPlayerTokens(enabled: boolean) {

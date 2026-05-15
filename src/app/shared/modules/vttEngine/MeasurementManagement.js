@@ -50,8 +50,16 @@ export class MeasurementManager {
   }
 
   getRelativePointerPosition() {
+    const pointer = this.engine.stage.getPointerPosition();
+    if (!pointer) return null;
+
     const transform = this.engine.stage.getAbsoluteTransform().copy().invert();
-    return transform.point(this.engine.stage.getPointerPosition());
+    return transform.point(pointer);
+  }
+
+  getSnappedPointerPosition() {
+    const pos = this.getRelativePointerPosition();
+    return this.engine.snapPointToGrid?.(pos) || pos;
   }
 
   normalizeConeAngle(angle) {
@@ -68,8 +76,11 @@ export class MeasurementManager {
 
     stage.on('mousedown', (e) => {
       if (this.mode === 'none' || e.evt.button !== 0) return;
+      const startPos = this.getSnappedPointerPosition();
+      if (!startPos) return;
+
       this.isDrawing = true;
-      this.startPos = this.getRelativePointerPosition();
+      this.startPos = startPos;
 
       this.localGroup = this.createMeasureGroup(
         this.startPos,
@@ -86,7 +97,8 @@ export class MeasurementManager {
 
     stage.on('mousemove', () => {
       if (!this.isDrawing) return;
-      const currentPos = this.getRelativePointerPosition();
+      const currentPos = this.getSnappedPointerPosition();
+      if (!currentPos) return;
 
       this.updateMeasureGroup(
         this.localGroup,
@@ -182,8 +194,9 @@ export class MeasurementManager {
 
     const dx = current.x - start.x;
     const dy = current.y - start.y;
-    const distancePx = Math.sqrt(dx * dx + dy * dy);
-    const ft = Math.round((distancePx / this.engine.gridSize) * 5);
+    const rawDistancePx = Math.sqrt(dx * dx + dy * dy);
+    const distancePx = this.engine.snapDistanceToGrid?.(rawDistancePx) ?? rawDistancePx;
+    const ft = this.engine.getGridDistanceFeet?.(rawDistancePx) ?? Math.round((distancePx / this.engine.gridSize) * 5);
 
     // Update text
     group.measureLabel.getText().text(`${ft} ft`);

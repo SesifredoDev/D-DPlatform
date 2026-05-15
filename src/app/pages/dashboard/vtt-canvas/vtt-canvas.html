@@ -104,10 +104,10 @@
         mat-icon-button
         *ngIf="canUseFx"
         [matMenuTriggerFor]="fxMenu"
-        [class.active]="activeTool === 'fx-polygon' || activeTool === 'fx-square' || activeTool === 'fx-circle' || activeTool === 'fx-erase'"
+        [class.active]="activeTool === 'fx-polygon' || activeTool === 'fx-square' || activeTool === 'fx-circle' || activeTool === 'fx-cone' || activeTool === 'fx-erase'"
         matTooltip="FX">
         <mat-icon>
-          {{ activeTool === 'fx-square' ? 'crop_square' : activeTool === 'fx-circle' ? 'radio_button_unchecked' : activeTool === 'fx-erase' ? 'auto_fix_off' : 'auto_awesome' }}
+          {{ activeTool === 'fx-square' ? 'crop_square' : activeTool === 'fx-circle' ? 'radio_button_unchecked' : activeTool === 'fx-cone' ? 'change_history' : activeTool === 'fx-erase' ? 'auto_fix_off' : 'auto_awesome' }}
         </mat-icon>
       </button>
     </div>
@@ -250,10 +250,29 @@
         <mat-icon>radio_button_unchecked</mat-icon>
         <span>Circle</span>
       </button>
+      <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-cone'" (click)="setFxTool('cone')">
+        <mat-icon>change_history</mat-icon>
+        <span>Cone</span>
+      </button>
       <button mat-menu-item class="vtt-menu-action" [class.active]="activeTool === 'fx-erase'" (click)="setFxTool('erase')">
         <mat-icon>auto_fix_off</mat-icon>
         <span>Erase</span>
       </button>
+    </div>
+
+    <div class="vtt-menu-control" (click)="$event.stopPropagation()">
+      <span>Cone Angle</span>
+      <div class="menu-chip-row">
+        <button
+          type="button"
+          class="angle-chip"
+          *ngFor="let angle of coneAngleOptions"
+          [class.active]="coneAngle === angle"
+          [attr.aria-pressed]="coneAngle === angle"
+          (click)="setFxTool('cone', angle)">
+          {{ angle }}&deg;
+        </button>
+      </div>
     </div>
 
     <div class="vtt-menu-control" (click)="$event.stopPropagation()">
@@ -383,64 +402,299 @@
      [matMenuTriggerFor]="tokenMenu">
 </div>
 
-<mat-menu #tokenMenu="matMenu" class="token-config-menu">
-  <div class="menu-content" (click)="$event.stopPropagation()">
-    <div class="menu-header">
-      <mat-icon>settings</mat-icon>
-      <h3>Token Config</h3>
-    </div>
-
-    <div class="token-preview-area">
-      <div class="preview-circle" [style.background-image]="tokenEditConfig.icon ? 'url(' + tokenEditConfig.icon + ')' : 'none'"
-           [style.background-color]="!tokenEditConfig.icon ? tokenEditConfig.color : 'transparent'"
-           [style.border-color]="tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : '#fff'"
-           [style.border-width]="tokenEditConfig.forceBorder ? '4px' : '2px'">
+<mat-menu #tokenMenu="matMenu" class="token-config-menu" (closed)="onTokenConfigMenuClosed()">
+  <div class="menu-content token-editor" (click)="$event.stopPropagation()">
+    <div class="token-editor-header">
+      <div class="token-editor-title">
+        <mat-icon>person_pin_circle</mat-icon>
+        <div>
+          <span>Token</span>
+          <h3>{{ tokenEditConfig.name || 'Unnamed' }}</h3>
+        </div>
       </div>
-      <label class="icon-upload-btn">
-        <mat-icon>photo_camera</mat-icon>
-        <input type="file" (change)="onTokenIconUpload($event)" accept="image/*" hidden>
-      </label>
+      <button mat-icon-button type="button" (click)="menuTrigger.closeMenu()" matTooltip="Close">
+        <mat-icon>close</mat-icon>
+      </button>
     </div>
 
-    <mat-form-field appearance="fill" class="full-width compact">
-      <mat-label>Name</mat-label>
-      <input matInput [(ngModel)]="tokenEditConfig.name">
-    </mat-form-field>
+    <div class="token-tab-list" role="tablist" aria-label="Token config sections">
+      <button
+        type="button"
+        role="tab"
+        [class.active]="tokenConfigTab === 'main'"
+        [attr.aria-selected]="tokenConfigTab === 'main'"
+        (click)="setTokenConfigTab('main')">
+        <mat-icon>assignment_ind</mat-icon>
+        <span>Main</span>
+      </button>
 
-    <div class="config-row">
-      <mat-form-field appearance="fill" class="half-width compact">
-        <mat-label>Size</mat-label>
-        <mat-select [(ngModel)]="tokenEditConfig.size">
-          <mat-option [value]="0.5">Small (0.5)</mat-option>
-          <mat-option [value]="1">Standard (1)</mat-option>
-          <mat-option [value]="2">Large (2)</mat-option>
-          <mat-option [value]="3">Huge (3)</mat-option>
-        </mat-select>
-      </mat-form-field>
+      <button
+        type="button"
+        role="tab"
+        [class.active]="tokenConfigTab === 'style'"
+        [attr.aria-selected]="tokenConfigTab === 'style'"
+        (click)="setTokenConfigTab('style')">
+        <mat-icon>palette</mat-icon>
+        <span>Style</span>
+      </button>
+    </div>
 
-      <div class="checkbox-container">
-        <mat-checkbox [(ngModel)]="tokenEditConfig.forceBorder">Border</mat-checkbox>
+    <div class="token-tab-panel" *ngIf="tokenConfigTab === 'main'">
+      <div class="token-editor-preview">
+        <div class="preview-frame">
+          <div
+            class="preview-circle"
+            [style.background-image]="tokenPreviewIcon ? 'url(' + tokenPreviewIcon + ')' : 'none'"
+            [style.background-color]="!tokenPreviewIcon ? tokenEditConfig.color : 'transparent'"
+            [style.border-color]="tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : '#fff'"
+            [style.border-width]="tokenEditConfig.forceBorder ? '4px' : '2px'">
+          </div>
+        </div>
+
+        <div class="token-image-actions">
+          <label class="image-upload-btn" [class.disabled]="isSavingTokenConfig">
+            <mat-icon>photo_camera</mat-icon>
+            <span>Upload</span>
+            <input type="file" (change)="onTokenIconUpload($event)" accept="image/*" [disabled]="isSavingTokenConfig" hidden>
+          </label>
+          <button
+            mat-icon-button
+            type="button"
+            (click)="clearTokenIcon()"
+            [disabled]="isSavingTokenConfig || !tokenPreviewIcon"
+            matTooltip="Clear Image">
+            <mat-icon>image_not_supported</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="token-editor-section">
+        <mat-form-field appearance="fill" class="full-width compact">
+          <mat-label>Name</mat-label>
+          <input matInput [(ngModel)]="tokenEditConfig.name" [disabled]="isSavingTokenConfig" autocomplete="off">
+        </mat-form-field>
+      </div>
+
+      <div class="token-editor-section health-section">
+        <div class="section-heading">
+          <mat-icon>favorite</mat-icon>
+          <span>Health</span>
+          <span class="health-summary">{{ tokenHealthSummary }}</span>
+        </div>
+
+        <div class="health-grid">
+          <mat-form-field appearance="fill" class="compact">
+            <mat-label>Current</mat-label>
+            <input
+              matInput
+              type="number"
+              min="0"
+              [(ngModel)]="tokenEditConfig.currentHealth"
+              (ngModelChange)="onTokenHealthInputChange()"
+              [disabled]="isSavingTokenConfig"
+              autocomplete="off">
+          </mat-form-field>
+
+          <mat-form-field appearance="fill" class="compact">
+            <mat-label>Max</mat-label>
+            <input
+              matInput
+              type="number"
+              min="0"
+              [(ngModel)]="tokenEditConfig.maxHealth"
+              (ngModelChange)="onTokenHealthInputChange()"
+              [disabled]="isSavingTokenConfig"
+              autocomplete="off">
+          </mat-form-field>
+        </div>
+
+        <div class="health-adjust-row">
+          <mat-form-field appearance="fill" class="compact health-delta-field">
+            <mat-label>Amount</mat-label>
+            <input
+              matInput
+              type="number"
+              min="1"
+              [(ngModel)]="tokenEditConfig.healthDelta"
+              (ngModelChange)="onTokenHealthInputChange()"
+              [disabled]="isSavingTokenConfig"
+              autocomplete="off">
+          </mat-form-field>
+
+          <button mat-stroked-button type="button" (click)="adjustTokenHealth(-1)" [disabled]="isSavingTokenConfig">
+            <mat-icon>remove</mat-icon>
+            Damage
+          </button>
+
+          <button mat-stroked-button type="button" (click)="adjustTokenHealth(1)" [disabled]="isSavingTokenConfig">
+            <mat-icon>add</mat-icon>
+            Heal
+          </button>
+        </div>
+      </div>
+
+      <div class="token-editor-section effects-section">
+        <div class="section-heading">
+          <mat-icon>auto_awesome</mat-icon>
+          <span>Effects</span>
+          <span class="effect-count">{{ tokenEditConfig.effects.length }}</span>
+        </div>
+
+        <div class="effect-entry-row">
+          <mat-form-field appearance="fill" class="compact effect-name-field">
+            <mat-label>Effect name</mat-label>
+            <input
+              matInput
+              [(ngModel)]="tokenEditConfig.newEffectName"
+              (keydown.enter)="addTokenEffect(); $event.preventDefault()"
+              [disabled]="isSavingTokenConfig"
+              autocomplete="off">
+          </mat-form-field>
+
+          <input
+            class="effect-color-input"
+            type="color"
+            [(ngModel)]="tokenEditConfig.newEffectColor"
+            [disabled]="isSavingTokenConfig"
+            aria-label="Effect colour"
+            matTooltip="Effect colour">
+
+          <button
+            mat-icon-button
+            class="add-effect-button"
+            type="button"
+            (click)="addTokenEffect()"
+            [disabled]="isSavingTokenConfig || !tokenEditConfig.newEffectName.trim()"
+            matTooltip="Add effect">
+            <mat-icon>add</mat-icon>
+          </button>
+        </div>
+
+        <div class="effect-chip-list" *ngIf="tokenEditConfig.effects.length; else noTokenEffects">
+          <div class="effect-chip" *ngFor="let effect of tokenEditConfig.effects" [title]="effect.name">
+            <span class="effect-chip-dot" [style.background-color]="effect.color"></span>
+            <span class="effect-chip-name">{{ effect.name }}</span>
+            <button
+              type="button"
+              (click)="removeTokenEffect(effect.id)"
+              [disabled]="isSavingTokenConfig"
+              [attr.aria-label]="'Remove effect ' + effect.name">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <ng-template #noTokenEffects>
+          <div class="empty-effects">No effects</div>
+        </ng-template>
+      </div>
+
+      <div class="token-editor-section notes-section">
+        <div class="section-heading">
+          <mat-icon>notes</mat-icon>
+          <span>Notes</span>
+        </div>
+
+        <mat-form-field appearance="fill" class="full-width compact">
+          <mat-label>Notes</mat-label>
+          <textarea
+            matInput
+            rows="4"
+            [(ngModel)]="tokenEditConfig.notes"
+            [disabled]="isSavingTokenConfig"
+            autocomplete="off"></textarea>
+        </mat-form-field>
       </div>
     </div>
 
-    <div class="color-picker-section">
-      <span class="section-label">{{ tokenEditConfig.forceBorder ? 'Border Color' : 'Token Color' }}</span>
-      <div class="color-grid">
-        <div *ngFor="let color of colorPresets"
-             class="color-swatch"
-             [style.background-color]="color"
-             [class.active]="(tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : tokenEditConfig.color) === color"
-             (click)="selectColor(color)">
+    <div class="token-tab-panel" *ngIf="tokenConfigTab === 'style'">
+      <div class="token-editor-section">
+        <div class="section-heading">
+          <mat-icon>open_in_full</mat-icon>
+          <span>Size</span>
+        </div>
+        <div class="size-segmented">
+          <button type="button" [class.active]="tokenEditConfig.size === 0.5" [disabled]="isSavingTokenConfig" (click)="tokenEditConfig.size = 0.5" matTooltip="Small">
+            S
+          </button>
+          <button type="button" [class.active]="tokenEditConfig.size === 1" [disabled]="isSavingTokenConfig" (click)="tokenEditConfig.size = 1" matTooltip="Standard">
+            M
+          </button>
+          <button type="button" [class.active]="tokenEditConfig.size === 2" [disabled]="isSavingTokenConfig" (click)="tokenEditConfig.size = 2" matTooltip="Large">
+            L
+          </button>
+          <button type="button" [class.active]="tokenEditConfig.size === 3" [disabled]="isSavingTokenConfig" (click)="tokenEditConfig.size = 3" matTooltip="Huge">
+            H
+          </button>
+        </div>
+      </div>
+
+      <div class="token-editor-section color-picker-section">
+        <div class="section-heading">
+          <mat-icon>{{ tokenEditConfig.forceBorder ? 'border_color' : 'palette' }}</mat-icon>
+          <span>{{ tokenEditConfig.forceBorder ? 'Border Colour' : 'Token Colour' }}</span>
+          <mat-checkbox [(ngModel)]="tokenEditConfig.forceBorder" [disabled]="isSavingTokenConfig">Border</mat-checkbox>
+        </div>
+
+        <div class="active-color-row">
+          <input
+            type="color"
+            [ngModel]="tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : tokenEditConfig.color"
+            (ngModelChange)="selectColor($event)"
+            [disabled]="isSavingTokenConfig"
+            aria-label="Selected token colour">
+          <span>{{ tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : tokenEditConfig.color }}</span>
+        </div>
+
+        <div class="color-grid">
+          <button
+            type="button"
+            *ngFor="let color of colorPresets"
+            class="color-swatch"
+            [style.background-color]="color"
+            [class.active]="(tokenEditConfig.forceBorder ? tokenEditConfig.borderColor : tokenEditConfig.color) === color"
+            [disabled]="isSavingTokenConfig"
+            [attr.aria-label]="'Use colour ' + color"
+            (click)="selectColor(color)">
+          </button>
         </div>
       </div>
     </div>
 
     <div class="menu-footer">
-      <button mat-icon-button color="warn" (click)="deleteSelectedToken()" matTooltip="Delete Token">
+      <button
+        mat-icon-button
+        class="token-footer-action duplicate-token-btn"
+        type="button"
+        (click)="duplicateSelectedToken()"
+        [disabled]="isSavingTokenConfig"
+        matTooltip="Duplicate token"
+        aria-label="Duplicate token">
+        <mat-icon>content_copy</mat-icon>
+      </button>
+
+      <button
+        mat-icon-button
+        class="token-footer-action delete-token-btn"
+        color="warn"
+        type="button"
+        (click)="deleteSelectedToken()"
+        [disabled]="isSavingTokenConfig"
+        matTooltip="Delete token"
+        aria-label="Delete token">
         <mat-icon>delete</mat-icon>
       </button>
-      <button mat-raised-button color="primary" (click)="applyTokenConfig()">
-        Save Changes
+
+      <button
+        mat-icon-button
+        class="token-footer-action save-token-btn"
+        color="primary"
+        type="button"
+        (click)="applyTokenConfig()"
+        [disabled]="isSavingTokenConfig"
+        [matTooltip]="isSavingTokenConfig ? 'Saving changes' : 'Save changes'"
+        aria-label="Save token changes">
+        <mat-icon>{{ isSavingTokenConfig ? 'hourglass_top' : 'check' }}</mat-icon>
       </button>
     </div>
   </div>

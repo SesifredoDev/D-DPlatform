@@ -165,7 +165,7 @@ export class DndSearchDrawer {
   private pointerInside = false;
 
   openFromTopEdge(): void {
-    this.open(true);
+    // this.open(true);
   }
 
   openAndFocus(): void {
@@ -179,8 +179,8 @@ export class DndSearchDrawer {
   }
 
   onDrawerMouseEnter(): void {
-    this.pointerInside = true;
-    this.clearCloseTimer();
+    // this.pointerInside = true;
+    // this.clearCloseTimer();
   }
 
   onDrawerMouseLeave(): void {

@@ -385,6 +385,32 @@ export class VttEngine {
     };
   }
 
+  getGridSnapPoint(x, y) {
+    return this.getSnapPosition(x, y, 1);
+  }
+
+  snapPointToGrid(point) {
+    if (!point) return null;
+
+    return this.getGridSnapPoint(point.x, point.y);
+  }
+
+  snapDistanceToGrid(distance) {
+    const parsedDistance = Number(distance);
+    const size = Number(this.gridSize) || 1;
+
+    if (!Number.isFinite(parsedDistance)) {
+      return 0;
+    }
+
+    return Math.round(parsedDistance / size) * size;
+  }
+
+  getGridDistanceFeet(distance) {
+    const size = Number(this.gridSize) || 1;
+    return Math.round(this.snapDistanceToGrid(distance) / size) * 5;
+  }
+
   getHexSnapPosition(x, y) {
     const radius = this.getHexRadius();
     const originX = this.gridSize / 2;
@@ -576,6 +602,10 @@ export class VttEngine {
   }
 
   updateTokenConfig(tokenId, options, remote = false) {
+    if (!remote && !this.isDM) {
+      return;
+    }
+
     const existingGroup = this.tokenLayer.findOne('#' + tokenId);
     if (existingGroup) {
       const token = existingGroup.tokenReference;
@@ -600,7 +630,11 @@ export class VttEngine {
       isPlayer: token.isPlayer,
       size: token.size,
       forceBorder: token.forceBorder,
-      borderColor: token.borderColor
+      borderColor: token.borderColor,
+      notes: token.notes,
+      currentHealth: token.currentHealth,
+      maxHealth: token.maxHealth,
+      effects: token.effects
     };
   }
 

@@ -1,6 +1,6 @@
 import Konva from 'konva';
 
-const FX_MODES = new Set(['none', 'polygon', 'square', 'circle', 'erase']);
+const FX_MODES = new Set(['none', 'polygon', 'square', 'circle', 'cone', 'erase']);
 const MIN_EFFECT_SIZE = 8;
 const MAX_TEXTURE_SIZE = 220;
 const MIN_TEXTURE_SIZE = 36;
@@ -85,11 +85,14 @@ export class FxManager {
     this.layer = engine.fxLayer;
     this.mode = 'none';
     this.color = '#6fd6ff';
+    this.coneAngle = 53;
     this.effects = new Map();
     this.dragStart = null;
     this.dragPreview = null;
+    this.dragPreviewLabel = null;
     this.polygonPoints = [];
     this.polygonPreview = null;
+    this.polygonPreviewLabel = null;
     this.renderedAt = 0;
 
     this.handleKeyDown = this.handleKeyDown.bind(this);
@@ -128,6 +131,9 @@ export class FxManager {
     if (options.color) {
       this.setColor(options.color);
     }
+    if (options.coneAngle !== undefined) {
+      this.coneAngle = this.normalizeConeAngle(options.coneAngle);
+    }
 
     const container = this.engine.stage.container();
     container.style.cursor = this.mode === 'erase' ? 'not-allowed' : this.mode !== 'none' ? 'crosshair' : 'default';
@@ -137,6 +143,11 @@ export class FxManager {
 
   setColor(color) {
     this.color = this.normalizeColor(color);
+  }
+
+  normalizeConeAngle(angle) {
+    const parsedAngle = Number(angle);
+    return Number.isFinite(parsedAngle) ? Math.min(359, Math.max(1, parsedAngle)) : 53;
   }
 
   setPermissionMode(playersCanUseFx) {
@@ -230,13 +241,20 @@ export class FxManager {
     return transform.point(pointer);
   }
 
-  startDragShape() {
+  getSnappedPointerPosition() {
     const pos = this.getRelativePointerPosition();
+    return this.engine.snapPointToGrid?.(pos) || pos;
+  }
+
+  startDragShape() {
+    const pos = this.getSnappedPointerPosition();
     if (!pos) return;
 
     this.dragStart = pos;
     this.dragPreview = this.createPreviewShape(this.mode, pos);
+    this.dragPreviewLabel = this.createMeasureLabel('0 ft', pos.x, pos.y - 28);
     this.layer.add(this.dragPreview);
+    this.layer.add(this.dragPreviewLabel);
     this.layer.batchDraw();
   }
 
@@ -254,33 +272,114 @@ export class FxManager {
       return new Konva.Circle({ ...shared, x: pos.x, y: pos.y, radius: 0 });
     }
 
+    if (type === 'cone') {
+      return new Konva.Wedge({
+        ...shared,
+        x: pos.x,
+        y: pos.y,
+        radius: 0,
+        angle: this.coneAngle,
+        rotation: -this.coneAngle / 2
+      });
+    }
+
     return new Konva.Rect({ ...shared, x: pos.x, y: pos.y, width: 0, height: 0 });
+  }
+
+  createMeasureLabel(text, x, y) {
+    const label = new Konva.Label({
+      x,
+      y,
+      opacity: 0.92,
+      listening: false
+    });
+
+    label.add(new Konva.Tag({
+      fill: 'black',
+      cornerRadius: 4,
+      pointerDirection: 'down',
+      pointerWidth: 8,
+      pointerHeight: 6
+    }));
+    label.add(new Konva.Text({
+      text,
+      fill: 'white',
+      padding: 5,
+      fontSize: 13,
+      fontStyle: 'bold'
+    }));
+
+    return label;
+  }
+
+  setMeasureLabel(label, text, x, y) {
+    if (!label) return;
+
+    label.getText().text(text);
+    label.position({ x, y });
+  }
+
+  destroyDragPreviewLabel() {
+    if (!this.dragPreviewLabel) return;
+
+    this.dragPreviewLabel.destroy();
+    this.dragPreviewLabel = null;
   }
 
   updateDragPreview() {
     if (!this.dragStart || !this.dragPreview) return;
 
-    const pos = this.getRelativePointerPosition();
+    const pos = this.getSnappedPointerPosition();
     if (!pos) return;
 
     if (this.mode === 'circle') {
-      this.dragPreview.radius(this.getDistance(this.dragStart, pos));
+      this.dragPreview.radius(this.getSnappedDistance(this.dragStart, pos));
+    } else if (this.mode === 'cone') {
+      this.updateConeShape(this.dragPreview, this.dragStart, pos, this.coneAngle);
     } else {
       this.dragPreview.setAttrs(this.getSquareFromDrag(this.dragStart, pos));
     }
 
+    this.updateDragPreviewLabel(this.dragStart, pos, this.mode);
     this.layer.batchDraw();
+  }
+
+  updateDragPreviewLabel(start, current, mode) {
+    if (!this.dragPreviewLabel) return;
+
+    const radius = this.getSnappedDistance(start, current);
+    const distanceText = this.formatFeet(radius);
+
+    if (mode === 'square') {
+      const rect = this.getSquareFromDrag(start, current);
+      this.setMeasureLabel(
+        this.dragPreviewLabel,
+        `${this.formatFeet(rect.width)} x ${this.formatFeet(rect.height)}`,
+        rect.x + rect.width / 2,
+        rect.y - 26
+      );
+      return;
+    }
+
+    if (mode === 'cone') {
+      const endpoint = this.getConeLabelPoint(start, current, radius * 0.72);
+      this.setMeasureLabel(this.dragPreviewLabel, `${distanceText} / ${this.coneAngle} deg`, endpoint.x, endpoint.y - 18);
+      return;
+    }
+
+    this.setMeasureLabel(this.dragPreviewLabel, distanceText, current.x, current.y - 26);
   }
 
   finishDragShape() {
     if (!this.dragStart || !this.dragPreview) return;
 
-    const pos = this.getRelativePointerPosition();
+    const pos = this.getSnappedPointerPosition();
     const start = this.dragStart;
     const mode = this.mode;
 
     this.dragPreview.destroy();
     this.dragPreview = null;
+    this.destroyDragPreviewLabel();
     this.dragStart = null;
 
     if (!pos) {
@@ -290,7 +389,9 @@ export class FxManager {
 
     const effect = mode === 'circle'
       ? this.createCircleEffect(start, pos)
-      : this.createSquareEffect(start, pos);
+      : mode === 'cone'
+        ? this.createConeEffect(start, pos)
+        : this.createSquareEffect(start, pos);
 
     if (effect) {
       this.addEffect(effect, false);
@@ -307,7 +408,7 @@ export class FxManager {
 
     if (e.evt.button !== 0) return;
 
-    const pos = this.getRelativePointerPosition();
+    const pos = this.getSnappedPointerPosition();
     if (!pos) return;
 
     if (this.polygonPoints.length >= 6 && this.isNearFirstPolygonPoint(pos)) {
@@ -329,17 +430,52 @@ export class FxManager {
       this.layer.add(this.polygonPreview);
     }
 
+    if (!this.polygonPreviewLabel) {
+      this.polygonPreviewLabel = this.createMeasureLabel('0 ft', pos.x, pos.y - 26);
+      this.layer.add(this.polygonPreviewLabel);
+    }
+
     this.updatePolygonPreview(pos);
   }
 
   updatePolygonPreview(pointerPos = null) {
     if (!this.polygonPreview || this.polygonPoints.length < 2) return;
 
-    const pos = pointerPos || this.getRelativePointerPosition();
+    const pos = pointerPos || this.getSnappedPointerPosition();
     if (!pos) return;
 
     this.polygonPreview.points([...this.polygonPoints, pos.x, pos.y]);
+    this.updatePolygonPreviewLabel(pos);
     this.layer.batchDraw();
+  }
+
+  updatePolygonPreviewLabel(pos) {
+    if (!this.polygonPreviewLabel || this.polygonPoints.length < 2) return;
+
+    const lastPoint = {
+      x: this.polygonPoints[this.polygonPoints.length - 2],
+      y: this.polygonPoints[this.polygonPoints.length - 1]
+    };
+    const distance = this.getSnappedDistance(lastPoint, pos);
+    const previewPoints = [...this.polygonPoints, pos.x, pos.y];
+    const bounds = this.getPolygonBounds(previewPoints);
+    const boundsText = bounds
+      ? ` (${this.formatFeet(bounds.width)} x ${this.formatFeet(bounds.height)})`
+      : '';
+
+    this.setMeasureLabel(
+      this.polygonPreviewLabel,
+      `${this.formatFeet(distance)}${boundsText}`,
+      pos.x,
+      pos.y - 26
+    );
+  }
+
+  destroyPolygonPreviewLabel() {
+    if (!this.polygonPreviewLabel) return;
+
+    this.polygonPreviewLabel.destroy();
+    this.polygonPreviewLabel = null;
   }
 
   finishPolygon() {
@@ -347,6 +483,7 @@ export class FxManager {
       this.polygonPreview.destroy();
       this.polygonPreview = null;
     }
+    this.destroyPolygonPreviewLabel();
 
     const points = [...this.polygonPoints];
     this.polygonPoints = [];
@@ -365,18 +502,20 @@ export class FxManager {
       this.dragPreview.destroy();
       this.dragPreview = null;
     }
+    this.destroyDragPreviewLabel();
 
     this.polygonPoints = [];
     if (this.polygonPreview) {
       this.polygonPreview.destroy();
       this.polygonPreview = null;
     }
+    this.destroyPolygonPreviewLabel();
 
     this.layer.batchDraw();
   }
 
   createCircleEffect(start, current) {
-    const radius = this.getDistance(start, current);
+    const radius = this.getSnappedDistance(start, current);
     if (radius < MIN_EFFECT_SIZE) return null;
 
     return {
@@ -385,6 +524,27 @@ export class FxManager {
       x: start.x,
       y: start.y,
       radius,
+      color: this.color,
+      seed: this.createSeed(),
+      opacity: 0.82
+    };
+  }
+
+  createConeEffect(start, current) {
+    const radius = this.getSnappedDistance(start, current);
+    if (radius < MIN_EFFECT_SIZE) return null;
+
+    const angle = this.normalizeConeAngle(this.coneAngle);
+    const directionDegrees = Math.atan2(current.y - start.y, current.x - start.x) * 180 / Math.PI;
+
+    return {
+      id: this.createId(),
+      type: 'cone',
+      x: start.x,
+      y: start.y,
+      radius,
+      angle,
+      rotation: directionDegrees - angle / 2,
       color: this.color,
       seed: this.createSeed(),
       opacity: 0.82
@@ -525,10 +685,14 @@ export class FxManager {
     const group = new Konva.Group({
       id: `fx-${effect.id}`,
       x: bounds.x,
-      y: bounds.y,
-      clipFunc: (ctx) => this.drawClipPath(ctx, effect, bounds)
+      y: bounds.y
     });
     group.fxEffectId = effect.id;
+
+    const clipGroup = new Konva.Group({
+      clipFunc: (ctx) => this.drawClipPath(ctx, effect, bounds)
+    });
+    clipGroup.fxEffectId = effect.id;
 
     const imageNode = new Konva.Image({
       x: 0,
@@ -544,7 +708,8 @@ export class FxManager {
     const outline = this.createOutline(effect, bounds);
     outline.fxEffectId = effect.id;
 
-    group.add(imageNode, outline);
+    clipGroup.add(imageNode, outline);
+    group.add(clipGroup);
 
     return {
       ...effect,
@@ -578,6 +743,17 @@ export class FxManager {
       });
     }
 
+    if (effect.type === 'cone') {
+      return new Konva.Wedge({
+        ...shared,
+        x: effect.x - bounds.x,
+        y: effect.y - bounds.y,
+        radius: effect.radius,
+        angle: effect.angle,
+        rotation: effect.rotation
+      });
+    }
+
     if (effect.type === 'square') {
       return new Konva.Rect({
         ...shared,
@@ -601,6 +777,18 @@ export class FxManager {
 
     if (effect.type === 'circle') {
       ctx.arc(effect.x - bounds.x, effect.y - bounds.y, effect.radius, 0, Math.PI * 2);
+      ctx.closePath();
+      return;
+    }
+
+    if (effect.type === 'cone') {
+      const centerX = effect.x - bounds.x;
+      const centerY = effect.y - bounds.y;
+      const startAngle = effect.rotation * Math.PI / 180;
+      const endAngle = (effect.rotation + effect.angle) * Math.PI / 180;
+
+      ctx.moveTo(centerX, centerY);
+      ctx.arc(centerX, centerY, effect.radius, startAngle, endAngle);
       ctx.closePath();
       return;
     }
@@ -692,14 +880,51 @@ export class FxManager {
     return amount * amount * (3 - 2 * amount);
   }
 
+  updateConeShape(shape, start, current, angle) {
+    const normalizedAngle = this.normalizeConeAngle(angle);
+    const directionDegrees = Math.atan2(current.y - start.y, current.x - start.x) * 180 / Math.PI;
+
+    shape.setAttrs({
+      x: start.x,
+      y: start.y,
+      radius: this.getSnappedDistance(start, current),
+      angle: normalizedAngle,
+      rotation: directionDegrees - normalizedAngle / 2
+    });
+  }
+
+  getConeLabelPoint(start, current, distance) {
+    const direction = Math.atan2(current.y - start.y, current.x - start.x);
+
+    return {
+      x: start.x + Math.cos(direction) * distance,
+      y: start.y + Math.sin(direction) * distance
+    };
+  }
+
+  formatFeet(distancePx) {
+    const feet = this.engine.getGridDistanceFeet?.(distancePx)
+      ?? Math.round((distancePx / (this.engine.gridSize || 1)) * 5);
+
+    return `${feet} ft`;
+  }
+
   getSquareFromDrag(start, current) {
-    const side = Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y));
+    const side = this.engine.snapDistanceToGrid?.(
+      Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y))
+    ) ?? Math.max(Math.abs(current.x - start.x), Math.abs(current.y - start.y));
+
     return {
       x: current.x < start.x ? start.x - side : start.x,
       y: current.y < start.y ? start.y - side : start.y,
       width: side,
       height: side
     };
+  }
+
+  getSnappedDistance(a, b) {
+    const distance = this.getDistance(a, b);
+    return this.engine.snapDistanceToGrid?.(distance) ?? distance;
   }
 
   getDistance(a, b) {
@@ -725,6 +950,15 @@ export class FxManager {
 
   getEffectBounds(effect) {
     if (effect.type === 'circle') {
+      return {
+        x: effect.x - effect.radius,
+        y: effect.y - effect.radius,
+        width: effect.radius * 2,
+        height: effect.radius * 2
+      };
+    }
+
+    if (effect.type === 'cone') {
       return {
         x: effect.x - effect.radius,
         y: effect.y - effect.radius,
@@ -787,6 +1021,19 @@ export class FxManager {
         x: Number(effect.x) || 0,
         y: Number(effect.y) || 0,
         radius
+      };
+    }
+
+    if (effect.type === 'cone') {
+      const radius = Math.max(0, Number(effect.radius));
+      if (!Number.isFinite(radius) || radius < MIN_EFFECT_SIZE) return null;
+      return {
+        ...base,
+        x: Number(effect.x) || 0,
+        y: Number(effect.y) || 0,
+        radius,
+        angle: this.normalizeConeAngle(effect.angle),
+        rotation: Number.isFinite(Number(effect.rotation)) ? Number(effect.rotation) : 0
       };
     }
 
