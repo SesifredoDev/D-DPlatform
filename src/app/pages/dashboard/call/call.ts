@@ -13,7 +13,7 @@ import {
   EventEmitter,
   ChangeDetectorRef,
 } from '@angular/core';
-import { CallParticipantMetadata, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, RemoteVideoQualityPreference, Video } from '../../../shared/services/video/video';
+import { CallParticipantMetadata, CallRecordingParticipant, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, RemoteVideoQualityPreference, Video } from '../../../shared/services/video/video';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
@@ -32,6 +32,8 @@ import { IServer, TemporaryDmDuration } from '../../../shared/models/server/serv
 import { MarkdownComponent } from 'ngx-markdown';
 import { AuthService } from '../../../shared/services/auth/auth';
 import { DeviceService, DeviceType } from '../../../shared/services/device/device';
+import { RecordedCallEnvironmentAction, SessionPlaybackState, SessionRecording, SessionRecordingMedia, SessionRecordingParticipantMedia, SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
+import { AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
 
 interface ParticipantStream {
   id: string;
@@ -48,6 +50,17 @@ interface ParticipantStream {
 export interface VttStopEvent {
   roomId: string;
   endSession: boolean;
+}
+
+export interface VttPlaybackEvent {
+  roomId: string;
+  active: boolean;
+}
+
+interface VttSessionState {
+  active: boolean;
+  roomId: string | null;
+  hostId: string | null;
 }
 
 type MicrophoneProcessingMode = 'studio' | 'processed';
@@ -85,6 +98,73 @@ interface PriorityGridPlacement {
   row: number;
   column: number;
   columnSpan: number;
+}
+
+interface CallParticipantRecorder {
+  participantId: string;
+  isLocal: boolean;
+  userData: Partial<ICharacter> | null;
+  participantMeta: CallParticipantMetadata | null;
+  volumePercent: number;
+  stream: MediaStream;
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  mimeType: string;
+  startedAtMs: number;
+  stopping: boolean;
+  astralSegmentIndex: number | null;
+  astralFilePath: string | null;
+  astralFileUrl: string | null;
+  astralSize: number;
+  astralWriteChain: Promise<void>;
+  astralWriteFailed: boolean;
+}
+
+interface CallPlaybackSource {
+  participant: SessionRecordingParticipantMedia;
+  video: HTMLVideoElement;
+  stream: MediaStream | null;
+  cleanup: Array<() => void>;
+  active: boolean;
+  ended: boolean;
+}
+
+interface RecordedCallParticipantSnapshot {
+  id: string;
+  isLocal: boolean;
+  userData: Partial<ICharacter> | null;
+  participantMeta: CallParticipantMetadata | null;
+  ping?: number;
+  volumePercent: number;
+  isSceneMainCharacter: boolean;
+  hasAudio: boolean;
+  hasVideo: boolean;
+}
+
+interface RecordedSpotifyState {
+  uri: string | null;
+  name: string;
+  artist: string;
+  image: string;
+  position: number;
+  playing: boolean;
+  paused: boolean;
+  contextUri: string | null;
+  shuffle: boolean;
+  volumePercent: number;
+}
+
+interface RecordedCallEnvironmentState {
+  activeColors: ThemeColors;
+  activeOverlayImage: string | null;
+  activeOverlayText: string | null;
+  activeTemporaryAtmosphereBackground: string | null;
+  sceneMainCharacterIds: string[];
+  isDmMode: boolean;
+  vttSession: VttSessionState;
+  spotify: RecordedSpotifyState | null;
+  spotifyRequests: any[];
+  participants: RecordedCallParticipantSnapshot[];
 }
 
 @Component({
@@ -146,6 +226,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   @Output() hostVtt = new EventEmitter<string>();
   @Output() joinVtt = new EventEmitter<string>();
   @Output() stopVtt = new EventEmitter<string | VttStopEvent>();
+  @Output() playbackVtt = new EventEmitter<string | VttPlaybackEvent>();
 
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
@@ -181,6 +262,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     { level: 2, value: 'high', label: 'Max detail' }
   ];
   readonly supportsMicTestRecording = typeof MediaRecorder !== 'undefined';
+  readonly supportsSessionRecording = typeof MediaRecorder !== 'undefined';
 
   localStream: MediaStream | null = null;
   previewStream: MediaStream | null = null;
@@ -198,6 +280,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   micTestDurationSeconds = 0;
   micTestPlaybackUrl: string | null = null;
   micTestError = '';
+  isSessionRecording = false;
+  sessionRecordingDurationSeconds = 0;
+  sessionRecordingError = '';
+  recordedSession: SessionRecording | null = null;
+  isCallPlaybackMode = false;
 
 
   isAudioMuted = false;
@@ -230,17 +317,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private lastValidThemeBackgroundImageBlur = false;
 
   // VTT Session state
-  vttSession: { active: boolean, roomId: string | null, hostId: string | null } = { active: false, roomId: null, hostId: null };
+  vttSession: VttSessionState = { active: false, roomId: null, hostId: null };
   showVttNotification: boolean = false;
   private vttNotificationTimeout: any;
 
   // Broadcast state
   activeOverlayImage: string | null = null;
   activeOverlayText: string | null = null;
+  activeTemporaryAtmosphereBackground: string | null = null;
 
   // Spotify Requests
   spotifyRequests: any[] = [];
   showSpotifyRequests: boolean = false;
+  playbackSpotifyState: RecordedSpotifyState | null = null;
+  playbackSpotifyVolumePercent = 100;
 
   // DM Mode State
   isServerOwner: boolean = false;
@@ -286,6 +376,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private remoteVideoQualitySub!: Subscription;
   private participantVolumesSub!: Subscription;
   private sceneMainCharactersSub!: Subscription;
+  private sessionRecordingStateSub!: Subscription;
+  private sessionRecordingLastSub!: Subscription;
+  private sessionPlaybackSub!: Subscription;
   readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   readonly supportsRemoteAudioGain = typeof window !== 'undefined' && !!this.getAudioContextConstructor();
 
@@ -306,6 +399,39 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private monitoredMicTrack: MediaStreamTrack | null = null;
   private remoteAudioContext: AudioContext | null = null;
   private remoteAudioOutputs = new Map<string, RemoteAudioOutput>();
+  private callRecordingStartedAt = 0;
+  private callRecordingDurationInterval: any;
+  private callRecordingDiscardOnStop = false;
+  private callParticipantRecorders = new Map<string, CallParticipantRecorder>();
+  private stoppingCallParticipantRecorders = 0;
+  private finalizingSessionRecording = false;
+  private astralRecordingSessionId: string | null = null;
+  private astralParticipantSegmentCounters = new Map<string, number>();
+  astralRecordingPath: string | null = null;
+  private callPlaybackRecordingId: string | null = null;
+  private callPlaybackEnvironmentEventIndex = 0;
+  private callPlaybackLastTimeMs = 0;
+  private callEnvironmentBeforePlayback: RecordedCallEnvironmentState | null = null;
+  private isApplyingCallPlaybackEnvironment = false;
+  private isRestoringCallPlaybackEnvironment = false;
+  private lastRecordedCallParticipantsSnapshot = '';
+  private callPlaybackParticipantSnapshots = new Map<string, RecordedCallParticipantSnapshot>();
+  private activePlaybackVttRoomId: string | null = null;
+  playbackLocalParticipantStream: ParticipantStream | null = null;
+  playbackParticipantStreams: ParticipantStream[] = [];
+  callPlaybackPaused = true;
+  callPlaybackCurrentTimeMs = 0;
+  callPlaybackDurationMs = 0;
+  private callPlaybackSources: CallPlaybackSource[] = [];
+  private callPlaybackSourcesRecordingId: string | null = null;
+  private callPlaybackMediaHost: HTMLDivElement | null = null;
+  private visiblePlaybackSourceTargets = new Map<string, HTMLVideoElement>();
+  private callPlaybackSyncInterval: any;
+  private isSeekingCallPlaybackSources = false;
+  private callPlaybackClockStartedAtMs = 0;
+  private callPlaybackClockStartTimeMs = 0;
+  private visiblePlaybackSyncToken = 0;
+  private lastAppliedPlaybackSpotifySignature = '';
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
   private readonly handleDeviceChangeBound = () => {
@@ -322,7 +448,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private serverService: ServerService,
     private authService: AuthService,
     private deviceService: DeviceService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private sessionRecording: SessionRecordingService,
+    private astralRecording: AstralRecordingService
   ) {
     this.activeColors = this.themeService.getColors();
     this.rememberValidThemeBackground(this.activeColors);
@@ -389,6 +517,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       this.refreshVisibleRemoteStreams(streams);
+      this.recordCallParticipantsSnapshotIfChanged();
+      this.syncCallParticipantRecorders();
       if (
         this.remoteContextMenu &&
         !this.isContextMenuParticipantAvailable(this.remoteContextMenu.remoteId)
@@ -399,21 +529,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.updateLocalVideoDisplay(streams);
 
       setTimeout(() => {
-        this.remoteVideos.forEach((videoRef, i) => {
-          const video = videoRef.nativeElement;
-          const remote = this.remoteStreams[i];
-          const stream = remote?.stream;
-          if (video && stream && video.srcObject !== stream) {
-            video.srcObject = stream;
-          }
-          if (video && !stream && video.srcObject) {
-            video.srcObject = null;
-          }
-          if (video && remote) {
-            this.configureRemoteAudio(remote, video);
-          }
-        });
-        this.teardownMissingRemoteAudioOutputs(new Set(this.remoteStreams.map(remote => remote.id)));
+        this.bindVisibleRemoteVideos();
         void this.applyAudioOutputToAllMedia();
       });
     });
@@ -438,6 +554,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         // Anti-bounce lock: Prevent rapid shuffling while Spotify API is loading the last track
         if (this.isSyncing) return;
         this.isSyncing = true;
+      }
+
+      const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
+      if (recordedSpotifyState) {
+        this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
       }
 
       try {
@@ -502,6 +623,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.syncDebounceTimer = setTimeout(() => {
           // Stamp the payload with the Host ID so clients know it is authoritative
           const payload = { ...action.data, hostId: this.character.ownerId };
+          const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
+          if (recordedSpotifyState) {
+            this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+          }
           this.videoService.sendSpotifyCommand(action.command, payload, action.source);
         }, 400); // 400ms debounce
 
@@ -530,10 +655,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
             uri: state.track_window.current_track.uri,
             position: state.position,
             paused: state.paused,
+            playing: !state.paused,
             contextUri: state.context?.uri,
             shuffle: state.shuffle_state,
             hostId: this.character.ownerId // Embed host ID for validation
           }, 'manual');
+          const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload({
+            uri: state.track_window.current_track.uri,
+            position: state.position,
+            paused: state.paused,
+            playing: !state.paused,
+            contextUri: state.context?.uri,
+            shuffle: state.shuffle_state
+          });
+          if (recordedSpotifyState) {
+            this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+          }
         }
 
         if (this.activeColors) {
@@ -547,15 +684,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         // Prevent duplicates
         if (!this.spotifyRequests.some(r => r.uri === req.uri && r.fromName === req.fromName)) {
            this.spotifyRequests.push(req);
+           this.recordSpotifyRequestsSnapshot();
            this.cdr.detectChanges();
         }
       }
     });
 
     this.themeSyncSub = this.videoService.themeSync$.subscribe(colors => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
       this.activeColors = colors;
       this.rememberValidThemeBackground(colors);
       this.themeService.applyTheme(colors, false); // DO NOT save call atmosphere to local player preference
+      this.recordCallEnvironmentEvent('theme-sync', colors);
     });
 
     this.pinnedThemesSub = this.themeService.pinnedThemes$.subscribe(themes => {
@@ -565,6 +707,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.vttSub = this.videoService.vttSession$.subscribe(session => {
       const wasActive = this.vttSession.active;
+      const recordedSession = this.createRecordedVttSessionState(session, this.vttSession);
       this.vttSession = session;
       if (session.active && !wasActive && session.hostId !== this.videoService.getCurrentParticipantIdentity()) {
         this.triggerVttNotification();
@@ -572,19 +715,33 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.showVttNotification = false;
         if (this.vttNotificationTimeout) clearTimeout(this.vttNotificationTimeout);
       }
+      this.recordCallEnvironmentEvent('vtt-session', recordedSession);
     });
 
     this.overlaySub = this.videoService.overlayImage$.subscribe(url => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
       this.activeOverlayImage = url;
+      this.recordCallEnvironmentEvent('overlay-image', { url });
       this.cdr.detectChanges();
     });
 
     this.overlayTextSub = this.videoService.overlayText$.subscribe(text => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
       this.activeOverlayText = text;
+      this.recordCallEnvironmentEvent('overlay-text', { text });
       this.cdr.detectChanges();
     });
 
     this.temporaryAtmosphereBackgroundSub = this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
+      this.activeTemporaryAtmosphereBackground = url;
+      this.recordCallEnvironmentEvent('temporary-atmosphere-background', { url });
       this.applyTemporaryAtmosphereBackground(url);
     });
 
@@ -622,9 +779,25 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.cdr.detectChanges();
     });
     this.sceneMainCharactersSub = this.videoService.sceneMainCharacters$.subscribe(state => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
       this.sceneMainCharacterIds = state.participantIds;
       this.refreshSceneMainCharacterFlags();
+      this.recordCallEnvironmentEvent('scene-main-characters', state);
       this.cdr.detectChanges();
+    });
+    this.sessionRecordingStateSub = this.sessionRecording.recordingState$.subscribe(state => {
+      this.isSessionRecording = state.active;
+      this.sessionRecordingDurationSeconds = Math.floor(state.elapsedMs / 1000);
+      this.cdr.detectChanges();
+    });
+    this.sessionRecordingLastSub = this.sessionRecording.lastRecording$.subscribe(recording => {
+      this.recordedSession = recording;
+      this.cdr.detectChanges();
+    });
+    this.sessionPlaybackSub = this.sessionRecording.playbackState$.subscribe(state => {
+      this.applyCallPlaybackState(state);
     });
 
     this.checkServerOwner();
@@ -1011,6 +1184,1766 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.micTestDiscardOnStop = false;
   }
 
+  get sessionRecordingStatusText(): string {
+    if (this.sessionRecordingError) {
+      return this.sessionRecordingError;
+    }
+
+    if (!this.supportsSessionRecording) {
+      return 'Recording unsupported here';
+    }
+
+    if (this.isSessionRecording) {
+      const storageLabel = this.astralRecordingSessionId ? ' locally' : '';
+      return `Recording${storageLabel} ${this.formatSessionRecordingDuration(this.sessionRecordingDurationSeconds * 1000)}`;
+    }
+
+    if (this.hasRecordedSessionPlayback) {
+      const packageLabel = this.recordedSession?.package ? ' saved as .astral' : '';
+      return `Last recording ${this.formatSessionRecordingDuration(this.recordedSessionDurationMs)}${packageLabel}`;
+    }
+
+    return 'Record call and VTT';
+  }
+
+  get hasRecordedSessionPlayback(): boolean {
+    return !!this.recordedSession && this.hasPlayableCallRecording(this.recordedSession);
+  }
+
+  get isPlaybackVttLive(): boolean {
+    return !!this.activePlaybackVttRoomId;
+  }
+
+  get recordedSessionDurationMs(): number {
+    return this.getRecordingPlaybackDurationMs(this.recordedSession);
+  }
+
+  async startSessionRecording() {
+    if (this.isSessionRecording || this.callParticipantRecorders.size) {
+      return;
+    }
+
+    if (this.isCallPlaybackMode) {
+      this.stopSessionPlayback();
+    }
+
+    this.sessionRecordingError = '';
+    if (!this.supportsSessionRecording) {
+      this.sessionRecordingError = 'Recording unsupported here';
+      return;
+    }
+
+    if (!this.localStream) {
+      this.sessionRecordingError = 'Join the call first';
+      return;
+    }
+
+    if (!this.sessionRecording.startRecording(this.getVttRoomId())) {
+      this.sessionRecordingError = 'Recording already active';
+      return;
+    }
+
+    this.astralRecordingPath = null;
+    this.astralRecordingSessionId = null;
+    this.astralParticipantSegmentCounters.clear();
+    this.lastRecordedCallParticipantsSnapshot = '';
+    this.callRecordingStartedAt = Date.now();
+    this.recordCurrentCallEnvironmentInitialState();
+    void this.recordCurrentSpotifyPlaybackState();
+    this.callParticipantRecorders.clear();
+    this.stoppingCallParticipantRecorders = 0;
+    this.finalizingSessionRecording = false;
+    this.callRecordingDiscardOnStop = false;
+
+    await this.startAstralRecordingSession();
+    if (!this.sessionRecording.isRecording() || this.finalizingSessionRecording) {
+      await this.abortAstralRecordingSession();
+      return;
+    }
+
+    this.syncCallParticipantRecorders();
+    if (!this.callParticipantRecorders.size) {
+      this.sessionRecordingError = 'No participant streams to record';
+      await this.abortAstralRecordingSession();
+      this.sessionRecording.abortRecording();
+      this.cleanupCallParticipantRecorders();
+      return;
+    }
+
+    this.callRecordingDurationInterval = setInterval(() => {
+      this.sessionRecordingDurationSeconds = Math.floor((Date.now() - this.callRecordingStartedAt) / 1000);
+      this.cdr.detectChanges();
+    }, 500);
+  }
+
+  stopSessionRecording(discardRecording: boolean = false) {
+    if (!this.sessionRecording.isRecording() && !this.callParticipantRecorders.size) {
+      return;
+    }
+
+    this.callRecordingDiscardOnStop = this.callRecordingDiscardOnStop || discardRecording;
+    this.finalizingSessionRecording = true;
+    this.clearCallRecordingTimer();
+    if (!this.callParticipantRecorders.size) {
+      void this.finishSessionRecordingIfReady();
+      return;
+    }
+
+    this.stopAllCallParticipantRecorders();
+    void this.finishSessionRecordingIfReady();
+  }
+
+  private async startAstralRecordingSession() {
+    try {
+      if (!(await this.astralRecording.isAvailable())) {
+        return;
+      }
+
+      const session = await this.astralRecording.begin(this.getVttRoomId());
+      this.astralRecordingSessionId = session.sessionId;
+    } catch (error) {
+      console.warn('Astral local recording storage unavailable; falling back to in-memory recording.', error);
+      this.astralRecordingSessionId = null;
+      this.astralParticipantSegmentCounters.clear();
+    }
+  }
+
+  private async abortAstralRecordingSession() {
+    const sessionId = this.astralRecordingSessionId;
+    this.cleanupAstralRecordingState();
+    if (!sessionId) {
+      return;
+    }
+
+    await this.astralRecording.abort(sessionId).catch(error => {
+      console.warn('Failed to abort Astral recording session', error);
+    });
+  }
+
+  private async finalizeAstralRecordingSession(recording: SessionRecording): Promise<boolean> {
+    const sessionId = this.astralRecordingSessionId;
+    this.cleanupAstralRecordingState();
+    if (!sessionId) {
+      return false;
+    }
+
+    try {
+      const packageResult = await this.astralRecording.finalize(sessionId, this.createAstralRecordingManifest(recording));
+      this.astralRecordingPath = packageResult.astralPath;
+      this.sessionRecording.attachRecordingPackage(recording.id, {
+        storage: 'astral',
+        path: packageResult.astralPath,
+        size: packageResult.astralSize,
+        formatVersion: 1,
+        createdAt: new Date().toISOString()
+      });
+      return true;
+    } catch (error) {
+      console.error('Failed to finalize Astral recording package', error);
+      this.sessionRecordingError = 'Recording playable, but .astral packaging failed';
+      return false;
+    }
+  }
+
+  private cleanupAstralRecordingState() {
+    this.astralRecordingSessionId = null;
+    this.astralParticipantSegmentCounters.clear();
+  }
+
+  startSessionPlayback(recording: SessionRecording | null = this.recordedSession) {
+    this.sessionRecordingError = '';
+    if (this.isSessionRecording) {
+      this.sessionRecordingError = 'Stop recording before playback';
+      return;
+    }
+
+    if (!recording || !this.hasPlayableCallRecording(recording)) {
+      this.sessionRecordingError = 'No recording ready';
+      return;
+    }
+
+    this.clearSpotifyPlaybackForSessionStart();
+    if (!this.sessionRecording.startPlayback(recording)) {
+      this.sessionRecordingError = 'No recording ready';
+      return;
+    }
+
+    this.setCallPlaybackPaused(false);
+  }
+
+  private clearSpotifyPlaybackForSessionStart() {
+    this.playbackSpotifyState = null;
+    this.lastAppliedPlaybackSpotifySignature = '';
+    void this.spotify.clearCurrentPlayback(true);
+  }
+
+  stopSessionPlayback() {
+    this.pauseCallPlaybackSources();
+    this.sessionRecording.stopPlayback();
+  }
+
+  onCallPlaybackEnded() {
+    this.pauseCallPlaybackSources();
+    this.sessionRecording.setPlaybackTime(this.callPlaybackDurationMs, true);
+  }
+
+  openSessionPlaybackVtt(recording: SessionRecording | null = this.recordedSession) {
+    const roomId = this.activePlaybackVttRoomId || recording?.vtt.roomId || this.getVttRoomId();
+    if (!this.activePlaybackVttRoomId && this.isCallPlaybackMode) {
+      this.sessionRecordingError = 'VTT replay is not live at this point';
+      return;
+    }
+
+    this.playbackVtt.emit(roomId);
+  }
+
+  formatSessionRecordingDuration(durationMs: number | null | undefined): string {
+    const totalSeconds = Math.max(0, Math.floor((durationMs ?? 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private applyCallPlaybackState(state: SessionPlaybackState) {
+    const nextPlaybackMode = state.active && this.hasPlayableCallRecording(state.recording);
+
+    if (nextPlaybackMode && !this.isCallPlaybackMode) {
+      this.callEnvironmentBeforePlayback = this.createCallEnvironmentState();
+    }
+
+    if (!nextPlaybackMode && this.isCallPlaybackMode) {
+      this.closeActivePlaybackVtt();
+      try {
+        this.isRestoringCallPlaybackEnvironment = true;
+        this.restoreCallEnvironmentAfterPlayback();
+      } finally {
+        this.isRestoringCallPlaybackEnvironment = false;
+      }
+      this.resetCallPlaybackEnvironmentTimeline();
+      this.cleanupCallPlaybackSources();
+    }
+
+    this.isCallPlaybackMode = nextPlaybackMode;
+    this.callPlaybackPaused = state.paused;
+    this.callPlaybackCurrentTimeMs = state.currentTimeMs;
+    this.callPlaybackDurationMs = state.durationMs;
+
+    if (nextPlaybackMode) {
+      this.prepareCallPlaybackSources(state.recording!);
+      this.syncCallPlaybackSourcesToState(state);
+      this.applyCallPlaybackEnvironment(state);
+    }
+
+    this.cdr.detectChanges();
+    setTimeout(() => this.bindVisibleRemoteVideos());
+  }
+
+  private applyCallPlaybackEnvironment(state: SessionPlaybackState) {
+    const recording = state.recording;
+    if (!recording) {
+      return;
+    }
+
+    if (this.shouldResetCallPlaybackEnvironment(recording, state.currentTimeMs)) {
+      this.resetCallPlaybackEnvironment(recording);
+    }
+
+    const events = recording.callEnvironment?.events ?? [];
+    while (
+      this.callPlaybackEnvironmentEventIndex < events.length &&
+      events[this.callPlaybackEnvironmentEventIndex].timeMs <= state.currentTimeMs
+    ) {
+      this.applyCallEnvironmentEvent(events[this.callPlaybackEnvironmentEventIndex]);
+      this.callPlaybackEnvironmentEventIndex += 1;
+    }
+
+    this.callPlaybackLastTimeMs = state.currentTimeMs;
+  }
+
+  private shouldResetCallPlaybackEnvironment(recording: SessionRecording, currentTimeMs: number): boolean {
+    return this.callPlaybackRecordingId !== recording.id || currentTimeMs < this.callPlaybackLastTimeMs;
+  }
+
+  private resetCallPlaybackEnvironment(recording: SessionRecording) {
+    this.callPlaybackRecordingId = recording.id;
+    this.callPlaybackEnvironmentEventIndex = 0;
+    this.callPlaybackLastTimeMs = 0;
+    this.callPlaybackParticipantSnapshots.clear();
+
+    const initialState = recording.callEnvironment?.initialState as RecordedCallEnvironmentState | null;
+    if (initialState) {
+      this.applyCallEnvironmentState(initialState);
+    }
+  }
+
+  private resetCallPlaybackEnvironmentTimeline() {
+    this.callPlaybackRecordingId = null;
+    this.callPlaybackEnvironmentEventIndex = 0;
+    this.callPlaybackLastTimeMs = 0;
+  }
+
+  private restoreCallEnvironmentAfterPlayback() {
+    if (!this.callEnvironmentBeforePlayback) {
+      return;
+    }
+
+    this.applyCallEnvironmentState(this.callEnvironmentBeforePlayback);
+    this.callEnvironmentBeforePlayback = null;
+  }
+
+  private applyCallEnvironmentEvent(event: { action: RecordedCallEnvironmentAction; data: any }) {
+    const data = event.data;
+    this.isApplyingCallPlaybackEnvironment = true;
+    try {
+      switch (event.action) {
+        case 'theme-sync':
+          this.applyRecordedTheme(data);
+          break;
+        case 'overlay-image':
+          this.activeOverlayImage = data?.url ?? data ?? null;
+          break;
+        case 'overlay-text':
+          this.activeOverlayText = data?.text ?? data ?? null;
+          break;
+        case 'temporary-atmosphere-background':
+          this.activeTemporaryAtmosphereBackground = data?.url ?? data ?? null;
+          this.applyTemporaryAtmosphereBackground(this.activeTemporaryAtmosphereBackground);
+          break;
+        case 'scene-main-characters':
+          this.sceneMainCharacterIds = Array.isArray(data?.participantIds)
+            ? [...data.participantIds]
+            : Array.isArray(data)
+              ? [...data]
+              : [];
+          this.refreshSceneMainCharacterFlags();
+          break;
+        case 'dm-mode':
+          this.isDmMode = !!data?.enabled;
+          if (data?.character) {
+            this.dmCharacter = { ...this.dmCharacter, ...data.character };
+          }
+          break;
+        case 'participants':
+          this.setCallPlaybackParticipantSnapshots(data);
+          this.refreshCallPlaybackParticipantStreams(this.callPlaybackCurrentTimeMs);
+          break;
+        case 'vtt-session':
+          this.applyRecordedVttSession(data);
+          break;
+        case 'spotify-state':
+          this.applyRecordedSpotifyState(data);
+          break;
+        case 'spotify-requests':
+          this.spotifyRequests = this.cloneSpotifyRequests(data);
+          break;
+      }
+    } finally {
+      this.isApplyingCallPlaybackEnvironment = false;
+    }
+  }
+
+  private applyCallEnvironmentState(state: RecordedCallEnvironmentState) {
+    this.isApplyingCallPlaybackEnvironment = true;
+    try {
+      this.applyRecordedTheme(state.activeColors);
+      this.activeOverlayImage = state.activeOverlayImage ?? null;
+      this.activeOverlayText = state.activeOverlayText ?? null;
+      this.activeTemporaryAtmosphereBackground = state.activeTemporaryAtmosphereBackground ?? null;
+      this.sceneMainCharacterIds = Array.isArray(state.sceneMainCharacterIds)
+        ? [...state.sceneMainCharacterIds]
+        : [];
+      this.isDmMode = !!state.isDmMode;
+      this.applyRecordedVttSession(state.vttSession);
+      this.applyRecordedSpotifyState(state.spotify);
+      this.spotifyRequests = this.cloneSpotifyRequests(state.spotifyRequests);
+      this.setCallPlaybackParticipantSnapshots(state.participants);
+      this.refreshSceneMainCharacterFlags();
+      this.applyTemporaryAtmosphereBackground(this.activeTemporaryAtmosphereBackground);
+    } finally {
+      this.isApplyingCallPlaybackEnvironment = false;
+    }
+  }
+
+  private applyRecordedTheme(colors: ThemeColors | null | undefined) {
+    if (!colors) {
+      return;
+    }
+
+    this.activeColors = colors;
+    this.rememberValidThemeBackground(colors);
+    this.themeService.applyTheme(colors, false);
+  }
+
+  private createRecordedVttSessionState(
+    session: Partial<VttSessionState> | null | undefined,
+    previousSession: Partial<VttSessionState> | null | undefined
+  ): VttSessionState {
+    const active = !!session?.active;
+    const roomId = session?.roomId ?? previousSession?.roomId ?? (active ? this.getVttRoomId() : null);
+
+    return {
+      active,
+      roomId,
+      hostId: active
+        ? session?.hostId ?? previousSession?.hostId ?? null
+        : null
+    };
+  }
+
+  private applyRecordedVttSession(session: Partial<VttSessionState> | null | undefined) {
+    const normalizedSession = session
+      ? this.createRecordedVttSessionState(session, { active: false, roomId: null, hostId: null })
+      : { active: false, roomId: null, hostId: null };
+    this.vttSession = normalizedSession;
+    this.syncPlaybackVttSession(normalizedSession);
+  }
+
+  private syncPlaybackVttSession(session: VttSessionState) {
+    if (!this.isCallPlaybackMode || this.isRestoringCallPlaybackEnvironment) {
+      return;
+    }
+
+    if (session.active && session.roomId) {
+      if (this.activePlaybackVttRoomId && this.activePlaybackVttRoomId !== session.roomId) {
+        this.playbackVtt.emit({ roomId: this.activePlaybackVttRoomId, active: false });
+      }
+
+      this.activePlaybackVttRoomId = session.roomId;
+      this.playbackVtt.emit({ roomId: session.roomId, active: true });
+      return;
+    }
+
+    this.closeActivePlaybackVtt(session.roomId ?? undefined);
+  }
+
+  private closeActivePlaybackVtt(roomId: string | undefined = this.activePlaybackVttRoomId ?? undefined) {
+    const closeRoomId = roomId ?? this.activePlaybackVttRoomId;
+    if (!closeRoomId) {
+      return;
+    }
+
+    this.playbackVtt.emit({ roomId: closeRoomId, active: false });
+    if (this.activePlaybackVttRoomId === closeRoomId || !roomId) {
+      this.activePlaybackVttRoomId = null;
+    }
+  }
+
+  private createRecordedSpotifyStateFromCurrent(): RecordedSpotifyState | null {
+    const track = this.spotify.currentTrack$.value;
+    if (!track?.uri) {
+      return null;
+    }
+
+    return this.createRecordedSpotifyState({
+      uri: track.uri,
+      name: track.name,
+      artist: this.getSpotifyTrackArtist(track),
+      image: this.getSpotifyTrackImage(track),
+      position: 0,
+      playing: !this.spotify.isPaused$.value,
+      paused: this.spotify.isPaused$.value,
+      contextUri: null,
+      shuffle: this.spotify.shuffleState$.value,
+      volumePercent: this.getCurrentSpotifyVolumePercent()
+    });
+  }
+
+  private createRecordedSpotifyStateFromSyncPayload(payload: any): RecordedSpotifyState | null {
+    const currentTrack = this.spotify.currentTrack$.value;
+    const uri = payload?.uri ?? currentTrack?.uri ?? null;
+    if (!uri) {
+      return null;
+    }
+
+    const payloadTrack = {
+      uri,
+      name: payload?.name,
+      artist: payload?.artist,
+      image: payload?.image,
+      album: payload?.album,
+      artists: payload?.artists
+    };
+
+    return this.createRecordedSpotifyState({
+      uri,
+      name: payloadTrack.name ?? currentTrack?.name,
+      artist: this.getSpotifyTrackArtist(payloadTrack) || this.getSpotifyTrackArtist(currentTrack),
+      image: this.getSpotifyTrackImage(payloadTrack) || this.getSpotifyTrackImage(currentTrack),
+      position: payload?.position,
+      playing: this.getSpotifyPlayingFromPayload(payload),
+      paused: this.getSpotifyPausedFromPayload(payload),
+      contextUri: payload?.contextUri ?? null,
+      shuffle: payload?.shuffle,
+      volumePercent: payload?.volumePercent ?? this.getCurrentSpotifyVolumePercent()
+    });
+  }
+
+  private createRecordedSpotifyState(state: Partial<RecordedSpotifyState>): RecordedSpotifyState {
+    const paused = state.paused === undefined
+      ? state.playing === undefined ? true : !state.playing
+      : !!state.paused;
+
+    return {
+      uri: state.uri ?? null,
+      name: state.name ?? 'Spotify',
+      artist: state.artist ?? '',
+      image: state.image ?? '',
+      position: Math.max(0, Number(state.position) || 0),
+      playing: !paused,
+      paused,
+      contextUri: state.contextUri ?? null,
+      shuffle: !!state.shuffle,
+      volumePercent: this.normalizeSpotifyVolume(state.volumePercent ?? this.getCurrentSpotifyVolumePercent())
+    };
+  }
+
+  private applyRecordedSpotifyState(state: Partial<RecordedSpotifyState> | null | undefined) {
+    if (!state?.uri) {
+      this.playbackSpotifyState = null;
+      this.lastAppliedPlaybackSpotifySignature = '';
+      return;
+    }
+
+    this.playbackSpotifyState = this.createRecordedSpotifyState(state);
+    this.playbackSpotifyVolumePercent = this.playbackSpotifyState.volumePercent;
+    this.syncSpotifyPlayerToPlaybackState(this.playbackSpotifyState);
+  }
+
+  private getSpotifyTrackArtist(track: any): string {
+    if (!track) {
+      return '';
+    }
+
+    if (track.artist) {
+      return track.artist;
+    }
+
+    if (Array.isArray(track.artists)) {
+      return track.artists.map((artist: any) => artist?.name).filter(Boolean).join(', ');
+    }
+
+    return '';
+  }
+
+  private getSpotifyTrackImage(track: any): string {
+    return track?.image
+      ?? track?.album?.images?.[0]?.url
+      ?? track?.images?.[0]?.url
+      ?? '';
+  }
+
+  private getSpotifyPausedFromPayload(payload: any): boolean {
+    if (payload?.paused !== undefined) {
+      return !!payload.paused;
+    }
+
+    if (payload?.playing !== undefined) {
+      return !payload.playing;
+    }
+
+    if (payload?.isPlaying !== undefined) {
+      return !payload.isPlaying;
+    }
+
+    return this.spotify.isPaused$.value;
+  }
+
+  private getSpotifyPlayingFromPayload(payload: any): boolean {
+    return !this.getSpotifyPausedFromPayload(payload);
+  }
+
+  private getCurrentSpotifyVolumePercent(): number {
+    const devices = this.spotify.devices$.value ?? [];
+    const activeDeviceId = this.spotify.activeDeviceId$.value;
+    const activeDevice = devices.find(device => device.id === activeDeviceId) ?? devices.find(device => device.is_active);
+    return this.normalizeSpotifyVolume(activeDevice?.volume_percent ?? this.playbackSpotifyVolumePercent ?? 100);
+  }
+
+  private normalizeSpotifyVolume(value: number | string | null | undefined): number {
+    return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+  }
+
+  setPlaybackSpotifyVolume(value: number | string) {
+    const volumePercent = this.normalizeSpotifyVolume(value);
+    this.playbackSpotifyVolumePercent = volumePercent;
+    if (this.playbackSpotifyState) {
+      this.playbackSpotifyState = {
+        ...this.playbackSpotifyState,
+        volumePercent
+      };
+    }
+    void this.spotify.setVolume(volumePercent / 100);
+  }
+
+  private syncSpotifyPlayerToPlaybackState(state: RecordedSpotifyState) {
+    if (!this.isCallPlaybackMode || this.isRestoringCallPlaybackEnvironment || !state.uri) {
+      return;
+    }
+
+    const signature = [
+      state.uri,
+      state.playing ? 'playing' : 'paused',
+      Math.floor(state.position / 1000),
+      state.contextUri ?? '',
+      state.volumePercent
+    ].join('|');
+    if (signature === this.lastAppliedPlaybackSpotifySignature) {
+      return;
+    }
+
+    this.lastAppliedPlaybackSpotifySignature = signature;
+    void this.spotify.setVolume(state.volumePercent / 100);
+    if (state.playing) {
+      void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined);
+      return;
+    }
+
+    void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined)
+      .then(() => this.spotify.pause(true))
+      .catch(() => undefined);
+  }
+
+  private cloneSpotifyRequests(requests: any[] | null | undefined): any[] {
+    return Array.isArray(requests)
+      ? requests.map(request => ({ ...request }))
+      : [];
+  }
+
+  private recordSpotifyRequestsSnapshot() {
+    this.recordCallEnvironmentEvent('spotify-requests', this.cloneSpotifyRequests(this.spotifyRequests));
+  }
+
+  private async recordCurrentSpotifyPlaybackState() {
+    if (!this.sessionRecording.isRecording()) {
+      return;
+    }
+
+    const state = await this.spotify.getPlaybackState().catch(() => null);
+    if (!state) {
+      return;
+    }
+
+    const track = state?.track_window?.current_track;
+    if (!track?.uri) {
+      return;
+    }
+
+    const recordedSpotifyState = this.createRecordedSpotifyState({
+      uri: track.uri,
+      name: track.name,
+      artist: this.getSpotifyTrackArtist(track),
+      image: this.getSpotifyTrackImage(track),
+      position: state.position,
+      playing: !state.paused,
+      paused: state.paused,
+      contextUri: state.context?.uri ?? null,
+      shuffle: state.shuffle_state,
+      volumePercent: this.getCurrentSpotifyVolumePercent()
+    });
+    this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+  }
+
+  private recordCurrentCallEnvironmentInitialState() {
+    this.sessionRecording.recordCallEnvironmentInitialState(this.createCallEnvironmentState());
+    this.lastRecordedCallParticipantsSnapshot = this.getCallParticipantsSnapshotSignature(
+      this.createCallParticipantSnapshots()
+    );
+  }
+
+  private recordCallEnvironmentEvent(action: RecordedCallEnvironmentAction, data: any) {
+    if (!this.sessionRecording.isRecording() || this.isCallPlaybackMode || this.isApplyingCallPlaybackEnvironment) {
+      return;
+    }
+
+    this.sessionRecording.recordCallEnvironmentEvent(action, data);
+  }
+
+  private recordCallParticipantsSnapshotIfChanged() {
+    if (!this.sessionRecording.isRecording() || this.isCallPlaybackMode) {
+      return;
+    }
+
+    const snapshot = this.createCallParticipantSnapshots();
+    const signature = this.getCallParticipantsSnapshotSignature(snapshot);
+    if (signature === this.lastRecordedCallParticipantsSnapshot) {
+      return;
+    }
+
+    this.lastRecordedCallParticipantsSnapshot = signature;
+    this.recordCallEnvironmentEvent('participants', snapshot);
+  }
+
+  private createCallEnvironmentState(): RecordedCallEnvironmentState {
+    return {
+      activeColors: this.activeColors,
+      activeOverlayImage: this.activeOverlayImage,
+      activeOverlayText: this.activeOverlayText,
+      activeTemporaryAtmosphereBackground: this.activeTemporaryAtmosphereBackground,
+      sceneMainCharacterIds: [...this.sceneMainCharacterIds],
+      isDmMode: this.isDmMode,
+      vttSession: this.createRecordedVttSessionState(this.vttSession, this.vttSession),
+      spotify: this.createRecordedSpotifyStateFromCurrent(),
+      spotifyRequests: this.cloneSpotifyRequests(this.spotifyRequests),
+      participants: this.createCallParticipantSnapshots()
+    };
+  }
+
+  private createCallParticipantSnapshots(): RecordedCallParticipantSnapshot[] {
+    const localParticipant = this.getLocalContextMenuParticipant();
+    const snapshots: RecordedCallParticipantSnapshot[] = [];
+    if (localParticipant) {
+      snapshots.push(this.createCallParticipantSnapshot(localParticipant));
+    }
+
+    this.remoteStreams.forEach(remote => snapshots.push(this.createCallParticipantSnapshot(remote)));
+    return snapshots;
+  }
+
+  private createCallParticipantSnapshot(participant: ParticipantStream): RecordedCallParticipantSnapshot {
+    return {
+      id: participant.id,
+      isLocal: !!participant.isLocal,
+      userData: this.createCharacterSnapshot(participant.userData),
+      participantMeta: participant.participantMeta ?? null,
+      ping: participant.ping,
+      volumePercent: participant.volumePercent,
+      isSceneMainCharacter: participant.isSceneMainCharacter,
+      hasAudio: !!participant.stream?.getAudioTracks().length,
+      hasVideo: !!participant.stream?.getVideoTracks().length
+    };
+  }
+
+  private createCharacterSnapshot(character: ICharacter | undefined | null): Partial<ICharacter> | null {
+    if (!character) {
+      return null;
+    }
+
+    return {
+      _id: character._id,
+      ownerId: character.ownerId,
+      name: character.name,
+      race: character.race,
+      icon: character.icon,
+      baseStats: character.baseStats ? { ...character.baseStats } : undefined,
+      classes: Array.isArray(character.classes) ? character.classes.map(characterClass => ({ ...characterClass })) : [],
+      ac: character.ac
+    };
+  }
+
+  private getCallParticipantsSnapshotSignature(snapshot: RecordedCallParticipantSnapshot[]): string {
+    return JSON.stringify(snapshot);
+  }
+
+  private setCallPlaybackParticipantSnapshots(snapshots: RecordedCallParticipantSnapshot[] | null | undefined) {
+    if (!Array.isArray(snapshots)) {
+      return;
+    }
+
+    snapshots.forEach(snapshot => {
+      if (snapshot?.id) {
+        this.callPlaybackParticipantSnapshots.set(snapshot.id, snapshot);
+      }
+    });
+  }
+
+  private hasPlayableCallRecording(recording: SessionRecording | null | undefined): boolean {
+    return !!recording && (!!recording.media || !!recording.participantMedia?.length);
+  }
+
+  private getRecordingPlaybackDurationMs(recording: SessionRecording | null | undefined): number {
+    if (!recording) {
+      return 0;
+    }
+
+    const participantDurationMs = (recording.participantMedia ?? []).reduce(
+      (durationMs, participant) => Math.max(durationMs, participant.endedAtMs),
+      0
+    );
+
+    return Math.max(recording.media?.durationMs ?? 0, recording.durationMs, participantDurationMs);
+  }
+
+  private createAstralRecordingManifest(recording: SessionRecording) {
+    return {
+      format: 'astral-session-recording',
+      formatVersion: 1,
+      packagedAt: new Date().toISOString(),
+      recording: {
+        id: recording.id,
+        callRoomId: recording.callRoomId,
+        startedAt: recording.startedAt,
+        endedAt: recording.endedAt,
+        durationMs: recording.durationMs,
+        media: this.createAstralMediaManifest(recording.media),
+        participantMedia: (recording.participantMedia ?? []).map(participant => ({
+          participantId: participant.participantId,
+          isLocal: participant.isLocal,
+          userData: participant.userData,
+          participantMeta: participant.participantMeta,
+          volumePercent: participant.volumePercent,
+          startedAtMs: participant.startedAtMs,
+          endedAtMs: participant.endedAtMs,
+          media: this.createAstralMediaManifest(participant.media)
+        })),
+        vtt: recording.vtt,
+        callEnvironment: recording.callEnvironment
+      }
+    };
+  }
+
+  private createAstralMediaManifest(media: SessionRecordingMedia | null | undefined) {
+    if (!media) {
+      return null;
+    }
+
+    return {
+      storage: media.storage,
+      mimeType: media.mimeType,
+      durationMs: media.durationMs,
+      size: media.size,
+      path: media.path ?? null
+    };
+  }
+
+  private syncCallParticipantRecorders() {
+    if (!this.sessionRecording.isRecording() || this.finalizingSessionRecording || this.isCallPlaybackMode) {
+      return;
+    }
+
+    const activeParticipantIds = new Set<string>();
+    this.getCallRecordingParticipantsForStreams().forEach(participant => {
+      const tracks = this.getRecordableParticipantTracks(participant);
+      if (!tracks.length) {
+        return;
+      }
+
+      activeParticipantIds.add(participant.id);
+      const existingRecorder = this.callParticipantRecorders.get(participant.id);
+      if (existingRecorder && this.hasSameTrackSet(existingRecorder.stream.getTracks(), tracks)) {
+        existingRecorder.userData = this.createCharacterSnapshot(participant.userData);
+        existingRecorder.participantMeta = participant.participantMeta ?? null;
+        existingRecorder.volumePercent = participant.volumePercent;
+        return;
+      }
+
+      if (existingRecorder) {
+        this.stopCallParticipantRecorder(existingRecorder);
+      }
+
+      this.startCallParticipantRecorder(participant, tracks);
+    });
+
+    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
+      if (!activeParticipantIds.has(recorder.participantId)) {
+        this.stopCallParticipantRecorder(recorder);
+      }
+    });
+  }
+
+  private getCallRecordingParticipantsForStreams(): CallRecordingParticipant[] {
+    const localIdentity = this.videoService.getCurrentParticipantIdentity() ?? 'local';
+    const participants: CallRecordingParticipant[] = [];
+    const localRecordingStream = this.getLocalRecordingStream();
+
+    if (localRecordingStream) {
+      participants.push({
+        id: localIdentity,
+        stream: localRecordingStream,
+        userData: this.isDmMode ? this.dmCharacter : this.character,
+        participantMeta: this.videoService.getCurrentParticipantMetadata(),
+        isLocal: true,
+        volumePercent: 100
+      });
+    }
+
+    this.remoteStreams.forEach(remote => {
+      participants.push({
+        id: remote.id,
+        stream: remote.stream,
+        userData: remote.userData,
+        participantMeta: remote.participantMeta,
+        isLocal: false,
+        volumePercent: remote.volumePercent
+      });
+    });
+
+    return participants;
+  }
+
+  private getLocalRecordingStream(): MediaStream | null {
+    const displayStream = this.getCompanionLocalStream(this.videoService.remoteStreams$.value) || this.localStream;
+    const audioStream = this.videoService.getSelectedCompanionAudioStream() || this.localStream;
+    const tracks: MediaStreamTrack[] = [];
+    displayStream?.getVideoTracks()
+      .filter(track => track.readyState === 'live')
+      .forEach(track => tracks.push(track));
+    audioStream?.getAudioTracks()
+      .filter(track => track.readyState === 'live')
+      .forEach(track => tracks.push(track));
+
+    return tracks.length ? new MediaStream(tracks) : null;
+  }
+
+  private getRecordableParticipantTracks(participant: CallRecordingParticipant): MediaStreamTrack[] {
+    return participant.stream?.getTracks().filter(track => track.readyState === 'live') ?? [];
+  }
+
+  private hasSameTrackSet(firstTracks: MediaStreamTrack[], secondTracks: MediaStreamTrack[]): boolean {
+    const firstTrackIds = firstTracks.map(track => track.id).sort();
+    const secondTrackIds = secondTracks.map(track => track.id).sort();
+    return firstTrackIds.length === secondTrackIds.length &&
+      firstTrackIds.every((trackId, index) => trackId === secondTrackIds[index]);
+  }
+
+  private startCallParticipantRecorder(participant: CallRecordingParticipant, tracks: MediaStreamTrack[]) {
+    const stream = new MediaStream(tracks);
+    const startedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt);
+    let recorder: MediaRecorder;
+    let mimeType = this.getSupportedSessionRecordingMimeType(stream) || '';
+
+    try {
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      mimeType = recorder.mimeType || mimeType || 'video/webm';
+    } catch (error) {
+      console.error('Failed to create participant recorder', error);
+      this.sessionRecordingError = 'Recording unavailable';
+      this.stopSessionRecording(true);
+      return;
+    }
+
+    const participantRecorder: CallParticipantRecorder = {
+      participantId: participant.id,
+      isLocal: !!participant.isLocal,
+      userData: this.createCharacterSnapshot(participant.userData),
+      participantMeta: participant.participantMeta ?? null,
+      volumePercent: participant.volumePercent,
+      stream,
+      recorder,
+      chunks: [],
+      mimeType,
+      startedAtMs,
+      stopping: false,
+      astralSegmentIndex: this.astralRecordingSessionId
+        ? this.getNextAstralParticipantSegmentIndex(participant.id)
+        : null,
+      astralFilePath: null,
+      astralFileUrl: null,
+      astralSize: 0,
+      astralWriteChain: Promise.resolve(),
+      astralWriteFailed: false
+    };
+
+    recorder.ondataavailable = event => {
+      if (event.data.size > 0) {
+        if (this.astralRecordingSessionId && participantRecorder.astralSegmentIndex !== null) {
+          this.queueAstralParticipantChunk(participantRecorder, event.data);
+        } else {
+          participantRecorder.chunks.push(event.data);
+        }
+      }
+    };
+    recorder.onerror = event => {
+      console.error('Participant session recorder error', event);
+      this.sessionRecordingError = 'Recording failed';
+      this.stopSessionRecording(true);
+      this.cdr.detectChanges();
+    };
+    recorder.onstop = () => void this.handleCallParticipantRecorderStopped(participantRecorder);
+
+    try {
+      recorder.start(1000);
+      this.callParticipantRecorders.set(participant.id, participantRecorder);
+    } catch (error) {
+      console.error('Failed to start participant recorder', error);
+      this.sessionRecordingError = 'Recording failed';
+      this.stopSessionRecording(true);
+    }
+  }
+
+  private getNextAstralParticipantSegmentIndex(participantId: string): number {
+    const nextIndex = this.astralParticipantSegmentCounters.get(participantId) ?? 0;
+    this.astralParticipantSegmentCounters.set(participantId, nextIndex + 1);
+    return nextIndex;
+  }
+
+  private queueAstralParticipantChunk(participantRecorder: CallParticipantRecorder, chunk: Blob) {
+    const sessionId = this.astralRecordingSessionId;
+    const segmentIndex = participantRecorder.astralSegmentIndex;
+    if (!sessionId || segmentIndex === null || participantRecorder.astralWriteFailed) {
+      return;
+    }
+
+    const chunkStartedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
+    participantRecorder.astralWriteChain = participantRecorder.astralWriteChain
+      .catch(() => undefined)
+      .then(async () => {
+        if (participantRecorder.astralWriteFailed) {
+          return;
+        }
+
+        try {
+          const result = await this.astralRecording.writeChunk({
+            sessionId,
+            participantId: participantRecorder.participantId,
+            segmentIndex,
+            mimeType: participantRecorder.mimeType,
+            startedAtMs: participantRecorder.startedAtMs,
+            chunkStartedAtMs,
+            blob: chunk
+          });
+          participantRecorder.astralFilePath = result.filePath;
+          participantRecorder.astralFileUrl = result.fileUrl;
+          participantRecorder.astralSize = result.size;
+        } catch (error) {
+          console.error('Failed to persist Astral recording chunk', error);
+          participantRecorder.astralWriteFailed = true;
+          this.sessionRecordingError = 'Recording failed';
+          this.stopSessionRecording(true);
+        }
+      });
+  }
+
+  private stopAllCallParticipantRecorders() {
+    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
+      this.stopCallParticipantRecorder(recorder);
+    });
+  }
+
+  private stopCallParticipantRecorder(participantRecorder: CallParticipantRecorder) {
+    if (participantRecorder.stopping) {
+      return;
+    }
+
+    participantRecorder.stopping = true;
+    if (participantRecorder.recorder.state !== 'inactive') {
+      this.stoppingCallParticipantRecorders += 1;
+      participantRecorder.recorder.stop();
+      return;
+    }
+
+    void this.handleCallParticipantRecorderStopped(participantRecorder);
+  }
+
+  private async handleCallParticipantRecorderStopped(participantRecorder: CallParticipantRecorder) {
+    await participantRecorder.astralWriteChain.catch(() => undefined);
+    if (participantRecorder.astralWriteFailed) {
+      this.callRecordingDiscardOnStop = true;
+      this.sessionRecordingError = 'Recording failed';
+    }
+
+    const activeRecorder = this.callParticipantRecorders.get(participantRecorder.participantId);
+    if (activeRecorder === participantRecorder) {
+      this.callParticipantRecorders.delete(participantRecorder.participantId);
+    }
+
+    if (participantRecorder.stopping && this.stoppingCallParticipantRecorders > 0) {
+      this.stoppingCallParticipantRecorders -= 1;
+    }
+
+    if (!this.callRecordingDiscardOnStop && participantRecorder.astralFileUrl) {
+      const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
+      this.sessionRecording.attachCallParticipantExternalMedia({
+        participantId: participantRecorder.participantId,
+        isLocal: participantRecorder.isLocal,
+        userData: participantRecorder.userData,
+        participantMeta: participantRecorder.participantMeta,
+        volumePercent: participantRecorder.volumePercent,
+        startedAtMs: participantRecorder.startedAtMs
+      }, participantRecorder.astralFileUrl, participantRecorder.mimeType, durationMs, participantRecorder.astralSize, participantRecorder.astralFilePath);
+    } else if (!this.callRecordingDiscardOnStop && participantRecorder.chunks.length > 0) {
+      const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
+      this.sessionRecording.attachCallParticipantMedia({
+        participantId: participantRecorder.participantId,
+        isLocal: participantRecorder.isLocal,
+        userData: participantRecorder.userData,
+        participantMeta: participantRecorder.participantMeta,
+        volumePercent: participantRecorder.volumePercent,
+        startedAtMs: participantRecorder.startedAtMs
+      }, new Blob(participantRecorder.chunks, { type: participantRecorder.mimeType }), participantRecorder.mimeType, durationMs);
+    }
+
+    void this.finishSessionRecordingIfReady();
+  }
+
+  private async finishSessionRecordingIfReady() {
+    if (!this.finalizingSessionRecording || this.stoppingCallParticipantRecorders > 0 || this.callParticipantRecorders.size > 0) {
+      return;
+    }
+
+    const discardRecording = this.callRecordingDiscardOnStop;
+    this.cleanupCallParticipantRecorders();
+
+    if (discardRecording) {
+      await this.abortAstralRecordingSession();
+      this.sessionRecording.abortRecording();
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const recording = this.sessionRecording.stopRecording();
+    if (this.hasPlayableCallRecording(recording)) {
+      const packagedAsAstral = recording ? await this.finalizeAstralRecordingSession(recording) : false;
+      this.recordedSession = this.sessionRecording.getLastRecording() ?? recording;
+      this.snackBar.open(
+        packagedAsAstral
+          ? 'Call and VTT recording ready for playback and saved as .astral.'
+          : 'Call and VTT recording ready for playback.',
+        'Close',
+        { duration: 3000 }
+      );
+    } else {
+      await this.abortAstralRecordingSession();
+      this.sessionRecordingError = 'No participant media captured';
+    }
+
+    this.cdr.detectChanges();
+  }
+
+  private cleanupCallParticipantRecorders() {
+    this.clearCallRecordingTimer();
+    this.callParticipantRecorders.clear();
+    this.stoppingCallParticipantRecorders = 0;
+    this.finalizingSessionRecording = false;
+    this.callRecordingStartedAt = 0;
+    this.callRecordingDiscardOnStop = false;
+    this.sessionRecordingDurationSeconds = 0;
+  }
+
+  private prepareCallPlaybackSources(recording: SessionRecording) {
+    if (this.callPlaybackSourcesRecordingId === recording.id) {
+      return;
+    }
+
+    this.cleanupCallPlaybackSources();
+    this.callPlaybackSourcesRecordingId = recording.id;
+    const host = document.createElement('div');
+    host.className = 'call-playback-media-host';
+    Object.assign(host.style, {
+      position: 'fixed',
+      width: '320px',
+      height: '180px',
+      overflow: 'hidden',
+      opacity: '0.01',
+      pointerEvents: 'none',
+      left: '0',
+      top: '0',
+      zIndex: '-1'
+    });
+    document.body.appendChild(host);
+    this.callPlaybackMediaHost = host;
+
+    (recording.participantMedia ?? []).forEach(participant => {
+      const video = document.createElement('video');
+      video.src = participant.media.url;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.volume = Math.min(1, Math.max(0, participant.volumePercent / 100));
+      host.appendChild(video);
+      void this.applyAudioOutputToMediaElement(video);
+
+      const source: CallPlaybackSource = {
+        participant,
+        video,
+        stream: this.capturePlaybackVideoStream(video),
+        cleanup: [],
+        active: false,
+        ended: false
+      };
+      this.bindPlaybackSourceVideoReadiness(source);
+      this.callPlaybackSources.push(source);
+    });
+
+    this.refreshCallPlaybackParticipantStreams(0);
+  }
+
+  private capturePlaybackVideoStream(video: HTMLVideoElement): MediaStream | null {
+    return (video as HTMLVideoElement & {
+      captureStream?: () => MediaStream;
+      mozCaptureStream?: () => MediaStream;
+    }).captureStream?.() ?? (video as HTMLVideoElement & {
+      mozCaptureStream?: () => MediaStream;
+    }).mozCaptureStream?.() ?? null;
+  }
+
+  private bindPlaybackSourceVideoReadiness(source: CallPlaybackSource) {
+    const refreshSourceStream = () => {
+      if (this.updatePlaybackSourceStream(source)) {
+        this.refreshCallPlaybackParticipantStreams(this.callPlaybackCurrentTimeMs);
+        setTimeout(() => this.bindVisibleRemoteVideos());
+      }
+    };
+
+    ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'resize', 'seeked'].forEach(eventName => {
+      source.video.addEventListener(eventName, refreshSourceStream);
+      source.cleanup.push(() => source.video.removeEventListener(eventName, refreshSourceStream));
+    });
+
+    const markSourceEnded = () => {
+      source.ended = true;
+    };
+    source.video.addEventListener('ended', markSourceEnded);
+    source.cleanup.push(() => source.video.removeEventListener('ended', markSourceEnded));
+
+    const refreshInterval = window.setInterval(refreshSourceStream, 250);
+    const refreshTimeout = window.setTimeout(() => window.clearInterval(refreshInterval), 4000);
+    source.cleanup.push(() => {
+      window.clearInterval(refreshInterval);
+      window.clearTimeout(refreshTimeout);
+    });
+  }
+
+  private updatePlaybackSourceStream(source: CallPlaybackSource): boolean {
+    const nextStream = this.capturePlaybackVideoStream(source.video);
+    if (!nextStream) {
+      return false;
+    }
+
+    if (!source.stream) {
+      source.stream = nextStream;
+      return true;
+    }
+
+    if (source.stream === nextStream || !this.shouldReplacePlaybackSourceStream(source.stream, nextStream)) {
+      return false;
+    }
+
+    source.stream = nextStream;
+    return true;
+  }
+
+  private shouldReplacePlaybackSourceStream(currentStream: MediaStream, nextStream: MediaStream): boolean {
+    const currentTracks = currentStream.getTracks();
+    const nextTracks = nextStream.getTracks();
+    if (this.hasSameTrackSet(currentTracks, nextTracks)) {
+      return false;
+    }
+
+    const currentLiveTrackCount = currentTracks.filter(track => track.readyState === 'live').length;
+    const nextLiveTrackCount = nextTracks.filter(track => track.readyState === 'live').length;
+    if (currentLiveTrackCount === 0 && nextLiveTrackCount > 0) {
+      return true;
+    }
+
+    return !this.hasVideoTrack(currentStream) && this.hasVideoTrack(nextStream);
+  }
+
+  private cleanupCallPlaybackSources() {
+    this.stopCallPlaybackSyncTimer();
+    Array.from(this.visiblePlaybackSourceTargets.values()).forEach(video => this.detachVisiblePlaybackSourceVideo(video));
+    this.visiblePlaybackSourceTargets.clear();
+    this.callPlaybackSources.forEach(source => {
+      source.cleanup.forEach(cleanup => cleanup());
+      source.video.pause();
+      source.video.removeAttribute('src');
+      source.video.load();
+      source.video.remove();
+    });
+    this.callPlaybackSources = [];
+    this.playbackLocalParticipantStream = null;
+    this.playbackParticipantStreams = [];
+    this.callPlaybackSourcesRecordingId = null;
+    this.callPlaybackParticipantSnapshots.clear();
+    this.callPlaybackPaused = true;
+    this.callPlaybackCurrentTimeMs = 0;
+    this.callPlaybackDurationMs = 0;
+    this.callPlaybackClockStartedAtMs = 0;
+    this.callPlaybackClockStartTimeMs = 0;
+    this.visiblePlaybackSyncToken = 0;
+    this.activePlaybackVttRoomId = null;
+    this.playbackSpotifyState = null;
+    this.playbackSpotifyVolumePercent = 100;
+    this.lastAppliedPlaybackSpotifySignature = '';
+    this.callPlaybackMediaHost?.remove();
+    this.callPlaybackMediaHost = null;
+  }
+
+  private syncCallPlaybackSourcesToState(state: SessionPlaybackState) {
+    if (!state.recording || !this.callPlaybackSources.length) {
+      return;
+    }
+
+    this.refreshCallPlaybackParticipantStreams(state.currentTimeMs);
+    if (state.paused) {
+      this.pauseCallPlaybackSources();
+    } else {
+      this.playCallPlaybackSources();
+    }
+  }
+
+  private seekCallPlaybackSources(currentTimeMs: number) {
+    this.isSeekingCallPlaybackSources = true;
+    this.callPlaybackCurrentTimeMs = currentTimeMs;
+    this.visiblePlaybackSyncToken += 1;
+    this.callPlaybackSources.forEach(source => {
+      source.ended = false;
+      const relativeTimeSeconds = Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000;
+      this.setPlaybackMediaTime(source.video, relativeTimeSeconds);
+    });
+    this.isSeekingCallPlaybackSources = false;
+    if (!this.callPlaybackPaused) {
+      this.startCallPlaybackClock(currentTimeMs);
+    }
+    this.refreshCallPlaybackParticipantStreams(currentTimeMs);
+    setTimeout(() => this.bindVisibleRemoteVideos());
+  }
+
+  private playCallPlaybackSources() {
+    this.startCallPlaybackClock(this.callPlaybackCurrentTimeMs);
+    this.refreshCallPlaybackParticipantStreams(this.callPlaybackCurrentTimeMs);
+    this.callPlaybackSources
+      .filter(source => source.active && !source.ended)
+      .forEach(source => this.playPlaybackMediaSource(source));
+    this.startCallPlaybackSyncTimer();
+  }
+
+  private pauseCallPlaybackSources() {
+    this.callPlaybackCurrentTimeMs = this.getCurrentCallPlaybackTimeMs();
+    this.callPlaybackClockStartedAtMs = 0;
+    this.callPlaybackSources.forEach(source => source.video.pause());
+    this.stopCallPlaybackSyncTimer();
+  }
+
+  setCallPlaybackPaused(paused: boolean) {
+    if (!this.isCallPlaybackMode) {
+      return;
+    }
+
+    this.callPlaybackPaused = paused;
+    if (paused) {
+      this.pauseCallPlaybackSources();
+    } else {
+      this.playCallPlaybackSources();
+    }
+
+    this.sessionRecording.setPlaybackPaused(paused);
+  }
+
+  seekCallPlayback(value: number | string) {
+    const currentTimeMs = Math.max(0, Number(value) || 0);
+    this.callPlaybackCurrentTimeMs = currentTimeMs;
+    this.seekCallPlaybackSources(currentTimeMs);
+    this.sessionRecording.setPlaybackTime(currentTimeMs, this.callPlaybackPaused);
+  }
+
+  private startCallPlaybackSyncTimer() {
+    if (this.callPlaybackSyncInterval) {
+      return;
+    }
+
+    this.callPlaybackSyncInterval = setInterval(() => {
+      if (!this.isCallPlaybackMode || this.isSeekingCallPlaybackSources) {
+        return;
+      }
+
+      const currentTimeMs = this.getCurrentCallPlaybackTimeMs();
+      this.callPlaybackCurrentTimeMs = currentTimeMs;
+      this.sessionRecording.setPlaybackTime(currentTimeMs, this.callPlaybackPaused);
+      this.refreshCallPlaybackParticipantStreams(currentTimeMs);
+      if (!this.callPlaybackPaused) {
+        this.callPlaybackSources
+          .filter(source => source.active && source.video.paused && !source.ended)
+          .forEach(source => this.playPlaybackMediaSource(source));
+      }
+      if (currentTimeMs >= this.callPlaybackDurationMs) {
+        this.onCallPlaybackEnded();
+      }
+    }, 250);
+  }
+
+  private stopCallPlaybackSyncTimer() {
+    if (this.callPlaybackSyncInterval) {
+      clearInterval(this.callPlaybackSyncInterval);
+      this.callPlaybackSyncInterval = null;
+    }
+  }
+
+  private getCurrentCallPlaybackTimeMs(): number {
+    if (this.callPlaybackPaused || !this.callPlaybackClockStartedAtMs) {
+      return this.callPlaybackCurrentTimeMs;
+    }
+
+    return Math.min(
+      this.callPlaybackDurationMs || Number.MAX_SAFE_INTEGER,
+      this.callPlaybackClockStartTimeMs + (Date.now() - this.callPlaybackClockStartedAtMs)
+    );
+  }
+
+  private startCallPlaybackClock(currentTimeMs: number) {
+    this.callPlaybackClockStartTimeMs = Math.max(0, currentTimeMs);
+    this.callPlaybackClockStartedAtMs = Date.now();
+  }
+
+  private playPlaybackMediaSource(source: CallPlaybackSource) {
+    if (source.ended || source.video.ended) {
+      source.ended = true;
+      return;
+    }
+
+    void source.video.play().catch(() => undefined);
+  }
+
+  private refreshCallPlaybackParticipantStreams(currentTimeMs: number) {
+    this.callPlaybackSources.forEach(source => {
+      const isActive = this.isCallPlaybackSourceActive(source, currentTimeMs);
+      if (!isActive) {
+        source.active = false;
+        source.video.pause();
+        return;
+      }
+
+      if (!source.active) {
+        source.active = true;
+        source.ended = false;
+        this.setPlaybackMediaTime(source.video, Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000);
+      }
+    });
+
+    const activeSourceMap = new Map<string, CallPlaybackSource>();
+    this.callPlaybackSources
+      .filter(source => source.active && (source.stream || this.hasVideoMedia(source)))
+      .sort((first, second) => first.participant.startedAtMs - second.participant.startedAtMs)
+      .forEach(source => activeSourceMap.set(source.participant.participantId, source));
+
+    const activeSources = Array.from(activeSourceMap.values())
+      .sort((first, second) => first.participant.startedAtMs - second.participant.startedAtMs);
+
+    const participantStreams = activeSources.map(source => {
+      const snapshot = this.callPlaybackParticipantSnapshots.get(source.participant.participantId);
+      const volumePercent = snapshot?.volumePercent ?? source.participant.volumePercent;
+      source.video.volume = this.getPlaybackSourceVolume(volumePercent);
+      return {
+        id: source.participant.participantId,
+        stream: source.stream ?? undefined,
+        userData: this.toPlaybackCharacter(snapshot?.userData ?? source.participant.userData, source.participant.participantId),
+        participantMeta: snapshot?.participantMeta ?? source.participant.participantMeta,
+        isLocal: snapshot?.isLocal ?? source.participant.isLocal,
+        diagnostics: undefined,
+        ping: snapshot?.ping,
+        volumePercent,
+        isSceneMainCharacter: snapshot?.isSceneMainCharacter ?? this.isSceneMainCharacter(source.participant.participantId)
+      };
+    });
+
+    this.playbackLocalParticipantStream = participantStreams.find(participant => participant.isLocal) ?? null;
+    this.playbackParticipantStreams = participantStreams.filter(participant => !participant.isLocal);
+    this.cdr.detectChanges();
+    setTimeout(() => this.bindVisibleRemoteVideos());
+  }
+
+  private getPlaybackSourceVolume(participantVolumePercent: number): number {
+    return Math.min(1, Math.max(0, participantVolumePercent / 100));
+  }
+
+  private applyPlaybackParticipantVolume(participantId: string, volumePercent: number) {
+    this.callPlaybackSources.forEach(source => {
+      if (source.participant.participantId === participantId) {
+        source.video.volume = this.getPlaybackSourceVolume(volumePercent);
+      }
+    });
+  }
+
+  private isCallPlaybackSourceActive(source: CallPlaybackSource, currentTimeMs: number): boolean {
+    return currentTimeMs >= source.participant.startedAtMs &&
+      currentTimeMs <= Math.max(source.participant.endedAtMs, source.participant.startedAtMs + 250);
+  }
+
+  private toPlaybackCharacter(character: any, participantId: string): ICharacter {
+    const fallbackName = participantId || 'Recorded Participant';
+    return {
+      _id: character?._id ?? participantId,
+      ownerId: character?.ownerId ?? '',
+      servers: Array.isArray(character?.servers) ? character.servers : [],
+      name: character?.name ?? fallbackName,
+      race: character?.race ?? '',
+      icon: character?.icon ?? null,
+      baseStats: character?.baseStats ?? { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
+      classes: Array.isArray(character?.classes) ? character.classes : [],
+      ac: character?.ac
+    };
+  }
+
+  private bindVisibleRemoteVideos() {
+    this.bindVisibleLocalVideo();
+    const remotes = this.liveRemoteStreams;
+    this.remoteVideos.forEach((videoRef, i) => {
+      const video = videoRef.nativeElement;
+      const remote = remotes[i];
+      const stream = remote?.stream;
+      if (video && remote && this.isCallPlaybackMode) {
+        const source = this.getActivePlaybackSourceForParticipant(remote.id);
+        if (source && this.hasVideoMedia(source)) {
+          this.bindVisiblePlaybackSourceVideo(video, source);
+          return;
+        }
+      }
+      if (video && stream && video.srcObject !== stream) {
+        this.clearVisiblePlaybackMediaElement(video);
+        video.srcObject = stream;
+      }
+      if (video && !stream && video.srcObject) {
+        video.srcObject = null;
+      }
+      if (video && this.isCallPlaybackMode) {
+        video.muted = true;
+        return;
+      }
+      if (video && remote) {
+        this.configureRemoteAudio(remote, video);
+      }
+    });
+    if (this.isCallPlaybackMode) {
+      this.teardownAllRemoteAudioOutputs();
+    } else {
+      this.teardownMissingRemoteAudioOutputs(new Set(remotes.map(remote => remote.id)));
+    }
+  }
+
+  private bindVisibleLocalVideo() {
+    if (!this.localVideo) {
+      return;
+    }
+
+    const video = this.localVideo.nativeElement;
+    if (this.isCallPlaybackMode) {
+      const source = this.playbackLocalParticipantStream
+        ? this.getActivePlaybackSourceForParticipant(this.playbackLocalParticipantStream.id)
+        : null;
+      if (source && this.shouldBindVisiblePlaybackMediaElement(source)) {
+        this.bindVisiblePlaybackSourceVideo(video, source);
+        return;
+      }
+
+      const stream = this.playbackLocalParticipantStream?.stream ?? null;
+      if (video.srcObject !== stream) {
+        this.clearVisiblePlaybackMediaElement(video);
+        video.srcObject = stream;
+      }
+      video.muted = true;
+      return;
+    }
+
+    this.updateLocalVideoDisplay();
+  }
+
+  private shouldBindVisiblePlaybackMediaElement(source: CallPlaybackSource): boolean {
+    return this.hasVideoMedia(source);
+  }
+
+  private bindVisiblePlaybackSourceVideo(targetVideo: HTMLVideoElement, source: CallPlaybackSource) {
+    const sourceKey = this.getPlaybackSourceKey(source);
+    const previousTarget = this.visiblePlaybackSourceTargets.get(sourceKey);
+    if (previousTarget && previousTarget !== targetVideo) {
+      this.detachVisiblePlaybackSourceVideo(previousTarget);
+    }
+
+    if (targetVideo.dataset['playbackElementSourceKey'] !== sourceKey) {
+      this.detachVisiblePlaybackSourceVideo(targetVideo);
+      this.clearVisiblePlaybackMediaElement(targetVideo);
+      targetVideo.dataset['playbackElementSourceKey'] = sourceKey;
+      targetVideo.style.display = 'none';
+      this.visiblePlaybackSourceTargets.set(sourceKey, targetVideo);
+    }
+
+    const parent = targetVideo.parentElement;
+    if (parent && source.video.parentElement !== parent) {
+      parent.insertBefore(source.video, targetVideo.nextSibling);
+    }
+
+    source.video.playsInline = true;
+    source.video.preload = 'auto';
+    source.video.muted = false;
+    source.video.style.display = 'block';
+    source.video.style.visibility = '';
+    source.video.style.position = 'absolute';
+    source.video.style.inset = '0';
+    source.video.style.width = '100%';
+    source.video.style.height = '100%';
+    source.video.style.objectFit = 'contain';
+    source.video.style.background = '#000';
+    source.video.style.transform = source.participant.isLocal ? 'rotateY(180deg)' : '';
+    source.video.style.zIndex = '1';
+    source.video.classList.add('call-playback-visible-video');
+    void this.applyAudioOutputToMediaElement(source.video);
+
+    if (this.callPlaybackPaused || source.ended) {
+      if (!source.video.paused) {
+        source.video.pause();
+      }
+      return;
+    }
+
+    this.playPlaybackMediaSource(source);
+  }
+
+  private detachVisiblePlaybackSourceVideo(targetVideo: HTMLVideoElement) {
+    const sourceKey = targetVideo.dataset['playbackElementSourceKey'];
+    if (!sourceKey) {
+      targetVideo.style.display = '';
+      targetVideo.style.visibility = '';
+      return;
+    }
+
+    const source = this.callPlaybackSources.find(candidate => this.getPlaybackSourceKey(candidate) === sourceKey);
+    if (source) {
+      source.video.classList.remove('call-playback-visible-video');
+      source.video.style.display = '';
+      source.video.style.visibility = '';
+      source.video.style.position = '';
+      source.video.style.inset = '';
+      source.video.style.width = '';
+      source.video.style.height = '';
+      source.video.style.objectFit = '';
+      source.video.style.background = '';
+      source.video.style.transform = '';
+      source.video.style.zIndex = '';
+      if (this.callPlaybackMediaHost && source.video.parentElement !== this.callPlaybackMediaHost) {
+        this.callPlaybackMediaHost.appendChild(source.video);
+      }
+    }
+
+    this.visiblePlaybackSourceTargets.delete(sourceKey);
+    delete targetVideo.dataset['playbackElementSourceKey'];
+    targetVideo.style.display = '';
+    targetVideo.style.visibility = '';
+  }
+
+  private getPlaybackSourceKey(source: CallPlaybackSource): string {
+    return source.participant.media.url || `${source.participant.participantId}:${source.participant.startedAtMs}`;
+  }
+
+  private bindVisiblePlaybackMediaElement(video: HTMLVideoElement, source: CallPlaybackSource) {
+    if (video.srcObject) {
+      video.srcObject = null;
+    }
+
+    const sourceUrl = source.participant.media.url;
+    const isNewSource = video.dataset['playbackSourceUrl'] !== sourceUrl;
+    if (isNewSource) {
+      video.dataset['playbackSourceUrl'] = sourceUrl;
+      video.src = sourceUrl;
+      video.playsInline = true;
+      video.preload = 'auto';
+    }
+
+    video.muted = true;
+    const syncToken = String(this.visiblePlaybackSyncToken);
+    if (isNewSource || video.dataset['playbackSyncToken'] !== syncToken || this.callPlaybackPaused) {
+      const sourceTime = Math.max(0, this.callPlaybackCurrentTimeMs - source.participant.startedAtMs) / 1000;
+      this.setPlaybackMediaTime(video, sourceTime);
+      video.dataset['playbackSyncToken'] = syncToken;
+    } else {
+      this.correctVisiblePlaybackMediaDrift(video, source);
+    }
+
+    if (this.callPlaybackPaused || source.ended) {
+      if (!video.paused) {
+        video.pause();
+      }
+    } else {
+      if (video.paused && !video.ended) {
+        void video.play().catch(() => undefined);
+      }
+    }
+  }
+
+  private clearVisiblePlaybackMediaElement(video: HTMLVideoElement) {
+    this.detachVisiblePlaybackSourceVideo(video);
+    if (!video.src && !video.srcObject) {
+      return;
+    }
+
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+    delete video.dataset['playbackSourceUrl'];
+    delete video.dataset['playbackSyncToken'];
+    video.style.display = '';
+    video.style.visibility = '';
+    video.load();
+  }
+
+  private getActivePlaybackSourceForParticipant(participantId: string): CallPlaybackSource | null {
+    return this.callPlaybackSources.find(source =>
+      source.participant.participantId === participantId &&
+      this.isCallPlaybackSourceActive(source, this.callPlaybackCurrentTimeMs)
+    ) ?? null;
+  }
+
+  private hasVideoTrack(stream: MediaStream | null | undefined): boolean {
+    return !!stream?.getVideoTracks().some(track => track.readyState === 'live');
+  }
+
+  private hasVideoMedia(source: CallPlaybackSource): boolean {
+    return source.participant.media.mimeType.startsWith('video/');
+  }
+
+  private correctVisiblePlaybackMediaDrift(video: HTMLVideoElement, source: CallPlaybackSource) {
+    if (this.callPlaybackPaused || source.ended || video.seeking || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return;
+    }
+
+    const expectedTimeSeconds = Math.max(0, this.callPlaybackCurrentTimeMs - source.participant.startedAtMs) / 1000;
+    const actualTimeSeconds = Number.isFinite(video.currentTime) ? video.currentTime : expectedTimeSeconds;
+    const driftSeconds = Math.abs(actualTimeSeconds - expectedTimeSeconds);
+    const jumpedToStart = expectedTimeSeconds > 2 && actualTimeSeconds < 0.5;
+    if (jumpedToStart || driftSeconds > 1.5) {
+      this.setPlaybackMediaTime(video, expectedTimeSeconds);
+    }
+  }
+
+  private setPlaybackMediaTime(video: HTMLVideoElement, targetTimeSeconds: number) {
+    const applyTime = () => {
+      const duration = Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER;
+      const nextTime = Math.max(0, Math.min(duration, targetTimeSeconds));
+      try {
+        video.currentTime = nextTime;
+      } catch {
+        // Media metadata can race source assignment in WebView. The next
+        // explicit seek or activation will retry.
+      }
+    };
+
+    if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+      video.addEventListener('loadedmetadata', applyTime, { once: true });
+      return;
+    }
+
+    applyTime();
+  }
+
+  private getSupportedSessionRecordingMimeType(stream?: MediaStream): string | null {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+      return null;
+    }
+
+    const hasVideo = stream ? stream.getVideoTracks().length > 0 : true;
+    const supportedMimeType = (hasVideo
+      ? [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=h264,opus',
+        'video/webm'
+      ]
+      : [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'video/webm;codecs=opus',
+        'video/webm'
+      ]
+    ).find(type => MediaRecorder.isTypeSupported(type));
+
+    return supportedMimeType || null;
+  }
+
+  private clearCallRecordingTimer() {
+    if (this.callRecordingDurationInterval) {
+      clearInterval(this.callRecordingDurationInterval);
+      this.callRecordingDurationInterval = null;
+    }
+  }
+
   private syncMicInputMonitor() {
     const track = this.getActiveMicTrack();
     if (!track || track.readyState !== 'live') {
@@ -1126,8 +3059,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.applyAudioOutputToAllMedia();
   }
 
-  changeRemoteVolume(participantId: string, value: number | string) {
-    const volumePercent = this.normalizeRemoteVolume(value);
+  changeParticipantVolume(participantId: string, value: number | string) {
+    const volumePercent = this.normalizeParticipantVolume(value, this.isCallPlaybackMode ? 100 : 200);
+    if (this.isCallPlaybackMode) {
+      this.updatePlaybackParticipantVolume(participantId, volumePercent);
+      return;
+    }
+
     this.videoService.setParticipantVolume(participantId, volumePercent);
     this.remoteStreams = this.remoteStreams.map(remote => remote.id === participantId
       ? { ...remote, volumePercent }
@@ -1136,22 +3074,88 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.applyRemoteVolume(participantId, volumePercent);
   }
 
+  canShowParticipantVolumeControl(participant: ParticipantStream): boolean {
+    return this.isCallPlaybackMode || !participant.isLocal;
+  }
+
+  getParticipantVolumeMax(participant: ParticipantStream): number {
+    return this.isCallPlaybackMode ? 100 : 200;
+  }
+
+  private updatePlaybackParticipantVolume(participantId: string, volumePercent: number) {
+    const existingSnapshot = this.callPlaybackParticipantSnapshots.get(participantId);
+    if (existingSnapshot) {
+      this.callPlaybackParticipantSnapshots.set(participantId, {
+        ...existingSnapshot,
+        volumePercent
+      });
+    }
+
+    if (this.playbackLocalParticipantStream?.id === participantId) {
+      this.playbackLocalParticipantStream = {
+        ...this.playbackLocalParticipantStream,
+        volumePercent
+      };
+    }
+
+    this.playbackParticipantStreams = this.playbackParticipantStreams.map(participant => participant.id === participantId
+      ? { ...participant, volumePercent }
+      : participant
+    );
+    this.applyPlaybackParticipantVolume(participantId, volumePercent);
+    this.cdr.detectChanges();
+  }
+
   getRemoteVolumeIcon(remote: ParticipantStream): string {
     if (remote.volumePercent <= 0) return 'volume_off';
     if (remote.volumePercent > 100) return 'volume_up';
     return 'volume_down';
   }
 
+  get localDisplayCharacter(): ICharacter {
+    return this.isCallPlaybackMode
+      ? this.playbackLocalParticipantStream?.userData ?? this.character
+      : this.isDmMode ? this.dmCharacter : this.character;
+  }
+
+  get localDisplayIsDm(): boolean {
+    return this.isCallPlaybackMode
+      ? this.localDisplayCharacter.name === 'DM'
+      : this.isDmMode;
+  }
+
+  get localVideoHidden(): boolean {
+    if (!this.isCallPlaybackMode) {
+      return this.isVideoOff;
+    }
+
+    if (!this.playbackLocalParticipantStream) {
+      return true;
+    }
+
+    const source = this.getActivePlaybackSourceForParticipant(this.playbackLocalParticipantStream.id);
+    return !this.hasVideoTrack(this.playbackLocalParticipantStream.stream) &&
+      !source?.participant.media.mimeType.startsWith('video/');
+  }
+
   get localSceneMainCharacter(): boolean {
-    return this.isSceneMainCharacter(this.videoService.getCurrentParticipantIdentity());
+    return this.isSceneMainCharacter(this.getLocalDisplayParticipantId());
   }
 
   get localContextMenuOpen(): boolean {
-    return this.remoteContextMenu?.remoteId === this.videoService.getCurrentParticipantIdentity();
+    return this.remoteContextMenu?.remoteId === this.getLocalDisplayParticipantId();
   }
 
   get showLocalSelfView(): boolean {
+    if (this.isCallPlaybackMode) {
+      return !!this.playbackLocalParticipantStream && !this.hideSelfView;
+    }
+
     return !!this.localStream && !this.hideSelfView;
+  }
+
+  get liveRemoteStreams(): ParticipantStream[] {
+    return this.isCallPlaybackMode ? this.playbackParticipantStreams : this.remoteStreams;
   }
 
   get visibleSceneMainCharacterCount(): number {
@@ -1159,7 +3163,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get visibleParticipantCount(): number {
-    return this.remoteStreams.length + (this.showLocalSelfView ? 1 : 0);
+    return this.liveRemoteStreams.length + (this.showLocalSelfView ? 1 : 0);
   }
 
   get hasVisibleSceneMainCharacters(): boolean {
@@ -1249,15 +3253,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   getLocalPriorityGridColumn(): string | null {
-    return this.getPriorityGridColumn(this.videoService.getCurrentParticipantIdentity());
+    return this.getPriorityGridColumn(this.getLocalDisplayParticipantId());
   }
 
   getLocalPriorityGridRow(): string | null {
-    return this.getPriorityGridRow(this.videoService.getCurrentParticipantIdentity());
+    return this.getPriorityGridRow(this.getLocalDisplayParticipantId());
   }
 
   getLocalPriorityGridMaxHeight(): string | null {
-    return this.getPriorityGridMaxHeight(this.videoService.getCurrentParticipantIdentity());
+    return this.getPriorityGridMaxHeight(this.getLocalDisplayParticipantId());
   }
 
   getPriorityGridColumn(participantId: string | null | undefined): string | null {
@@ -1381,13 +3385,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private getVisibleParticipantIds(): string[] {
     const participantIds: string[] = [];
-    const localParticipantId = this.videoService.getCurrentParticipantIdentity();
+    const localParticipantId = this.getLocalDisplayParticipantId();
 
     if (this.showLocalSelfView && localParticipantId) {
       participantIds.push(localParticipantId);
     }
 
-    this.remoteStreams.forEach(remote => participantIds.push(remote.id));
+    this.liveRemoteStreams.forEach(remote => participantIds.push(remote.id));
 
     return participantIds;
   }
@@ -1538,13 +3542,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return localParticipant;
     }
 
-    return this.remoteStreams.find(remote => remote.id === this.remoteContextMenu?.remoteId);
+    return this.liveRemoteStreams.find(remote => remote.id === this.remoteContextMenu?.remoteId);
   }
 
   private getLocalContextMenuParticipant(): ParticipantStream | undefined {
-    const localParticipantId = this.videoService.getCurrentParticipantIdentity();
+    const localParticipantId = this.getLocalDisplayParticipantId();
     if (!localParticipantId) {
       return undefined;
+    }
+
+    if (this.isCallPlaybackMode) {
+      return this.playbackLocalParticipantStream ?? undefined;
     }
 
     return {
@@ -1561,15 +3569,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private isContextMenuParticipantAvailable(participantId: string): boolean {
-    return participantId === this.videoService.getCurrentParticipantIdentity() ||
-      this.remoteStreams.some(remote => remote.id === participantId);
+    return participantId === this.getLocalDisplayParticipantId() ||
+      this.liveRemoteStreams.some(remote => remote.id === participantId);
+  }
+
+  private getLocalDisplayParticipantId(): string | null {
+    return this.isCallPlaybackMode
+      ? this.playbackLocalParticipantStream?.id ?? null
+      : this.videoService.getCurrentParticipantIdentity();
   }
 
   private getContextMenuHeight(participant: ParticipantStream): number {
     return 96 +
       (this.isServerOwner ? 44 : 0) +
       (this.canShowTemporaryDmMenu(participant) ? 220 : 0) +
-      (participant.isLocal ? 0 : 112);
+      (this.canShowParticipantVolumeControl(participant) ? 112 : 0);
   }
 
   private refreshVisibleRemoteStreams(streams: any[] = this.videoService.remoteStreams$.value) {
@@ -1672,8 +3686,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       return 'Could not join this call. Check your device access and channel permissions.';
     }
-  
+
     async leaveCall() {
+    this.stopSessionRecording();
     this.resetMicTestForCaptureChange();
     await this.videoService.leaveCall(this.channelId);
     this.themeService.revertToSaved();
@@ -1741,6 +3756,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       if (!this.isDmMode && this.channelId) {
         this.videoService.updateUserData(this.channelId, newCharacter);
+        this.recordCallParticipantsSnapshotIfChanged();
       }
     }
 
@@ -1833,6 +3849,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (!this.safeSendThemeUpdate(this.activeColors)) {
       return;
     }
+    this.recordCallEnvironmentEvent('theme-sync', this.activeColors);
     this.themePickerBaselineColors = null;
     this.showThemePicker = false;
   }
@@ -1858,6 +3875,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.themeService.applyTheme(this.activeColors, false);
     this.rememberValidThemeBackground(this.activeColors);
     if (this.safeSendThemeUpdate(this.activeColors)) {
+      this.recordCallEnvironmentEvent('theme-sync', this.activeColors);
       this.themePickerBaselineColors = this.cloneThemeColors(this.activeColors);
     }
   }
@@ -1879,6 +3897,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.isDmMode = !this.isDmMode;
     const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
     this.videoService.updateUserData(this.channelId, characterToBroadcast);
+    this.recordCallEnvironmentEvent('dm-mode', {
+      enabled: this.isDmMode,
+      character: this.createCharacterSnapshot(characterToBroadcast)
+    });
+    this.recordCallParticipantsSnapshotIfChanged();
     this.cdr.detectChanges();
   }
 
@@ -1912,6 +3935,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   ngOnDestroy() {
     this.gridResizeObserver?.disconnect();
     this.gridResizeObserver = null;
+    this.stopSessionRecording();
+    this.cleanupCallPlaybackSources();
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
     if (this.streamSub) this.streamSub.unsubscribe();
@@ -1933,6 +3958,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.remoteVideoQualitySub) this.remoteVideoQualitySub.unsubscribe();
     if (this.participantVolumesSub) this.participantVolumesSub.unsubscribe();
     if (this.sceneMainCharactersSub) this.sceneMainCharactersSub.unsubscribe();
+    if (this.sessionRecordingStateSub) this.sessionRecordingStateSub.unsubscribe();
+    if (this.sessionRecordingLastSub) this.sessionRecordingLastSub.unsubscribe();
+    if (this.sessionPlaybackSub) this.sessionPlaybackSub.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
 
     // Just clean up local hardware previews.
@@ -2172,6 +4200,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   removeRequest(request: any) {
       this.spotifyRequests = this.spotifyRequests.filter(r => r !== request);
+      this.recordSpotifyRequestsSnapshot();
   }
 
   canJoinVttSession(): boolean {
@@ -2737,16 +4766,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private normalizeRemoteVolume(value: number | string): number {
+    return this.normalizeParticipantVolume(value, 200);
+  }
+
+  private normalizeParticipantVolume(value: number | string, max: number): number {
     const numericValue = typeof value === 'number' ? value : Number(value);
     if (!Number.isFinite(numericValue)) {
       return 100;
     }
 
-    return Math.min(200, Math.max(0, Math.round(numericValue)));
+    return Math.min(max, Math.max(0, Math.round(numericValue)));
   }
 
   private refreshSceneMainCharacterFlags() {
     this.remoteStreams = this.remoteStreams.map(remote => ({
+      ...remote,
+      isSceneMainCharacter: this.isSceneMainCharacter(remote.id)
+    }));
+    this.playbackParticipantStreams = this.playbackParticipantStreams.map(remote => ({
       ...remote,
       isSceneMainCharacter: this.isSceneMainCharacter(remote.id)
     }));

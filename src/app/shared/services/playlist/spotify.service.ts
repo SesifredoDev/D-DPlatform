@@ -289,6 +289,7 @@ export class SpotifyService {
               uri: newUri,
               position: newPosition,
               paused: newPaused,
+              playing: !newPaused,
               contextUri: newContextUri,
               shuffle: newShuffle
           },
@@ -566,7 +567,7 @@ export class SpotifyService {
       if (!skipSync) {
         this.syncAction$.next({
           command: 'play',
-          data: { uri: effectiveUri, position: positionMs, paused: false, contextUri: contextUri || (effectiveUri?.includes(':track:') ? undefined : effectiveUri), shuffle: this.shuffleState$.value },
+          data: { uri: effectiveUri, position: positionMs, paused: false, playing: true, contextUri: contextUri || (effectiveUri?.includes(':track:') ? undefined : effectiveUri), shuffle: this.shuffleState$.value },
           source: 'manual'
         });
       }
@@ -584,6 +585,13 @@ export class SpotifyService {
     } catch (err) { return null; }
   }
 
+  async clearCurrentPlayback(skipSync: boolean = true) {
+    await this.pause(skipSync).catch(() => null);
+    this.currentTrack$.next(null);
+    this.isPaused$.next(true);
+    this.updateSyncCache(null, true, 0, this.shuffleState$.value, null);
+  }
+
   async pause(skipSync: boolean = false) {
     const targetId = this.activeDeviceId$.value || this.sdkDeviceId;
     if (!targetId) return;
@@ -596,7 +604,7 @@ export class SpotifyService {
         if (!skipSync) {
             this.syncAction$.next({
                 command: 'pause',
-                data: { uri: this.lastSyncedUri, position: this.lastSyncedPosition, paused: true, contextUri: this.lastSyncedContextUri, shuffle: this.lastSyncedShuffle },
+                data: { uri: this.lastSyncedUri, position: this.lastSyncedPosition, paused: true, playing: false, contextUri: this.lastSyncedContextUri, shuffle: this.lastSyncedShuffle },
                 source: 'manual'
             });
         }
@@ -616,7 +624,7 @@ export class SpotifyService {
         const state = await this.getPlaybackState();
         this.syncAction$.next({
           command: 'seek',
-          data: { uri: state?.track_window?.current_track?.uri, position: positionMs, paused: state?.paused, contextUri: state?.context?.uri, shuffle: state?.shuffle_state ?? this.lastSyncedShuffle },
+          data: { uri: state?.track_window?.current_track?.uri, position: positionMs, paused: state?.paused, playing: !(state?.paused ?? this.lastSyncedPaused ?? true), contextUri: state?.context?.uri, shuffle: state?.shuffle_state ?? this.lastSyncedShuffle },
           source: 'manual'
         });
       }
@@ -636,7 +644,7 @@ export class SpotifyService {
                 if (!skipSync) {
                     this.syncAction$.next({
                         command: 'next',
-                        data: { uri: state.track_window?.current_track?.uri, position: 0, paused: false, contextUri: state.context?.uri, shuffle: state.shuffle_state },
+                        data: { uri: state.track_window?.current_track?.uri, position: state.position || 0, paused: state.paused, playing: !state.paused, contextUri: state.context?.uri, shuffle: state.shuffle_state },
                         source: 'manual'
                     });
                 }
@@ -659,7 +667,7 @@ export class SpotifyService {
                 if (!skipSync) {
                     this.syncAction$.next({
                         command: 'previous',
-                        data: { uri: state.track_window?.current_track?.uri, position: 0, paused: false, contextUri: state.context?.uri, shuffle: state.shuffle_state },
+                        data: { uri: state.track_window?.current_track?.uri, position: state.position || 0, paused: state.paused, playing: !state.paused, contextUri: state.context?.uri, shuffle: state.shuffle_state },
                         source: 'manual'
                     });
                 }
@@ -681,7 +689,7 @@ export class SpotifyService {
             const playback = await this.getPlaybackState();
             this.syncAction$.next({
               command: 'shuffle',
-              data: { uri: playback?.track_window?.current_track?.uri, position: playback?.position || 0, paused: playback?.paused ?? true, contextUri: playback?.context?.uri, shuffle: state },
+              data: { uri: playback?.track_window?.current_track?.uri, position: playback?.position || 0, paused: playback?.paused ?? true, playing: !(playback?.paused ?? true), contextUri: playback?.context?.uri, shuffle: state },
               source: 'manual'
             });
         }

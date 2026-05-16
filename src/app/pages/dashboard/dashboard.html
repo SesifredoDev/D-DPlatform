@@ -59,7 +59,7 @@
         <div [hidden]="!tab.active" class="full-height">
           @if (tab.type === 'call') {
             <app-video-call [channelId]="tab.id" [character]="activeCharacter"
-                            (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
+                            (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)" (playbackVtt)="onPlaybackVtt($event)"></app-video-call>
           } @else if (tab.type === 'text' || tab.type === 'whisper') {
             <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
           } @else if(tab.type ==='character'){
@@ -67,7 +67,8 @@
           } @else if (tab.type === 'vtt'){
             <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userId"
                             [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
-                            [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
+                            [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"
+                            [isPlaybackMode]="tab.data?.vttSessionMode === 'playback'"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
             <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
           } @else if (tab.type === 'obsidian') {
@@ -131,7 +132,7 @@
           <div [hidden]="!tab.active" class="full-height">
             @if (tab.type === 'call') {
               <app-video-call [channelId]="tab.id" [character]="activeCharacter"
-                              (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)"></app-video-call>
+                              (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)" (playbackVtt)="onPlaybackVtt($event)"></app-video-call>
             } @else if (tab.type === 'text' || tab.type === 'whisper') {
               <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
             } @else if(tab.type ==='character'){
@@ -139,7 +140,8 @@
             } @else if (tab.type === 'vtt'){
               <app-vtt-canvas [serverId]="tab.data?.vttSessionRoomId || tab.id" [character]="activeCharacter" [userId]="userId"
                               [isHostVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttHostSessionId || tab.data?.vttSessionMode === 'host'"
-                              [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"></app-vtt-canvas>
+                              [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"
+                              [isPlaybackMode]="tab.data?.vttSessionMode === 'playback'"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
               <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
             } @else if (tab.type === 'obsidian') {

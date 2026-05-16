@@ -17,6 +17,7 @@ export class VttEngine {
     this.containerId = containerId;
     this.localCharacter = null;
     this.currentUserId= currentUserId;
+    this.playbackMode = false;
     this.pointerMode = false;
     this.pointerIsDown = false;
     this.pointerGroups = new Map();
@@ -88,6 +89,7 @@ export class VttEngine {
 
   initInteraction() {
     this.stage.on('mousedown', (e) => {
+      if (this.playbackMode) return;
       if (!this.pointerMode || e.evt.button !== 0) return;
 
       e.cancelBubble = true;
@@ -106,6 +108,7 @@ export class VttEngine {
     });
 
     this.stage.on('mousemove', (e) => {
+      if (this.playbackMode) return;
       if (!this.pointerMode || !this.pointerIsDown) return;
 
       if (e.evt.buttons !== undefined && (e.evt.buttons & 1) !== 1) {
@@ -127,18 +130,21 @@ export class VttEngine {
     });
 
     this.stage.on('mouseup', () => {
+      if (this.playbackMode) return;
       if (this.pointerMode) {
         this.endPointerDrag();
       }
     });
 
     this.stage.on('mouseleave', () => {
+      if (this.playbackMode) return;
       if (this.pointerMode) {
         this.endPointerDrag();
       }
     });
 
     this.stage.on('dblclick dbltap', (e) => {
+      if (this.playbackMode) return;
       if (this.fxManager?.isActive?.() || this.isMeasuring() || this.pointerMode) return;
       // Don't ping if clicking a token
       if (e.target.getParent()?.tokenReference) return;
@@ -151,6 +157,8 @@ export class VttEngine {
   }
 
   setPointerMode(active) {
+    if (this.playbackMode && active) return;
+
     const wasActive = this.pointerMode;
     this.pointerMode = !!active;
     const container = this.stage.container();
@@ -397,6 +405,33 @@ export class VttEngine {
     this.updateLighting();
   }
 
+  setPlaybackMode(active) {
+    this.playbackMode = !!active;
+
+    if (this.playbackMode) {
+      this.pointerMode = false;
+      this.pointerIsDown = false;
+      this.wallManager?.setMode?.('none');
+      this.measurementManager?.setMode?.('none');
+      this.fxManager?.setMode?.('none');
+      this.stage.draggable(false);
+      this.stage.container().style.cursor = 'default';
+    } else {
+      this.stage.draggable(
+        !this.wallManager?.isWallMode &&
+        !this.wallManager?.isDeleteMode &&
+        !this.isMeasuring() &&
+        !this.isFxActive()
+      );
+    }
+
+    this.refreshTokenPermissions();
+  }
+
+  isPlaybackMode() {
+    return this.playbackMode;
+  }
+
   setPlayerTokenControlMode(playersCanControlAllPlayerTokens) {
     this.playersCanControlAllPlayerTokens = !!playersCanControlAllPlayerTokens;
     this.refreshTokenPermissions();
@@ -412,6 +447,7 @@ export class VttEngine {
       const token = group.tokenReference;
       if (token) {
         group.draggable(
+          !this.playbackMode &&
           (typeof token.canDrag === 'function' ? token.canDrag() : token.checkPermissions()) &&
           !this.isFxActive() &&
           !this.isPointerActive()
@@ -995,6 +1031,8 @@ export class VttEngine {
   }
 
   setMeasurementMode(mode, options = {}) {
+    if (this.playbackMode && mode !== 'none') return;
+
     if (mode !== 'none') this.setPointerMode(false);
     if (mode !== 'none') this.wallManager.setMode('none');
     if (mode !== 'none') this.fxManager?.setMode('none');
@@ -1003,6 +1041,8 @@ export class VttEngine {
   }
 
   setFxMode(mode, options = {}) {
+    if (this.playbackMode && mode !== 'none') return;
+
     if (mode !== 'none') this.setPointerMode(false);
     if (mode !== 'none') {
       this.wallManager.setMode('none');

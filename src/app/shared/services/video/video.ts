@@ -74,6 +74,15 @@ export interface ParticipantMediaDiagnostics {
   video?: MediaTrackDiagnostics;
 }
 
+export interface CallRecordingParticipant {
+  id: string;
+  stream?: MediaStream;
+  userData?: any;
+  participantMeta?: CallParticipantMetadata | null;
+  isLocal: boolean;
+  volumePercent: number;
+}
+
 interface LiveKitConnectionInfo {
   token: string;
   iceServers?: RTCIceServer[];
@@ -646,6 +655,11 @@ export class Video {
     return this.participantStreams.get(this.selectedVideoSource$.value) || null;
   }
 
+  getSelectedCompanionAudioStream(): MediaStream | null {
+    if (this.selectedAudioSource$.value === 'desktop-local') return null;
+    return this.participantStreams.get(this.selectedAudioSource$.value) || null;
+  }
+
   sendSpotifyCommand(command: string, data: any, source: string = 'manual') {
     if (this.room.state !== 'connected') return;
     const payload = new TextEncoder().encode(JSON.stringify({
@@ -974,6 +988,29 @@ export class Video {
   }
 
   getLocalStream() { return this.localStream; }
+
+  getCallRecordingParticipants(localStream: MediaStream | null = this.localStream): CallRecordingParticipant[] {
+    const participants = this.remoteStreams$.value;
+    const remoteParticipants = participants
+      .filter(participant => !participant.isLocal)
+      .map(participant => ({
+        id: participant.id,
+        stream: participant.stream,
+        userData: participant.userData,
+        participantMeta: participant.participantMeta,
+        isLocal: false,
+        volumePercent: this.getParticipantVolume(participant.id)
+      }));
+
+    return [{
+      id: this.currentParticipantIdentity ?? 'local',
+      stream: localStream ?? undefined,
+      userData: this.currentParticipantMetadata?.character,
+      participantMeta: this.currentParticipantMetadata,
+      isLocal: true,
+      volumePercent: 100
+    }, ...remoteParticipants];
+  }
 
   getCurrentDeviceInfo(): DeviceInfo {
     return this.deviceService.getDeviceInfo();

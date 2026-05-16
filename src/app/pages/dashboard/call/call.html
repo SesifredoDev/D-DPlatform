@@ -1,7 +1,7 @@
 <div class="video-container">
 
   <!-- PRE-JOIN SCREEN -->
-  @if (!localStream) {
+  @if (!localStream && !isCallPlaybackMode) {
     <div class="pre-join-screen">
       <div class="setup-card glass">
         <div class="preview-area">
@@ -125,13 +125,24 @@
             <mat-icon>{{ isJoining ? 'hourglass_top' : 'login' }}</mat-icon>
             <span>{{ isJoining ? 'Joining...' : 'Enter Call' }}</span>
           </button>
+
+          <div class="session-recording-panel" *ngIf="hasRecordedSessionPlayback && !isSessionRecording">
+            <div>
+              <strong>Last recording</strong>
+              <span>{{ formatSessionRecordingDuration(recordedSessionDurationMs) }}</span>
+            </div>
+            <button class="btn-recording-playback" type="button" (click)="startSessionPlayback()">
+              <mat-icon>play_arrow</mat-icon>
+              <span>Playback</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
   }
 
   <!-- ACTIVE CALL VIEW -->
-  @if (localStream) {
+  @if (localStream || isCallPlaybackMode) {
     <div
       #gridContainer
       class="grid count-{{ visibleParticipantCount }}"
@@ -145,7 +156,7 @@
       <div
         *ngIf="showLocalSelfView"
         class="video-box local"
-        [class.video-hidden]="isVideoOff"
+        [class.video-hidden]="localVideoHidden"
         [class.context-menu-open]="localContextMenuOpen"
         [class.scene-main-character]="isSceneMainLayoutActive && localSceneMainCharacter"
         [class.scene-side-character]="isSceneMainLayoutActive && !localSceneMainCharacter"
@@ -155,8 +166,8 @@
         (contextmenu)="openLocalContextMenu($event)"
       >
         <video #localVideo autoplay playsinline [muted]="true"></video>
-        <div class="video-placeholder" *ngIf="isVideoOff">
-          <div class="user-avatar">{{ (isDmMode ? dmCharacter : character).name?.charAt(0) || 'Y' }}</div>
+        <div class="video-placeholder" *ngIf="localVideoHidden">
+          <div class="user-avatar">{{ (localDisplayCharacter.name || 'Y').charAt(0) }}</div>
         </div>
         <div class="scene-main-badge" *ngIf="isSceneMainLayoutActive && localSceneMainCharacter" matTooltip="Scene Main Character">
           <mat-icon>star</mat-icon>
@@ -168,25 +179,25 @@
           <!-- Stats Hover Card (Glass) -->
           <div class="character-hover-card glass">
             <div class="hover-header">
-              <strong>{{ (isDmMode ? dmCharacter : character).name }}</strong>
-              <span>{{ (isDmMode ? dmCharacter : character).race }}</span>
+              <strong>{{ localDisplayCharacter.name }}</strong>
+              <span>{{ localDisplayCharacter.race }}</span>
             </div>
             <div class="hover-section">
-              @for (c of (isDmMode ? dmCharacter : character).classes; track c) {
+              @for (c of localDisplayCharacter.classes; track c) {
                 <div class="class-line">Lvl {{ c.level }} {{ c.className }}</div>
               }
             </div>
             <div class="hover-stats">
-              <div class="stat-pill"><span>STR</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.strength }}</strong></div>
-              <div class="stat-pill"><span>DEX</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.dexterity }}</strong></div>
-              <div class="stat-pill"><span>CON</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.constitution }}</strong></div>
-              <div class="stat-pill"><span>INT</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.intelligence }}</strong></div>
-              <div class="stat-pill"><span>WIS</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.wisdom }}</strong></div>
-              <div class="stat-pill"><span>CHA</span><strong>{{ (isDmMode ? dmCharacter : character).baseStats.charisma }}</strong></div>
+              <div class="stat-pill"><span>STR</span><strong>{{ localDisplayCharacter.baseStats.strength }}</strong></div>
+              <div class="stat-pill"><span>DEX</span><strong>{{ localDisplayCharacter.baseStats.dexterity }}</strong></div>
+              <div class="stat-pill"><span>CON</span><strong>{{ localDisplayCharacter.baseStats.constitution }}</strong></div>
+              <div class="stat-pill"><span>INT</span><strong>{{ localDisplayCharacter.baseStats.intelligence }}</strong></div>
+              <div class="stat-pill"><span>WIS</span><strong>{{ localDisplayCharacter.baseStats.wisdom }}</strong></div>
+              <div class="stat-pill"><span>CHA</span><strong>{{ localDisplayCharacter.baseStats.charisma }}</strong></div>
             </div>
-            <div class="hover-footer" *ngIf="(isDmMode ? dmCharacter : character).ac">
+            <div class="hover-footer" *ngIf="localDisplayCharacter.ac">
               <mat-icon>shield</mat-icon>
-              <span>Armor Class: {{ (isDmMode ? dmCharacter : character).ac }}</span>
+              <span>Armor Class: {{ localDisplayCharacter.ac }}</span>
             </div>
           </div>
 
@@ -194,23 +205,23 @@
           <div class="unit-frame">
             <div class="portrait-container">
               <div class="portrait-inner">
-                <ng-container *ngIf="isDmMode">
+                <ng-container *ngIf="localDisplayIsDm">
                   <div class="dm-portrait">
                     <mat-icon>dvr</mat-icon>
                   </div>
                 </ng-container>
-                <ng-container *ngIf="!isDmMode">
-                  <img [src]="character.icon || 'https://www.gravatar.com/avatar/'+character._id+'?d=identicon'" class="char-portrait">
+                <ng-container *ngIf="!localDisplayIsDm">
+                  <img [src]="localDisplayCharacter.icon || 'https://www.gravatar.com/avatar/'+localDisplayCharacter._id+'?d=identicon'" class="char-portrait">
                 </ng-container>
               </div>
-              <div class="level-badge" *ngIf="(isDmMode ? dmCharacter : character).classes?.length">
-                {{ (isDmMode ? dmCharacter : character).classes[0].level }}
+              <div class="level-badge" *ngIf="localDisplayCharacter.classes.length">
+                {{ localDisplayCharacter.classes[0].level }}
               </div>
             </div>
 
             <div class="unit-info">
               <div class="name-row">
-                <span class="char-name">{{ (isDmMode ? dmCharacter : character).name || 'You' }}</span>
+                <span class="char-name">{{ localDisplayCharacter.name || 'You' }}</span>
                 @if (isAudioMuted) {
                   <mat-icon class="mute-icon">mic_off</mat-icon>
                 }
@@ -224,7 +235,7 @@
                 </div>
               </div>
               <div class="sub-row">
-                <span class="char-race">{{ (isDmMode ? dmCharacter : character).race }}</span>
+                <span class="char-race">{{ localDisplayCharacter.race }}</span>
               </div>
               <!-- Decorative bars for RPG feel -->
               <div class="status-bars">
@@ -240,7 +251,7 @@
       <!-- Remote Videos -->
       <div
         class="video-box remote"
-        *ngFor="let remote of remoteStreams; trackBy: trackRemoteStream"
+        *ngFor="let remote of liveRemoteStreams; trackBy: trackRemoteStream"
         [class.context-menu-open]="remoteContextMenu?.remoteId === remote.id"
         [class.scene-main-character]="isSceneMainLayoutActive && remote.isSceneMainCharacter"
         [class.scene-side-character]="isSceneMainLayoutActive && !remote.isSceneMainCharacter"
@@ -332,7 +343,7 @@
     <button
       type="button"
       class="scene-main-clear-button glass"
-      *ngIf="isSceneMainLayoutActive && isServerOwner && sceneMainCharacterIds.length"
+      *ngIf="!isCallPlaybackMode && isSceneMainLayoutActive && isServerOwner && sceneMainCharacterIds.length"
       (click)="clearSceneMainCharacters()"
       matTooltip="Clear scene main characters"
     >
@@ -406,7 +417,7 @@
             </button>
           </div>
 
-          <div class="remote-menu-section remote-volume-menu-item" *ngIf="!activeRemote.isLocal">
+          <div class="remote-menu-section remote-volume-menu-item" *ngIf="canShowParticipantVolumeControl(activeRemote)">
             <div class="remote-menu-label">
               <mat-icon>{{ getRemoteVolumeIcon(activeRemote) }}</mat-icon>
               <span>Volume</span>
@@ -416,10 +427,10 @@
               class="remote-volume-slider"
               type="range"
               min="0"
-              max="200"
+              [max]="getParticipantVolumeMax(activeRemote)"
               step="1"
               [ngModel]="activeRemote.volumePercent"
-              (ngModelChange)="changeRemoteVolume(activeRemote.id, $event)"
+              (ngModelChange)="changeParticipantVolume(activeRemote.id, $event)"
               [attr.aria-label]="'Volume for ' + (activeRemote.userData?.name || 'remote user')"
             />
           </div>
@@ -427,8 +438,59 @@
       }
     }
 
+    <div class="call-playback-controls glass" *ngIf="isCallPlaybackMode">
+      <button type="button" class="btn-action" (click)="setCallPlaybackPaused(!callPlaybackPaused)" [matTooltip]="callPlaybackPaused ? 'Play recording' : 'Pause recording'">
+        <mat-icon>{{ callPlaybackPaused ? 'play_arrow' : 'pause' }}</mat-icon>
+      </button>
+      <span class="playback-time">{{ formatSessionRecordingDuration(callPlaybackCurrentTimeMs) }}</span>
+      <div class="call-playback-spotify" *ngIf="playbackSpotifyState" [class.paused]="playbackSpotifyState.paused">
+        <img class="spotify-playback-art" [src]="playbackSpotifyState.image || 'assets/spotify-placeholder.png'" alt="">
+        <div class="spotify-playback-meta">
+          <span class="spotify-playback-title">{{ playbackSpotifyState.name }}</span>
+          <span class="spotify-playback-artist">
+            {{ playbackSpotifyState.artist }}
+            <span class="spotify-playback-state">{{ playbackSpotifyState.playing ? 'Playing' : 'Paused' }}</span>
+          </span>
+        </div>
+        <mat-icon>{{ playbackSpotifyVolumePercent === 0 || playbackSpotifyState.paused ? 'volume_off' : 'volume_up' }}</mat-icon>
+        <input
+          class="spotify-playback-volume"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          [ngModel]="playbackSpotifyVolumePercent"
+          (ngModelChange)="setPlaybackSpotifyVolume($event)"
+          aria-label="Recorded Spotify volume"
+        />
+      </div>
+      <input
+        class="playback-seek"
+        type="range"
+        min="0"
+        [max]="callPlaybackDurationMs"
+        step="250"
+        [ngModel]="callPlaybackCurrentTimeMs"
+        (ngModelChange)="seekCallPlayback($event)"
+        aria-label="Recording playback position"
+      />
+      <span class="playback-time">{{ formatSessionRecordingDuration(callPlaybackDurationMs) }}</span>
+      <button
+        type="button"
+        class="btn-action"
+        (click)="openSessionPlaybackVtt()"
+        [disabled]="!isPlaybackVttLive"
+        [matTooltip]="isPlaybackVttLive ? 'Open VTT replay' : 'VTT replay is not live at this point'"
+      >
+        <mat-icon>map</mat-icon>
+      </button>
+      <button type="button" class="btn-action btn-danger" (click)="stopSessionPlayback()" matTooltip="Close playback">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+
     <!-- Bottom Toolbar -->
-    <div class="bottom-toolbar">
+    <div class="bottom-toolbar" *ngIf="!isCallPlaybackMode">
       <div class="controls-wrapper">
         <div class="media-actions">
           <button (click)="showSpotify = !showSpotify" class="btn-action btn-spotify" [class.active]="showSpotify" matTooltip="Spotify">
@@ -438,6 +500,26 @@
           <button *ngIf="isServerOwner && spotifyRequests.length > 0" (click)="showSpotifyRequests = !showSpotifyRequests" class="btn-action btn-requests" [class.active]="showSpotifyRequests" matTooltip="Song Requests">
             <mat-icon [class.pulse]="spotifyRequests.length > 0">playlist_add_check</mat-icon>
             <span class="badge">{{ spotifyRequests.length }}</span>
+          </button>
+
+          <button
+            *ngIf="supportsSessionRecording"
+            (click)="isSessionRecording ? stopSessionRecording() : startSessionRecording()"
+            class="btn-action btn-record-session"
+            [class.active]="isSessionRecording"
+            [class.btn-danger]="isSessionRecording"
+            [matTooltip]="sessionRecordingStatusText"
+          >
+            <mat-icon>{{ isSessionRecording ? 'stop_circle' : 'fiber_manual_record' }}</mat-icon>
+          </button>
+
+          <button
+            *ngIf="hasRecordedSessionPlayback && !isSessionRecording"
+            (click)="startSessionPlayback()"
+            class="btn-action"
+            matTooltip="Playback recording"
+          >
+            <mat-icon>play_arrow</mat-icon>
           </button>
 
           <button (click)="toggleAudio()" [class.active]="isAudioMuted" class="btn-action" [matTooltip]="isAudioMuted ? 'Unmute' : 'Mute'">
@@ -800,6 +882,11 @@
       [userName]="character.name"
       (close)="showSpotify = false">
     </app-spotify-player>
+  </div>
+
+  <div class="recording-status-pill glass" *ngIf="isSessionRecording">
+    <mat-icon>fiber_manual_record</mat-icon>
+    <span>{{ formatSessionRecordingDuration(sessionRecordingDurationSeconds * 1000) }}</span>
   </div>
 
   <!-- Spotify Requests Overlay -->

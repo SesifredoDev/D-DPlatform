@@ -18,6 +18,7 @@ import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
 import {Subscription, Observable, firstValueFrom} from 'rxjs';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {ServerService} from '../../../shared/services/server/server';
+import { SessionPlaybackState, SessionRecording, SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
 
 type HostTakeoverChoice = 'take-control' | 'player';
 type FxShapeTool = 'polygon' | 'square' | 'circle' | 'cone' | 'erase';
@@ -129,6 +130,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   @Input() character!: ICharacter;
   @Input() isHostVttSession: boolean = false;
   @Input() isJoiningVttSession: boolean = false;
+  @Input() isPlaybackMode: boolean = false;
 
   @Output() vttSessionHosted = new EventEmitter<string>();
   @Output() vttSessionStopped = new EventEmitter<string>();
@@ -171,6 +173,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private playerTokenControlSub!: Subscription;
   private playerFxPermissionSub!: Subscription;
   private gridSettingsSub!: Subscription;
+  private playbackSub!: Subscription;
   private syncStateRun = 0;
   private noHostedGameClosed = false;
   private hostTakeoverPrompt: Promise<boolean> | null = null;
@@ -180,6 +183,9 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private readonly stageEventNamespace = `.vttCanvas${++VttCanvas.nextInstanceId}`;
   private readonly tokenContextMenuHandler = (data: any) => this.onTokenContextMenu(data);
   private readonly maxContainerReadyFrames = 30;
+  private playbackRecordingId: string | null = null;
+  private playbackActionIndex = 0;
+  private playbackLastTimeMs = 0;
   public playersCanControlAllPlayerTokens = false;
   public playersCanUseFx = false;
   public gridSettings: GridSettings = {
@@ -197,15 +203,21 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   private lastAddedEntryId: string | null = null; // To track the last added entry for clearing inputs
 
   // Expose sync state to UI
-  get isSyncing() { return this.isInCurrentSession; }
-  get isHosting() { return this.syncService.isHosting; }
+  get isSyncing() { return !this.isPlaybackMode && this.isInCurrentSession; }
+  get isHosting() { return !this.isPlaybackMode && this.syncService.isHosting; }
   get isInCurrentSession() {
+    if (this.isPlaybackMode) return true;
+
     return this.syncService.isConnected && this.syncService.currentRoomId === this.serverId;
   }
   get canUseFx() {
+    if (this.isPlaybackMode) return false;
+
     return !this.isInCurrentSession || this.syncService.isHosting || this.playersCanUseFx;
   }
   get canEditTokens() {
+    if (this.isPlaybackMode) return false;
+
     return !!this.engine?.isDM;
   }
   get tokenPreviewIcon() {
@@ -225,7 +237,8 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     public syncService: VttSync,
     private tabService: TabService,
     private serverService: ServerService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private sessionRecording: SessionRecordingService
   ) {
     this.turnOrderState$ = this.syncService.turnOrder$.asObservable();
   }
@@ -244,25 +257,39 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     await this.waitForContainerSize();
     if (this.destroyed) return;
 
-    if (this.syncService.currentRoomId === this.serverId && this.syncService.getEngine()) {
+    if (this.isPlaybackMode) {
+      this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
+    } else if (this.syncService.currentRoomId === this.serverId && this.syncService.getEngine()) {
       this.engine = this.syncService.getEngine()!;
       this.engine.setContainer(this.container.nativeElement);
       this.engine.stage.batchDraw();
     } else {
       this.engine = new VttEngine(this.container.nativeElement, this.userId, 50);
     }
-    this.engineAttachmentId = this.syncService.attachEngine(this.engine, this.serverId);
+    if (!this.isPlaybackMode) {
+      this.engineAttachmentId = this.syncService.attachEngine(this.engine, this.serverId);
+    }
     this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
 
-    this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
-    this.engine.stage.on(`tokenContextMenu${this.stageEventNamespace}`, this.tokenContextMenuHandler);
+    if (!this.isPlaybackMode) {
+      this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
+      this.engine.stage.on(`tokenContextMenu${this.stageEventNamespace}`, this.tokenContextMenuHandler);
+    }
 
-    this.loadLibrary();
+    if (!this.isPlaybackMode) {
+      this.loadLibrary();
+    }
 
     this.resizeObserver = new ResizeObserver(() => {
       window.requestAnimationFrame(() => this.handleResize());
     });
     this.resizeObserver.observe(this.container.nativeElement);
+
+    if (this.isPlaybackMode) {
+      this.enterPlaybackMode();
+      this.handleResize();
+      return;
+    }
 
     this.hostDisconnectedSub = this.syncService.hostDisconnected$.subscribe(disconnected => {
         void this.handleHostDisconnected(disconnected);
@@ -301,6 +328,17 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['isPlaybackMode'] && this.engine) {
+      if (this.isPlaybackMode) {
+        this.enterPlaybackMode();
+      }
+      return;
+    }
+
+    if (this.isPlaybackMode) {
+      return;
+    }
+
     if ((changes['isHostVttSession'] || changes['isJoiningVttSession']) && this.engine) {
       void this.handleSyncState();
     }
@@ -312,7 +350,76 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
   }
 
+  private enterPlaybackMode() {
+    this.isCheckingSession = false;
+    this.showHostTakeover = false;
+    this.applyPermissions(false);
+    this.setTool('select');
+    this.engine?.setPlaybackMode?.(true);
+
+    if (!this.playbackSub) {
+      this.playbackSub = this.sessionRecording.playbackState$.subscribe(state => {
+        this.applyPlaybackState(state);
+      });
+    }
+  }
+
+  private applyPlaybackState(state: SessionPlaybackState) {
+    if (!this.isPlaybackMode || !this.engine) {
+      return;
+    }
+
+    const recording = state.recording;
+    if (!state.active || !recording) {
+      return;
+    }
+
+    const roomId = recording.vtt.roomId;
+    if (roomId && roomId !== this.serverId) {
+      return;
+    }
+
+    const currentTimeMs = state.currentTimeMs;
+    if (this.shouldResetPlayback(recording, currentTimeMs)) {
+      this.resetPlaybackTimeline(recording);
+    }
+
+    const actions = recording.vtt.actions;
+    while (
+      this.playbackActionIndex < actions.length &&
+      actions[this.playbackActionIndex].timeMs <= currentTimeMs
+    ) {
+      const event = actions[this.playbackActionIndex];
+      this.syncService.applyPlaybackAction(this.engine, event.action, event.data);
+      this.playbackActionIndex++;
+    }
+
+    this.playbackLastTimeMs = currentTimeMs;
+    this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
+  }
+
+  private shouldResetPlayback(recording: SessionRecording, currentTimeMs: number): boolean {
+    return this.playbackRecordingId !== recording.id || currentTimeMs < this.playbackLastTimeMs;
+  }
+
+  private resetPlaybackTimeline(recording: SessionRecording) {
+    this.playbackRecordingId = recording.id;
+    this.playbackActionIndex = 0;
+    this.playbackLastTimeMs = 0;
+
+    if (recording.vtt.initialState) {
+      this.syncService.applyPlaybackSnapshot(this.engine, recording.vtt.initialState);
+    } else {
+      this.engine.clearAll();
+    }
+
+    this.applyPermissions(false);
+    this.engine.setPlaybackMode?.(true);
+    this.gridSettings = this.normalizeGridSettings(this.engine.getGridSettings());
+  }
+
   private async handleSyncState() {
+    if (this.isPlaybackMode) return;
     if (!this.engine || !this.serverId || !this.character) return;
 
     const runId = ++this.syncStateRun;
@@ -381,27 +488,6 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     }
 
     if (!this.isHostVttSession && !this.isJoiningVttSession) {
-      if (await this.canCurrentUserDm()) {
-        const status = await this.getHostedSessionStatus();
-        if (runId !== this.syncStateRun) return;
-
-        if (status?.active === false) {
-          this.syncService.stopSyncing(true);
-          this.applyPermissions(true);
-          this.isCheckingSession = false;
-          return;
-        }
-
-        const resumed = await this.joinExistingSessionWithHostChoice(status);
-        if (runId !== this.syncStateRun) return;
-
-        if (!resumed) {
-          this.applyPermissions(true);
-          this.isCheckingSession = false;
-        }
-        return;
-      }
-
       const status = await this.getHostedSessionStatus();
       if (runId !== this.syncStateRun) return;
       if (status?.active === false) {
@@ -623,13 +709,16 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.playerTokenControlSub) this.playerTokenControlSub.unsubscribe();
     if (this.playerFxPermissionSub) this.playerFxPermissionSub.unsubscribe();
     if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
+    if (this.playbackSub) this.playbackSub.unsubscribe();
     if (this.engine) {
       this.engine.setPointerMode(false);
-      this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
-      this.syncService.detachEngine(this.engine, this.serverId, this.engineAttachmentId);
+      if (!this.isPlaybackMode) {
+        this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
+        this.syncService.detachEngine(this.engine, this.serverId, this.engineAttachmentId);
+      }
       this.engineAttachmentId = null;
     }
-    if (this.syncService.currentRoomId !== this.serverId) {
+    if (!this.isPlaybackMode && this.syncService.currentRoomId !== this.serverId) {
       this.syncService.stopSyncing(true);
     }
   }

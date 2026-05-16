@@ -226,6 +226,31 @@
   mat-icon { font-size: 16px; width: 16px; height: 16px; color: var(--primary); }
 }
 
+.vtt-playback-indicator {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1002;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--on-background);
+  border: 1px solid var(--outline);
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: none;
+
+  mat-icon {
+    color: var(--primary);
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+  }
+}
+
 /* --- VTT Toolbar --- */
 #toolbar {
   position: absolute;

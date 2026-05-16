@@ -3,7 +3,7 @@ import {MatButtonModule, MatIconButton} from '@angular/material/button';
 import { UserService} from '../../shared/services/user/user';
 import {CharacterService} from '../../shared/services/character/character';
 import {SidePanel} from './side-panel/side-panel';
-import {Call, VttStopEvent} from './call/call';
+import {Call, type VttPlaybackEvent, type VttStopEvent} from './call/call';
 import {ChannelService} from '../../shared/services/channel/channel';
 import {TextChannel} from './text-channel/text-channel';
 import {MatIcon, MatIconModule} from '@angular/material/icon';
@@ -140,11 +140,12 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
       }
 
       if (!session.active) {
+        const endedRoomId = this.vttHostSessionId || this.vttJoinSessionId || session.roomId;
         this.vttHostSessionId = null;
         this.vttJoinSessionId = null;
         if (this.hasSeenActiveVttSession) {
           this.hasSeenActiveVttSession = false;
-          this.clearAllVttTabModes();
+          this.closeLiveVttTabs(endedRoomId ?? undefined);
         }
       }
     }));
@@ -443,6 +444,22 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  onPlaybackVtt(event: string | VttPlaybackEvent) {
+    const channelId = typeof event === 'string' ? event : event.roomId;
+    const active = typeof event === 'string' ? true : event.active;
+
+    if (!active) {
+      this.closePlaybackVttTabs(channelId);
+      return;
+    }
+
+    this.closePlaybackVttTabs(channelId, true);
+    this.tabService.openTab(`${channelId}:playback`, 'VTT Replay', 'vtt', this.isMobile ? this.leftPaneId : this.rightPaneId, {
+      vttSessionMode: 'playback',
+      vttSessionRoomId: channelId
+    });
+  }
+
   onStopVtt(event: string | VttStopEvent) {
     const channelId = typeof event === 'string' ? event : event.roomId;
     const shouldEndSession = typeof event !== 'string' && event.endSession;
@@ -453,7 +470,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
     if (this.vttHostSessionId === channelId) this.vttHostSessionId = null;
     if (this.vttJoinSessionId === channelId) this.vttJoinSessionId = null;
-    this.clearVttTabMode(channelId);
+    this.closeLiveVttTabs(channelId);
   }
 
   @HostListener('dragover', ['$event'])
@@ -610,23 +627,41 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     window.alert('Active calls can be moved inside the same window, but cannot be moved to another window while connected. Leave the call first, or pop it out before joining.');
   }
 
-  private clearAllVttTabModes() {
+  private closeLiveVttTabs(roomId?: string) {
     this.getCurrentViewTabs()
-      .filter(tab => tab.type === 'vtt' && tab.data?.vttSessionMode)
-      .forEach(tab => this.clearVttTabMode(tab.id));
+      .filter(tab => this.isLiveVttTab(tab, roomId))
+      .forEach(tab => this.tabService.closeTab(tab.id));
   }
 
-  private clearVttTabMode(channelId: string) {
-    const tab = this.getCurrentViewTabs().find(currentTab => currentTab.id === channelId && currentTab.type === 'vtt');
-    if (!tab?.data?.vttSessionMode) return;
+  private closePlaybackVttTabs(roomId?: string, keepMatchingRoom = false) {
+    this.getCurrentViewTabs()
+      .filter(tab => this.isPlaybackVttTab(tab, roomId, keepMatchingRoom))
+      .forEach(tab => this.tabService.closeTab(tab.id));
+  }
 
-    this.tabService.updateTab(channelId, {
-      data: {
-        ...tab.data,
-        vttSessionMode: null,
-        vttSessionRoomId: null
-      }
-    });
+  private isLiveVttTab(tab: Tab, roomId?: string): boolean {
+    if (tab.type !== 'vtt' || tab.data?.vttSessionMode === 'playback') {
+      return false;
+    }
+
+    if (!roomId) {
+      return true;
+    }
+
+    return tab.id === roomId || tab.data?.vttSessionRoomId === roomId;
+  }
+
+  private isPlaybackVttTab(tab: Tab, roomId?: string, keepMatchingRoom = false): boolean {
+    if (tab.type !== 'vtt' || tab.data?.vttSessionMode !== 'playback') {
+      return false;
+    }
+
+    const tabRoomId = tab.data?.vttSessionRoomId ?? tab.id.replace(/:playback$/, '');
+    if (!roomId) {
+      return true;
+    }
+
+    return keepMatchingRoom ? tabRoomId !== roomId : tabRoomId === roomId;
   }
 
   private readNativeTabDrop(event: DragEvent) {

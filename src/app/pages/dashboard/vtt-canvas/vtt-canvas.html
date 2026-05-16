@@ -1,4 +1,4 @@
-<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!isInCurrentSession || syncService.isHosting">
+<div class="map-drawer-container" [class.open]="showLibraryOverlay" *ngIf="!isPlaybackMode && (!isInCurrentSession || syncService.isHosting)">
   <div class="drawer-toggle" (click)="showLibraryOverlay = !showLibraryOverlay">
     <mat-icon>{{ showLibraryOverlay ? 'keyboard_double_arrow_down' : 'map' }}</mat-icon>
     <span class="toggle-text">{{ showLibraryOverlay ? 'CLOSE LIBRARY' : 'OPEN MAP LIBRARY' }}</span>
@@ -61,7 +61,12 @@
   <span>{{ currentMapName }}</span>
 </div>
 
-<div id="toolbar-wrapper">
+<div class="vtt-playback-indicator glass" *ngIf="isPlaybackMode">
+  <mat-icon>play_circle</mat-icon>
+  <span>Playback</span>
+</div>
+
+<div id="toolbar-wrapper" *ngIf="!isPlaybackMode">
   <div id="toolbar" class="glass">
     <!-- Map Management Tools -->
     <div class="tool-group" *ngIf="!isInCurrentSession || syncService.isHosting">
@@ -334,7 +339,7 @@
 
 <div #vttContainer id="vtt-container"></div>
 
-<div class="vtt-status-overlay" *ngIf="isCheckingSession">
+<div class="vtt-status-overlay" *ngIf="!isPlaybackMode && isCheckingSession">
   <div class="status-content glass">
     <div class="status-spinner"></div>
     <span>Checking game status...</span>

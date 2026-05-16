@@ -5,10 +5,11 @@ import {ICharacter} from '../../models/user/character.model';
 import {VttEngine} from '../../modules/vttEngine/VttEngine';
 import {Video} from '../video/video';
 import {environment} from '../../../../environments/environment';
-import { BehaviorSubject, firstValueFrom, Subject } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, Subject, Subscription } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { FileService } from '../file/file';
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { SessionRecordingService } from '../session-recording/session-recording';
 
 export interface TurnOrderEntry {
   id: string;
@@ -138,6 +139,8 @@ export class VttSync implements OnDestroy {
   private localCharacter: ICharacter | null = null;
   private needsSessionRestore = false;
   private isStopping = false;
+  private recordingStateSub?: Subscription;
+  private wasSessionRecordingActive = false;
 
   public hostDisconnected$ = new BehaviorSubject<boolean>(false);
   public sessionEnded$ = new Subject<void>();
@@ -168,11 +171,19 @@ export class VttSync implements OnDestroy {
     private tokenService: TokenService,
     private callService: Video,
     private http: HttpClient,
-    private fileService: FileService
+    private fileService: FileService,
+    private sessionRecording: SessionRecordingService
   ) {
     this.windowCommandChannel = this.createWindowCommandChannel();
     void this.resolveCurrentWindowLabel();
     void this.setupTauriWindowCommands();
+    this.recordingStateSub = this.sessionRecording.recordingState$.subscribe(state => {
+      const becameActive = state.active && !this.wasSessionRecordingActive;
+      this.wasSessionRecordingActive = state.active;
+      if (becameActive) {
+        this.captureCurrentVttRecordingState();
+      }
+    });
   }
 
   ngOnDestroy() {
@@ -180,6 +191,7 @@ export class VttSync implements OnDestroy {
     this.clearActiveEngineTarget();
     this.windowCommandChannel?.close();
     this.windowCommandUnlisten?.();
+    this.recordingStateSub?.unsubscribe();
     this.pendingWindowCommands.forEach(pending => window.clearTimeout(pending.timeoutId));
     this.pendingWindowCommands.clear();
     this.handledWindowCommandIds.clear();
@@ -360,6 +372,15 @@ export class VttSync implements OnDestroy {
       };
   }
 
+  private captureCurrentVttRecordingState() {
+    if (!this.engine) return;
+
+    this.sessionRecording.recordVttInitialState(
+      this.currentRoomId ?? this.activeEngineRoomId,
+      this.createHostState(this.engine)
+    );
+  }
+
   startHosting(engine: VttEngine, roomId: string, options: StartHostingOptions = {}) {
     this.clearPendingEngineDetach();
     this.currentRoomId = roomId;
@@ -398,6 +419,7 @@ export class VttSync implements OnDestroy {
       initialState: options.preserveExistingState ? null : this.createHostState(engine)
     });
 
+    this.captureCurrentVttRecordingState();
     this.hostDisconnected$.next(false);
   }
 
@@ -476,10 +498,11 @@ export class VttSync implements OnDestroy {
 
       this.attachEngineListeners(engine);
       socket.emit('join-session', { roomId, character });
+      this.captureCurrentVttRecordingState();
     });
   }
 
-  private applyMapState(engine: VttEngine, config: any) {
+  private applyMapState(engine: VttEngine, config: any, recordSnapshot: boolean = true) {
     if (!config) return;
 
     this.resyncing = false;
@@ -495,6 +518,13 @@ export class VttSync implements OnDestroy {
     }
     this.applyPlayerTokenControlMode(engine, !!config.playersCanControlAllPlayerTokens);
     this.applyPlayerFxPermissionMode(engine, !!config.playersCanUseFx);
+
+    if (recordSnapshot) {
+      this.sessionRecording.recordVttSnapshot(
+        this.currentRoomId ?? this.activeEngineRoomId,
+        this.createHostState(engine)
+      );
+    }
   }
 
   endSession() {
@@ -547,6 +577,7 @@ export class VttSync implements OnDestroy {
     const socket = this.getSocket();
     if (!socket.connected || !this.currentRoomId) return;
     const roomId = this.currentRoomId;
+    this.sessionRecording.recordVttAction(roomId, action, data, 'local');
 
     if (action === 'pointer-sync') {
       const emitSocket = (socket as any).volatile ?? socket;
@@ -690,6 +721,12 @@ export class VttSync implements OnDestroy {
     }
 
     this.applyRemoteAction(engine, action, data);
+    this.sessionRecording.recordVttAction(
+      this.currentRoomId ?? this.activeEngineRoomId,
+      action,
+      data,
+      'remote'
+    );
   }
 
   private handleHostActionRequest(engine: VttEngine, payload: SyncActionPayload) {
@@ -842,6 +879,14 @@ export class VttSync implements OnDestroy {
     engine.stage.batchDraw();
   }
 
+  applyPlaybackSnapshot(engine: VttEngine, state: any) {
+    this.applyMapState(engine, state, false);
+  }
+
+  applyPlaybackAction(engine: VttEngine, action: string, data: any) {
+    this.applyRemoteAction(engine, action, data);
+  }
+
   attachEngine(engine: VttEngine, roomId: string): string {
     this.clearPendingEngineDetach();
     const attachmentId = this.createWindowInstanceId();
@@ -858,6 +903,7 @@ export class VttSync implements OnDestroy {
     this.publishActiveEngineTarget();
     this.startEngineTargetHeartbeat();
     void this.resolveCurrentWindowLabel();
+    this.captureCurrentVttRecordingState();
     return attachmentId;
   }
 
