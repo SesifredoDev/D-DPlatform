@@ -79,6 +79,9 @@
       <button mat-icon-button [class.active]="activeTool === 'select'" (click)="setTool('select')" matTooltip="Select/Move">
         <mat-icon>near_me</mat-icon>
       </button>
+      <button mat-icon-button [class.active]="activeTool === 'pointer'" (click)="setTool('pointer')" matTooltip="Pointer">
+        <mat-icon>ads_click</mat-icon>
+      </button>
       <div class="measure-control">
         <button
           mat-icon-button

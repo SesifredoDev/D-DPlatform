@@ -1,19 +1,88 @@
-<h2 mat-dialog-title>Broadcast Content</h2>
-<mat-dialog-content>
-  <div class="preview-container">
+<h2 mat-dialog-title>
+  <mat-icon>{{ isComposerMode ? 'campaign' : 'ios_share' }}</mat-icon>
+  <span>{{ isComposerMode ? 'Create Broadcast' : 'Broadcast Content' }}</span>
+</h2>
+<mat-dialog-content [class.compose-mode]="isComposerMode">
+  <section class="composer-panel" *ngIf="isComposerMode">
+    <header class="panel-heading">
+      <div>
+        <span class="eyebrow">Compose</span>
+        <h3>Message</h3>
+      </div>
+      <span class="content-status" [class.ready]="hasContent">
+        {{ hasContent ? 'Ready' : 'Empty' }}
+      </span>
+    </header>
+
+    <mat-form-field appearance="outline" class="broadcast-text-field">
+      <mat-label>Broadcast text</mat-label>
+      <textarea
+        matInput
+        [(ngModel)]="draftText"
+        (ngModelChange)="onDraftTextChange($event)"
+        [disabled]="uploading"
+        rows="8"
+        placeholder="Write your broadcast..."></textarea>
+    </mat-form-field>
+
+    <div class="file-drop-panel" (click)="broadcastFileInput.click()" [class.has-file]="hasFile">
+      <input
+        #broadcastFileInput
+        type="file"
+        hidden
+        (change)="onComposerFileSelected($event)">
+      <mat-icon>{{ hasFile ? (selectedFileIsImage ? 'image' : 'attach_file') : 'upload_file' }}</mat-icon>
+      <div class="file-drop-copy">
+        <strong>{{ selectedFilename || 'Add an attachment' }}</strong>
+        <span>{{ selectedFilename ? selectedFileContentType : 'Optional image or document' }}</span>
+      </div>
+      <button mat-stroked-button type="button" [disabled]="uploading" (click)="$event.stopPropagation(); broadcastFileInput.click()">
+        <mat-icon>{{ hasFile ? 'sync' : 'upload' }}</mat-icon>
+        <span>{{ hasFile ? 'Replace' : 'Upload' }}</span>
+      </button>
+      <button mat-icon-button type="button" *ngIf="hasFile" (click)="$event.stopPropagation(); clearComposerFile()" [disabled]="uploading" aria-label="Remove attachment">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+  </section>
+
+  <section class="preview-container" [class.empty]="!hasContent">
+    <header class="panel-heading">
+      <div>
+        <span class="eyebrow">Preview</span>
+        <h3>{{ hasContent ? 'Broadcast Payload' : 'Nothing selected' }}</h3>
+      </div>
+    </header>
+
     <ng-container *ngIf="hasFile || hasImageUrl">
-      <img [src]="imagePreview" alt="Preview" class="image-preview">
+      <img *ngIf="imagePreview && selectedFileIsImage" [src]="imagePreview" alt="Preview" class="image-preview">
+      <div class="file-preview" *ngIf="hasFile && !selectedFileIsImage">
+        <mat-icon>description</mat-icon>
+        <div>
+          <strong>{{ selectedFilename }}</strong>
+          <span>{{ selectedFileContentType }}</span>
+        </div>
+      </div>
     </ng-container>
     <ng-container *ngIf="hasHtml && !hasFile && !hasImageUrl">
       <div class="html-preview" [innerHTML]="htmlPreview"></div>
     </ng-container>
-    <ng-container *ngIf="hasText && !hasFile && !hasImageUrl && !hasHtml">
+    <ng-container *ngIf="hasText && (isComposerMode || (!hasFile && !hasImageUrl && !hasHtml))">
       <pre class="text-preview">{{ textPreview }}</pre>
     </ng-container>
-  </div>
+    <div class="empty-preview" *ngIf="!hasContent">
+      <mat-icon>campaign</mat-icon>
+      <span>No broadcast content yet.</span>
+    </div>
+  </section>
 
-  <div class="options-container">
-    <h3>Select Destinations</h3>
+  <section class="options-container">
+    <div class="panel-heading destination-heading">
+      <div>
+        <span class="eyebrow">Send To</span>
+        <h3>Select Destinations</h3>
+      </div>
+    </div>
 
     <mat-tab-group>
       <mat-tab label="Channels">
@@ -46,28 +115,42 @@
 
       <mat-tab label="Active Overlays" *ngIf="isCallActive || isVttActive">
         <div class="section">
-           <div class="overlay-option" *ngIf="isCallActive && (hasFile || hasImageUrl || hasText || hasHtml)">
+           <div class="overlay-option" *ngIf="isCallActive && hasCallOverlayContent">
               <mat-checkbox [(ngModel)]="broadcastToCall">
                 <strong>Broadcast to Call Overlay</strong>
                 <p>Display this content on everyone's screen in the active video call.</p>
               </mat-checkbox>
            </div>
 
-           <div class="overlay-option" *ngIf="isVttActive && (hasFile || hasImageUrl)">
+           <div class="overlay-option" *ngIf="isCallActive && hasImageContentForVtt">
+              <mat-checkbox [(ngModel)]="setTemporaryAtmosphereBackground">
+                <strong>Set Temporary Atmosphere Background</strong>
+                <p>Use this image as the call background without saving it as the server theme.</p>
+              </mat-checkbox>
+           </div>
+
+           <div class="overlay-option" *ngIf="isVttActive && hasImageContentForVtt">
               <mat-checkbox [(ngModel)]="broadcastToVtt">
                 <strong>Add to VTT Map</strong>
                 <p>Create a non-player token on the active battlemap.</p>
+              </mat-checkbox>
+           </div>
+
+           <div class="overlay-option" *ngIf="canSetVttBackground">
+              <mat-checkbox [(ngModel)]="setVttBackground">
+                <strong>Set as VTT Background</strong>
+                <p>Replace the active battlemap background for everyone in the VTT session.</p>
               </mat-checkbox>
            </div>
         </div>
       </mat-tab>
     </mat-tab-group>
 
-  </div>
+  </section>
 </mat-dialog-content>
 
 <mat-dialog-actions align="end">
-  <div class="progress-info" *ngIf="uploading && uploadProgress > 0" style="margin-right: 15px; display: flex; align-items: center; gap: 8px;">
+  <div class="progress-info" *ngIf="uploading && uploadProgress > 0">
     <span>{{ uploadProgress }}%</span>
     <mat-progress-spinner
       mode="determinate"
@@ -78,6 +161,7 @@
   </div>
   <button mat-button mat-dialog-close>Cancel</button>
   <button mat-raised-button color="primary" [disabled]="!canBroadcast() || uploading" (click)="broadcast()">
+    <mat-icon *ngIf="!uploading">send</mat-icon>
     <span *ngIf="!uploading">Broadcast</span>
     <mat-spinner diameter="20" *ngIf="uploading && uploadProgress === 0"></mat-spinner>
     <span *ngIf="uploading && uploadProgress > 0">Uploading...</span>

@@ -527,7 +527,8 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     this.dialog.open(BroadcastDialog, {
       data: data,
       maxWidth: '600px',
-      width: '100%'
+      width: '100%',
+      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
     });
   }
 
@@ -582,7 +583,8 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     this.dialog.open(BroadcastDialog, {
       data: data,
       maxWidth: '600px',
-      width: '100%'
+      width: '100%',
+      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
     });
 
     return true;

@@ -277,6 +277,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private vttSub!: Subscription;
   private overlaySub!: Subscription;
   private overlayTextSub!: Subscription;
+  private temporaryAtmosphereBackgroundSub!: Subscription;
   private serverDetailsSub!: Subscription;
   private callKickedSub!: Subscription;
   private companionDevicesSub!: Subscription;
@@ -581,6 +582,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.overlayTextSub = this.videoService.overlayText$.subscribe(text => {
       this.activeOverlayText = text;
       this.cdr.detectChanges();
+    });
+
+    this.temporaryAtmosphereBackgroundSub = this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
+      this.applyTemporaryAtmosphereBackground(url);
     });
 
     this.callKickedSub = this.videoService.callKicked$.subscribe(async reason => {
@@ -1919,6 +1924,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.vttSub) this.vttSub.unsubscribe();
     if (this.overlaySub) this.overlaySub.unsubscribe();
     if (this.overlayTextSub) this.overlayTextSub.unsubscribe();
+    if (this.temporaryAtmosphereBackgroundSub) this.temporaryAtmosphereBackgroundSub.unsubscribe();
     if (this.serverDetailsSub) this.serverDetailsSub.unsubscribe();
     if (this.callKickedSub) this.callKickedSub.unsubscribe();
     if (this.companionDevicesSub) this.companionDevicesSub.unsubscribe();
@@ -2020,6 +2026,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private rememberValidThemeBackground(theme: ThemeColors) {
     this.lastValidThemeBackgroundImage = theme.backgroundImage ?? null;
     this.lastValidThemeBackgroundImageBlur = !!theme.backgroundImage && theme.backgroundImageBlur === true;
+  }
+
+  private applyTemporaryAtmosphereBackground(url: string | null) {
+    if (!url) {
+      this.themeService.applyTheme(this.activeColors, false, false);
+      return;
+    }
+
+    this.themeService.applyTheme({
+      ...this.activeColors,
+      backgroundImage: url,
+      backgroundImageBlur: true
+    }, false, false);
   }
 
   private isThemePayloadSizeError(error: unknown): boolean {

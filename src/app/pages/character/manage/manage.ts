@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatButtonModule } from '@angular/material/button';
@@ -16,6 +16,11 @@ import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import { Router } from '@angular/router';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { finalize, Subscription } from 'rxjs';
+import { UserService } from '../../../shared/services/user/user';
+import { IUser } from '../../../shared/models/user/user.model';
 
 @Component({
   selector: 'app-manage',
@@ -29,33 +34,67 @@ import { MatTooltipModule } from '@angular/material/tooltip';
     MatMenuModule,
     MatDividerModule,
     MatTooltipModule,
+    MatProgressSpinnerModule,
+    MatSnackBarModule,
     MatDialogModule
   ],
   templateUrl: './manage.html',
   styleUrl: './manage.scss'
 })
-export class Manage implements OnInit {
+export class Manage implements OnInit, OnDestroy {
+  private readonly subscriptions = new Subscription();
+  readonly maxProfileIconSizeMb = 10;
+
   characters: ICharacter[] = [];
   selectedCharacterId: string | undefined = undefined;
   availableServers: IServer[] = [];
+  currentUser: IUser | null = null;
+  profileLoading = true;
+  profileUploading = false;
+  profileIconPreview: string | null = null;
 
   constructor(
     private charService: CharacterService,
     private serverService: ServerService,
     private ddbService: dndbeyond,
+    private userService: UserService,
     private dialog: MatDialog,
-    private router: Router
+    private router: Router,
+    private snackBar: MatSnackBar
   ) {}
 
   ngOnInit(): void {
+    this.loadProfile();
     this.loadCharacters();
-    this.charService.getActiveCharacterObservable().subscribe(char => {
-      if (char) this.selectedCharacterId = char._id;
-    });
-    this.serverService.getMyServersObservable().subscribe(servers => {
-      this.availableServers = servers;
-    });
+    this.subscriptions.add(
+      this.charService.getActiveCharacterObservable().subscribe(char => {
+        this.selectedCharacterId = char?._id;
+      })
+    );
+    this.subscriptions.add(
+      this.serverService.getMyServersObservable().subscribe(servers => {
+        this.availableServers = servers;
+      })
+    );
     this.serverService.getMyServers();
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+  }
+
+  loadProfile() {
+    this.profileLoading = true;
+    this.userService.getMe()
+      .pipe(finalize(() => this.profileLoading = false))
+      .subscribe({
+        next: user => {
+          this.currentUser = user;
+        },
+        error: err => {
+          console.warn('Failed to load profile', err);
+        }
+      });
   }
 
   loadCharacters() {
@@ -64,8 +103,62 @@ export class Manage implements OnInit {
     });
   }
 
+  get profileDisplayName(): string {
+    return this.currentUser?.username || 'Player Profile';
+  }
+
+  get profileSubtitle(): string {
+    return this.currentUser?.email || 'Profile identity for chat, whispers, and default table presence.';
+  }
+
+  get profileId(): string {
+    return this.currentUser?._id || this.currentUser?.id || 'profile';
+  }
+
+  get profileAvatarSrc(): string {
+    return this.profileIconPreview ||
+      this.currentUser?.profileIconUrl ||
+      this.currentUser?.profileIcon ||
+      `https://www.gravatar.com/avatar/${this.profileId}?d=identicon`;
+  }
+
   getTotalLevel(char: ICharacter): number {
     return char.classes?.reduce((acc, c) => acc + (c.level || 0), 0) || 0;
+  }
+
+  onProfileIconSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      this.snackBar.open('Choose an image file for your profile icon.', 'Close', { duration: 3000 });
+      return;
+    }
+
+    if (file.size > this.maxProfileIconSizeMb * 1024 * 1024) {
+      this.snackBar.open(`Profile images must be ${this.maxProfileIconSizeMb}MB or smaller.`, 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.previewProfileIcon(file);
+    this.profileUploading = true;
+    this.userService.uploadProfileIcon(file)
+      .pipe(finalize(() => this.profileUploading = false))
+      .subscribe({
+        next: response => {
+          this.currentUser = response.user;
+          this.profileIconPreview = null;
+          this.snackBar.open('Profile icon updated.', 'OK', { duration: 2000 });
+        },
+        error: err => {
+          console.error('Failed to update profile icon', err);
+          this.profileIconPreview = null;
+          this.snackBar.open('Profile icon update failed.', 'Close', { duration: 3000 });
+        }
+      });
   }
 
   openCreateDialog() {
@@ -166,5 +259,13 @@ export class Manage implements OnInit {
 
   closeManager() {
     this.router.navigate(['']);
+  }
+
+  private previewProfileIcon(file: File) {
+    const reader = new FileReader();
+    reader.onload = event => {
+      this.profileIconPreview = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   }
 }

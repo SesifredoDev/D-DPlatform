@@ -162,6 +162,7 @@ export class Video {
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
   public overlayImage$ = new Subject<string | null>();
   public overlayText$ = new Subject<string | null>();
+  public temporaryAtmosphereBackground$ = new Subject<string | null>();
   public callKicked$ = new Subject<string>();
   public readonly deviceInfo$;
   public readonly companionDevices$ = new BehaviorSubject<CompanionDeviceOption[]>([]);
@@ -380,6 +381,8 @@ export class Video {
             this.overlayImage$.next(data.url);
           } else if (data.type === 'overlay-text') {
             this.overlayText$.next(data.text);
+          } else if (data.type === 'temporary-atmosphere-background') {
+            this.temporaryAtmosphereBackground$.next(data.url);
           } else if (data.type === 'scene-main-characters') {
             void this.receiveSceneMainCharactersState(data.state, participant);
           }
@@ -701,6 +704,13 @@ export class Video {
     const payload = new TextEncoder().encode(JSON.stringify({ type: 'overlay-text', text }));
     this.room.localParticipant.publishData(payload, { reliable: true });
     this.overlayText$.next(text);
+  }
+
+  broadcastTemporaryAtmosphereBackground(url: string | null) {
+    if (this.room.state !== 'connected') return;
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'temporary-atmosphere-background', url }));
+    this.room.localParticipant.publishData(payload, { reliable: true });
+    this.temporaryAtmosphereBackground$.next(url);
   }
 
   private async receiveSceneMainCharactersState(state: unknown, participant?: RemoteParticipant) {

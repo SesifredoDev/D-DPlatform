@@ -8,6 +8,8 @@ import { MatListModule } from '@angular/material/list';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTabsModule } from '@angular/material/tabs';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 
 import { ServerService } from '../../shared/services/server/server';
 import { IChannel } from '../../shared/models/server/channel.model';
@@ -27,6 +29,7 @@ export interface BroadcastData {
   filename?: string;
   embeddedFiles?: BroadcastEmbeddedFile[];
   preferTextForBroadcast?: boolean;
+  composeMode?: boolean;
 }
 
 export interface BroadcastEmbeddedFile {
@@ -62,7 +65,9 @@ interface BroadcastProcessingContext {
     MatListModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatTabsModule
+    MatTabsModule,
+    MatFormFieldModule,
+    MatInputModule
   ],
   templateUrl: './broadcast-dialog.html',
   styleUrls: ['./broadcast-dialog.scss']
@@ -71,6 +76,10 @@ export class BroadcastDialog implements OnInit {
   imagePreview: SafeUrl | null = null;
   textPreview: string | null = null;
   htmlPreview: SafeHtml | null = null;
+  draftText: string = '';
+  selectedFilename: string | null = null;
+  selectedFileContentType: string | null = null;
+  selectedFileIsImage: boolean = false;
 
   textChannels: IChannel[] = [];
   selectedChannels: string[] = [];
@@ -80,6 +89,8 @@ export class BroadcastDialog implements OnInit {
 
   broadcastToCall: boolean = false;
   broadcastToVtt: boolean = false;
+  setTemporaryAtmosphereBackground: boolean = false;
+  setVttBackground: boolean = false;
 
   isCallActive: boolean = false;
   isVttActive: boolean = false;
@@ -92,6 +103,7 @@ export class BroadcastDialog implements OnInit {
   hasImageUrl: boolean = false;
 
   currentServerId: string | null = null;
+  readonly isComposerMode: boolean;
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: BroadcastData,
@@ -104,25 +116,44 @@ export class BroadcastDialog implements OnInit {
     private userService: UserService,
     private sanitizer: DomSanitizer
   ) {
+    this.isComposerMode = !!data.composeMode;
+
     if (data.file) {
-      this.hasFile = true;
-      const reader = new FileReader();
-      reader.onload = (e: any) => this.imagePreview = this.sanitizer.bypassSecurityTrustUrl(e.target.result);
-      reader.readAsDataURL(data.file);
+      this.setFilePreview(data.file);
     } else if (data.imageUrl) {
       this.hasImageUrl = true;
       this.imagePreview = this.sanitizer.bypassSecurityTrustUrl(data.imageUrl);
+      this.selectedFilename = data.filename || 'image';
+      this.selectedFileContentType = 'image';
+      this.selectedFileIsImage = true;
     }
 
     if (data.text) {
       this.hasText = true;
       this.textPreview = data.text;
+      this.draftText = data.text;
     }
 
     if (data.htmlContent) {
       this.hasHtml = true;
       this.htmlPreview = this.sanitizer.bypassSecurityTrustHtml(data.htmlContent);
     }
+  }
+
+  get hasContent(): boolean {
+    return this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml;
+  }
+
+  get hasImageContentForVtt(): boolean {
+    return this.hasImageUrl || (this.hasFile && this.selectedFileIsImage) || this.hasEmbeddedImageContent();
+  }
+
+  get hasCallOverlayContent(): boolean {
+    return this.hasText || this.hasHtml || this.hasImageContentForVtt;
+  }
+
+  get canSetVttBackground(): boolean {
+    return this.hasImageContentForVtt && this.vttSync.canSetBroadcastBackground();
   }
 
   ngOnInit() {
@@ -141,10 +172,55 @@ export class BroadcastDialog implements OnInit {
   }
 
   canBroadcast() {
-    const canBroadcastToCallVtt = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && (this.broadcastToCall || this.broadcastToVtt);
-    const canBroadcastToTextChannels = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && this.selectedChannels.length > 0;
-    const canBroadcastToWhispers = (this.hasFile || this.hasImageUrl || this.hasText || this.hasHtml) && this.selectedMembers.length > 0;
-    return canBroadcastToCallVtt || canBroadcastToTextChannels || canBroadcastToWhispers;
+    const canBroadcastToCall = this.hasCallOverlayContent && this.isCallActive && this.broadcastToCall;
+    const canBroadcastToVtt = this.hasImageContentForVtt && this.isVttActive && this.broadcastToVtt;
+    const canSetTemporaryAtmosphere = this.hasImageContentForVtt && this.isCallActive && this.setTemporaryAtmosphereBackground;
+    const canSetVttBackground = this.canSetVttBackground && this.setVttBackground;
+    const canBroadcastToTextChannels = this.hasContent && this.selectedChannels.length > 0;
+    const canBroadcastToWhispers = this.hasContent && this.selectedMembers.length > 0;
+    return canBroadcastToCall || canBroadcastToVtt || canSetTemporaryAtmosphere || canSetVttBackground || canBroadcastToTextChannels || canBroadcastToWhispers;
+  }
+
+  onDraftTextChange(value: string) {
+    this.draftText = value;
+    const hasDraftText = value.trim().length > 0;
+    this.data.text = hasDraftText ? value : undefined;
+    this.textPreview = hasDraftText ? value : null;
+    this.hasText = hasDraftText;
+  }
+
+  onComposerFileSelected(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    this.data.file = file;
+    this.data.filename = file.name;
+    this.data.imageUrl = undefined;
+    this.hasImageUrl = false;
+    this.setFilePreview(file);
+    if (!this.hasImageContentForVtt) {
+      this.broadcastToVtt = false;
+      this.setTemporaryAtmosphereBackground = false;
+      this.setVttBackground = false;
+    }
+    input.value = '';
+  }
+
+  clearComposerFile() {
+    this.data.file = undefined;
+    this.data.filename = undefined;
+    this.data.imageUrl = undefined;
+    this.hasFile = false;
+    this.hasImageUrl = false;
+    this.selectedFilename = null;
+    this.selectedFileContentType = null;
+    this.selectedFileIsImage = false;
+    this.imagePreview = null;
+    const hasRemainingImageContent = this.hasImageContentForVtt;
+    this.broadcastToVtt = hasRemainingImageContent && this.broadcastToVtt;
+    this.setTemporaryAtmosphereBackground = hasRemainingImageContent && this.setTemporaryAtmosphereBackground;
+    this.setVttBackground = hasRemainingImageContent && this.setVttBackground;
   }
 
   async broadcast() {
@@ -162,13 +238,16 @@ export class BroadcastDialog implements OnInit {
       if (this.data.file) {
         console.log('[BroadcastDialog] Handling primary file', this.data.file.name);
         const uploaded = await this.uploadFile(this.data.file);
-        context.standaloneImageForCallVtt = uploaded.url;
+        if (this.isImageContentType(uploaded.contentType)) {
+          context.standaloneImageForCallVtt = uploaded.url;
+        }
         this.addAttachment(context, uploaded);
+        const uploadedMarkdown = this.formatUploadedAssetForMessage(uploaded);
 
         if (!this.data.text && !this.data.htmlContent) {
-          finalMessageContent = `![${uploaded.filename}](${uploaded.url})`;
+          finalMessageContent = uploadedMarkdown;
         } else {
-          finalMessageContent = `![${uploaded.filename}](${uploaded.url})\n\n`;
+          finalMessageContent = `${uploadedMarkdown}\n\n`;
         }
       }
 
@@ -226,8 +305,20 @@ export class BroadcastDialog implements OnInit {
         }
       }
 
-      // 6. VTT Broadcast
+      // 6. Temporary Call Atmosphere Background
       const imageForVtt = context.standaloneImageForCallVtt || context.embeddedImageForVtt;
+      if (this.setTemporaryAtmosphereBackground && this.isCallActive && imageForVtt) {
+        console.log('[BroadcastDialog] Setting temporary atmosphere background', imageForVtt);
+        this.videoService.broadcastTemporaryAtmosphereBackground(imageForVtt);
+      }
+
+      // 7. VTT Background Broadcast
+      if (this.setVttBackground && imageForVtt) {
+        console.log('[BroadcastDialog] Setting VTT background from broadcast', imageForVtt);
+        await this.vttSync.setBroadcastBackground(imageForVtt);
+      }
+
+      // 8. VTT Token Broadcast
       if (this.broadcastToVtt && this.isVttActive && imageForVtt) {
         console.log('[BroadcastDialog] Adding token to VTT', imageForVtt);
         const engine = this.vttSync.getEngine();
@@ -391,6 +482,46 @@ export class BroadcastDialog implements OnInit {
   private nextGeneratedImageName(context: BroadcastProcessingContext): string {
     context.uploadedBlobImageIndex += 1;
     return `image-${context.uploadedBlobImageIndex}`;
+  }
+
+  private setFilePreview(file: File) {
+    this.hasFile = true;
+    this.selectedFilename = file.name;
+    this.selectedFileContentType = file.type || 'unknown file type';
+    this.selectedFileIsImage = file.type.startsWith('image/');
+
+    if (!this.selectedFileIsImage) {
+      this.imagePreview = null;
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e: ProgressEvent<FileReader>) => {
+      if (typeof e.target?.result === 'string') {
+        this.imagePreview = this.sanitizer.bypassSecurityTrustUrl(e.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  private formatUploadedAssetForMessage(asset: UploadedBroadcastAsset): string {
+    return this.isImageContentType(asset.contentType)
+      ? `![${asset.filename}](${asset.url})`
+      : `[${asset.filename}](${asset.url})`;
+  }
+
+  private isImageContentType(contentType: string | null | undefined): boolean {
+    return !!contentType && contentType.startsWith('image/');
+  }
+
+  private hasEmbeddedImageContent(): boolean {
+    const text = this.data.text || this.draftText || '';
+    const html = this.data.htmlContent || '';
+    const embeddedFiles = this.data.embeddedFiles || [];
+
+    return /!\[[^\]]*\]\([^)]+\)/.test(text) ||
+      /<img\s/i.test(html) ||
+      embeddedFiles.some(embedded => this.isImageContentType(embedded.file?.type));
   }
 
   private async uploadEmbeddedFiles(context: BroadcastProcessingContext) {

@@ -7,5 +7,7 @@ export interface IUserBase {
 export interface IUser extends IUserBase {
   _id:string;
   email: string;
-  profileIcon: string;
+  profileIcon: string | null;
+  profileIconUrl?: string | null;
+  profileIconKey?: string | null;
 }

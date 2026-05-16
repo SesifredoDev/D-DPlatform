@@ -299,6 +299,7 @@ export class DndSearchDrawer {
         data,
         maxWidth: '600px',
         width: '100%',
+        panelClass: ['glass-dialog-container', 'broadcast-dialog-panel'],
       });
     } catch (error) {
       console.warn('Failed to prepare Open5e broadcast', error);

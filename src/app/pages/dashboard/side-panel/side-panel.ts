@@ -30,6 +30,7 @@ import {MatTooltipModule} from '@angular/material/tooltip';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
 import {Subscription} from 'rxjs';
+import {BroadcastDialog} from '../../../objects/broadcast-dialog/broadcast-dialog';
 
 type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
 type ServerManagementPermission = Extract<
@@ -391,6 +392,20 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       minWidth: '400px',
       minHeight: '500px',
       panelClass: 'custom-dialog-container'
+    });
+    this.actionPerformed.emit();
+  }
+
+  openBroadcastDialog() {
+    if (!this.selectedServer) return;
+
+    this.dialog.open(BroadcastDialog, {
+      data: { composeMode: true },
+      width: '860px',
+      maxWidth: '96vw',
+      height: '80vh',
+      maxHeight: '90vh',
+      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel', 'broadcast-compose-dialog']
     });
     this.actionPerformed.emit();
   }

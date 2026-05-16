@@ -264,6 +264,9 @@
       <button mat-icon-button *ngIf="selectedServer" (click)="openVTT()" matTooltip="Game Map">
         <mat-icon>map</mat-icon>
       </button>
+      <button mat-icon-button class="broadcast-action" *ngIf="selectedServer" (click)="openBroadcastDialog()" matTooltip="Broadcast">
+        <mat-icon>broadcast_on_home</mat-icon>
+      </button>
       <button mat-icon-button *ngIf="selectedServer" (click)="openObsidian()" matTooltip="Obsidian Vault">
         <mat-icon>auto_stories</mat-icon>
       </button>

@@ -45,7 +45,7 @@ body {
    GLOBAL DIALOG GLASS OVERRIDES (Angular Material)
    ============================================================================= */
 
-::ng-deep .glass-dialog-container {
+.glass-dialog-container {
   .mat-mdc-dialog-container {
     --mdc-dialog-container-color: transparent !important;
     --mdc-dialog-container-elevation-shadow: none !important;

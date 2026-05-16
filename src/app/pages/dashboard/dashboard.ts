@@ -514,7 +514,8 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     this.dialog.open(BroadcastDialog, {
       data: { file },
       width: '500px',
-      maxWidth: '90vw'
+      maxWidth: '90vw',
+      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
     });
   }
 

@@ -547,6 +547,17 @@ export class VttSync implements OnDestroy {
     const socket = this.getSocket();
     if (!socket.connected || !this.currentRoomId) return;
     const roomId = this.currentRoomId;
+
+    if (action === 'pointer-sync') {
+      const emitSocket = (socket as any).volatile ?? socket;
+      emitSocket.emit('sync-action', {
+        roomId,
+        action,
+        data
+      });
+      return;
+    }
+
     socket.emit('sync-action', {
       roomId,
       action,
@@ -573,6 +584,11 @@ export class VttSync implements OnDestroy {
     engine.stage.off('ping');
     engine.stage.on('ping', (data: any) => {
       this.broadcastAction('ping', data);
+    });
+
+    engine.stage.off('pointerAction');
+    engine.stage.on('pointerAction', (data: any) => {
+      this.broadcastAction('pointer-sync', data);
     });
 
     engine.stage.off('fxAdded');
@@ -784,7 +800,11 @@ export class VttSync implements OnDestroy {
         break;
 
       case 'ping':
-        engine.showPing(data.x, data.y, data.color);
+        engine.showPing(data.x, data.y, data.userId ? engine.getUserColor(data.userId) : data.color);
+        break;
+
+      case 'pointer-sync':
+        engine.handleRemotePointerAction(data);
         break;
 
       case 'player-token-control-change':
@@ -973,6 +993,23 @@ export class VttSync implements OnDestroy {
     if (this.isHosting) {
       this.broadcastAction('map-change', { url: mapUrl });
     }
+  }
+
+  public canSetBroadcastBackground(): boolean {
+    return !!this.engine && this.isConnected && this.isHosting;
+  }
+
+  async setBroadcastBackground(imageUrl: string): Promise<boolean> {
+    const mapUrl = imageUrl?.trim();
+    if (!mapUrl) return false;
+
+    if (!this.canSetBroadcastBackground()) {
+      console.warn('Only the active VTT host can set a broadcast image as the map background.');
+      return false;
+    }
+
+    await this.setMap(mapUrl);
+    return true;
   }
 
   async updateToken(tokenId: string, options: any, iconFile?: File): Promise<boolean> {

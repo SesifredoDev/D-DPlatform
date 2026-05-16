@@ -13,25 +13,33 @@
   &::after {
     content: '';
     position: absolute;
+    inset: -24px;
+    z-index: 0;
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
     pointer-events: none;
   }
 
   &::before {
-    inset: -24px;
-    z-index: 0;
-    background-color: var(--server-theme-background);
-    background-image: var(--server-theme-background-image);
-    background-position: center;
-    background-size: cover;
-    background-repeat: no-repeat;
-    filter: blur(var(--server-theme-background-image-blur));
-    transform: var(--server-theme-background-image-scale);
+    background-image:
+      linear-gradient(
+        var(--server-theme-background-image-previous-overlay),
+        var(--server-theme-background-image-previous-overlay)
+      ),
+      var(--server-theme-background-image-previous);
+    filter: blur(var(--server-theme-background-image-previous-blur));
+    opacity: var(--server-theme-background-image-previous-opacity);
+    transform: var(--server-theme-background-image-previous-scale);
   }
 
   &::after {
-    inset: 0;
-    z-index: 0;
-    background: var(--server-theme-background-overlay);
+    background-image:
+      linear-gradient(var(--server-theme-background-overlay), var(--server-theme-background-overlay)),
+      var(--server-theme-background-image);
+    filter: blur(var(--server-theme-background-image-blur));
+    opacity: var(--server-theme-background-image-opacity);
+    transform: var(--server-theme-background-image-scale);
   }
 }
 

@@ -46,7 +46,9 @@ class Token {
   }
 
   canDrag() {
-    return this.checkPermissions() && !this.engine.isMeasuring?.();
+    return this.checkPermissions() &&
+      !this.engine.isMeasuring?.() &&
+      !this.engine.isPointerActive?.();
   }
 
   async initVisuals() {

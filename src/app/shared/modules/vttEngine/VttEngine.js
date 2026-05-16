@@ -17,6 +17,16 @@ export class VttEngine {
     this.containerId = containerId;
     this.localCharacter = null;
     this.currentUserId= currentUserId;
+    this.pointerMode = false;
+    this.pointerIsDown = false;
+    this.pointerGroups = new Map();
+    this.pointerMoveThrottleMs = 80;
+    this.lastPointerMoveSentAt = 0;
+    this.handleWindowPointerRelease = () => {
+      if (this.pointerMode) {
+        this.endPointerDrag();
+      }
+    };
 
     this.isDM = false
     this.playersCanControlAllPlayerTokens = false;
@@ -77,15 +87,239 @@ export class VttEngine {
   }
 
   initInteraction() {
+    this.stage.on('mousedown', (e) => {
+      if (!this.pointerMode || e.evt.button !== 0) return;
+
+      e.cancelBubble = true;
+      e.evt.preventDefault();
+
+      const pos = this.getRelativePointerPosition();
+      if (!pos) return;
+
+      this.pointerIsDown = true;
+      this.lastPointerMoveSentAt = 0;
+      window.addEventListener('mouseup', this.handleWindowPointerRelease, { once: true });
+
+      const payload = this.createPointerPayload('move', pos);
+      this.showPointer(payload);
+      this.stage.fire('pointerAction', payload);
+    });
+
+    this.stage.on('mousemove', (e) => {
+      if (!this.pointerMode || !this.pointerIsDown) return;
+
+      if (e.evt.buttons !== undefined && (e.evt.buttons & 1) !== 1) {
+        this.endPointerDrag();
+        return;
+      }
+
+      e.cancelBubble = true;
+
+      const pos = this.getRelativePointerPosition();
+      if (!pos) return;
+
+      const payload = this.createPointerPayload('move', pos);
+      this.showPointer(payload);
+
+      if (this.shouldBroadcastPointerMove()) {
+        this.stage.fire('pointerAction', payload);
+      }
+    });
+
+    this.stage.on('mouseup', () => {
+      if (this.pointerMode) {
+        this.endPointerDrag();
+      }
+    });
+
+    this.stage.on('mouseleave', () => {
+      if (this.pointerMode) {
+        this.endPointerDrag();
+      }
+    });
+
     this.stage.on('dblclick dbltap', (e) => {
-      if (this.fxManager?.isActive?.() || this.isMeasuring()) return;
+      if (this.fxManager?.isActive?.() || this.isMeasuring() || this.pointerMode) return;
       // Don't ping if clicking a token
       if (e.target.getParent()?.tokenReference) return;
 
       const pos = this.stage.getRelativePointerPosition();
-      this.showPing(pos.x, pos.y, 'yellow');
-      this.stage.fire('ping', { x: pos.x, y: pos.y, color: 'yellow' });
+      const color = this.getUserColor(this.currentUserId || 'default');
+      this.showPing(pos.x, pos.y, color);
+      this.stage.fire('ping', { x: pos.x, y: pos.y, color, userId: this.currentUserId });
     });
+  }
+
+  setPointerMode(active) {
+    const wasActive = this.pointerMode;
+    this.pointerMode = !!active;
+    const container = this.stage.container();
+
+    if (this.pointerMode) {
+      this.wallManager?.setMode?.('none');
+      this.measurementManager?.setMode?.('none');
+      this.fxManager?.setMode?.('none');
+      container.style.cursor = 'crosshair';
+      this.stage.draggable(false);
+    } else {
+      if (wasActive) {
+        this.endPointerDrag();
+      }
+
+      container.style.cursor = 'default';
+      this.stage.draggable(
+        !this.wallManager?.isWallMode &&
+        !this.wallManager?.isDeleteMode &&
+        !this.isMeasuring() &&
+        !this.isFxActive()
+      );
+    }
+
+    this.refreshTokenPermissions();
+  }
+
+  isPointerActive() {
+    return this.pointerMode;
+  }
+
+  getRelativePointerPosition() {
+    const pointer = this.stage.getPointerPosition();
+    if (!pointer) return null;
+
+    const transform = this.stage.getAbsoluteTransform().copy().invert();
+    return transform.point(pointer);
+  }
+
+  shouldBroadcastPointerMove() {
+    const now = performance.now();
+    if (now - this.lastPointerMoveSentAt < this.pointerMoveThrottleMs) {
+      return false;
+    }
+
+    this.lastPointerMoveSentAt = now;
+    return true;
+  }
+
+  createPointerPayload(action, pos = null) {
+    const userId = this.currentUserId || 'default';
+    const payload = {
+      action,
+      userId,
+      color: this.getUserColor(userId)
+    };
+
+    if (pos) {
+      payload.x = pos.x;
+      payload.y = pos.y;
+    }
+
+    return payload;
+  }
+
+  broadcastPointerHide() {
+    const userId = this.currentUserId || 'default';
+    this.hidePointer(userId);
+    this.stage.fire('pointerAction', this.createPointerPayload('hide'));
+  }
+
+  endPointerDrag() {
+    if (!this.pointerIsDown) return;
+
+    this.pointerIsDown = false;
+    window.removeEventListener('mouseup', this.handleWindowPointerRelease);
+    this.broadcastPointerHide();
+  }
+
+  getUserColor(userId) {
+    const value = String(userId || 'default');
+    let hash = 0;
+
+    for (let index = 0; index < value.length; index++) {
+      hash = value.charCodeAt(index) + ((hash << 5) - hash);
+      hash |= 0;
+    }
+
+    const hue = Math.abs(hash) % 360;
+    return `hsl(${hue}, 82%, 56%)`;
+  }
+
+  showPointer(data) {
+    const userId = data?.userId?.toString();
+    const x = Number(data?.x);
+    const y = Number(data?.y);
+    if (!userId || !Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const color = this.getUserColor(userId);
+    let group = this.pointerGroups.get(userId);
+
+    if (!group) {
+      group = this.createPointerGroup(color);
+      this.pointerGroups.set(userId, group);
+      this.overlayLayer.add(group);
+    }
+
+    group.position({ x, y });
+    group.opacity(1);
+    this.overlayLayer.batchDraw();
+  }
+
+  createPointerGroup(color) {
+    const group = new Konva.Group({ listening: false, opacity: 1 });
+    const halo = new Konva.Circle({
+      radius: 13,
+      fill: color,
+      opacity: 0.18
+    });
+    const ring = new Konva.Circle({
+      radius: 9,
+      stroke: color,
+      strokeWidth: 2,
+      opacity: 0.95
+    });
+    const dot = new Konva.Circle({
+      radius: 5,
+      fill: color,
+      opacity: 1
+    });
+
+    group.add(halo, ring, dot);
+    return group;
+  }
+
+  hidePointer(userId) {
+    const key = userId?.toString();
+    if (!key) return;
+
+    const group = this.pointerGroups.get(key);
+    if (!group) return;
+
+    this.pointerGroups.delete(key);
+    group.destroy();
+    this.overlayLayer.batchDraw();
+  }
+
+  handleRemotePointerAction(data) {
+    const action = data?.action;
+    const userId = data?.userId?.toString();
+    if (!userId || userId === (this.currentUserId || 'default')) return;
+
+    if (action === 'hide') {
+      this.hidePointer(userId);
+      return;
+    }
+
+    if (action !== 'move' && action !== 'ping') return;
+
+    const x = Number(data?.x);
+    const y = Number(data?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const pointer = { userId, x, y };
+    this.showPointer(pointer);
+
+    if (action === 'ping') {
+      this.showPing(x, y, this.getUserColor(userId));
+    }
   }
 
   showPing(x, y, color = 'yellow') {
@@ -177,7 +411,11 @@ export class VttEngine {
     this.tokenLayer.getChildren().forEach(group => {
       const token = group.tokenReference;
       if (token) {
-        group.draggable((typeof token.canDrag === 'function' ? token.canDrag() : token.checkPermissions()) && !this.isFxActive());
+        group.draggable(
+          (typeof token.canDrag === 'function' ? token.canDrag() : token.checkPermissions()) &&
+          !this.isFxActive() &&
+          !this.isPointerActive()
+        );
       }
     });
     this.tokenLayer.batchDraw();
@@ -194,6 +432,7 @@ export class VttEngine {
   clearAll() {
     this.tokenLayer.destroyChildren();
     this.overlayLayer.destroyChildren();
+    this.pointerGroups.clear();
     this.fxManager?.clearAll(true);
     if (this.wallManager && typeof this.wallManager.clearAll === 'function') {
       this.wallManager.clearAll();
@@ -670,6 +909,7 @@ export class VttEngine {
     }
   }
   toggleWallMode(active) {
+    if (active) this.setPointerMode(false);
     if (active) this.fxManager?.setMode('none');
     this.wallManager.toggleMode(active);
     this.updateLighting();
@@ -755,6 +995,7 @@ export class VttEngine {
   }
 
   setMeasurementMode(mode, options = {}) {
+    if (mode !== 'none') this.setPointerMode(false);
     if (mode !== 'none') this.wallManager.setMode('none');
     if (mode !== 'none') this.fxManager?.setMode('none');
     this.measurementManager.setMode(mode, options);
@@ -762,6 +1003,7 @@ export class VttEngine {
   }
 
   setFxMode(mode, options = {}) {
+    if (mode !== 'none') this.setPointerMode(false);
     if (mode !== 'none') {
       this.wallManager.setMode('none');
       this.measurementManager.setMode('none');

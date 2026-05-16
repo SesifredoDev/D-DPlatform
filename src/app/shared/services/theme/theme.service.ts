@@ -101,10 +101,15 @@ function normalizeThemeBackgroundImage(value: unknown): string | null {
 export class ThemeService {
   private static readonly colorsStateKey = 'theme:colors';
   private static readonly pinnedThemesStateKey = 'theme:pinned';
+  private static readonly themeTransitionClass = 'theme-transitioning';
+  private static readonly themeTransitionDurationMs = 1000;
 
   private renderer: Renderer2;
   private _savedColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
   private _serverDefaultColors: ThemeColors = { ...DEFAULT_THEME_COLORS };
+  private themeTransitionTimeout: ReturnType<typeof setTimeout> | null = null;
+  private themeTransitionFrame: number | null = null;
+  private themeInitialized = false;
 
   private _colors = new BehaviorSubject<ThemeColors>(this._savedColors);
   colors$ = this._colors.asObservable();
@@ -128,7 +133,15 @@ export class ThemeService {
   }
 
   applyTheme(colors: ThemeColors, save: boolean = false, broadcast: boolean = true) {
+    const previousColors = this._colors.value;
     const normalizedColors = this.normalizeThemeColors(colors);
+    const shouldTransition = this.themeInitialized && !this.isSameState(previousColors, normalizedColors);
+    const shouldCrossfadeBackgroundImage = shouldTransition &&
+      previousColors.backgroundImage !== normalizedColors.backgroundImage;
+
+    if (shouldTransition) {
+      this.startThemeTransition(shouldCrossfadeBackgroundImage ? previousColors : null);
+    }
 
     if (save) {
       this._savedColors = { ...normalizedColors };
@@ -143,18 +156,9 @@ export class ThemeService {
     root.style.setProperty('--server-theme-text', normalizedColors.textColor ?? DEFAULT_SERVER_THEME.textColor);
     root.style.setProperty('--server-theme-font-family', normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily);
     root.style.setProperty('--server-theme-background-image', this.toCssImageValue(normalizedColors.backgroundImage ?? null));
-    root.style.setProperty(
-      '--server-theme-background-image-blur',
-      normalizedColors.backgroundImage && normalizedColors.backgroundImageBlur ? '18px' : '0px'
-    );
-    root.style.setProperty(
-      '--server-theme-background-image-scale',
-      normalizedColors.backgroundImage && normalizedColors.backgroundImageBlur ? 'scale(1.06)' : 'scale(1)'
-    );
-    root.style.setProperty(
-      '--server-theme-background-overlay',
-      normalizedColors.backgroundImage ? 'rgba(0, 0, 0, 0.42)' : 'transparent'
-    );
+    root.style.setProperty('--server-theme-background-image-blur', this.getBackgroundImageBlur(normalizedColors));
+    root.style.setProperty('--server-theme-background-image-scale', this.getBackgroundImageScale(normalizedColors));
+    root.style.setProperty('--server-theme-background-overlay', this.getBackgroundImageOverlay(normalizedColors));
     root.style.setProperty('--font-family-main', normalizedColors.fontFamily ?? DEFAULT_SERVER_THEME.fontFamily);
 
     const primaryRgb = this.hexToRgb(normalizedColors.primary);
@@ -174,6 +178,12 @@ export class ThemeService {
     if (broadcast) {
       this.sharedWindowState.publish(ThemeService.colorsStateKey, normalizedColors);
     }
+
+    if (shouldCrossfadeBackgroundImage) {
+      this.fadeInBackgroundImage();
+    }
+
+    this.themeInitialized = true;
   }
 
   applyServerTheme(theme: Partial<IServerTheme> | null | undefined) {
@@ -330,6 +340,81 @@ export class ThemeService {
     }
 
     return `url("${imageUrl.replace(/"/g, '\\"')}")`;
+  }
+
+  private startThemeTransition(previousBackgroundColors: ThemeColors | null): void {
+    const root = document.documentElement;
+
+    if (previousBackgroundColors) {
+      this.prepareBackgroundImageCrossfade(root, previousBackgroundColors);
+    }
+
+    this.renderer.addClass(root, ThemeService.themeTransitionClass);
+
+    if (this.themeTransitionTimeout) {
+      clearTimeout(this.themeTransitionTimeout);
+    }
+
+    this.themeTransitionTimeout = setTimeout(() => {
+      this.renderer.removeClass(root, ThemeService.themeTransitionClass);
+      this.resetBackgroundImageCrossfade(root);
+      this.themeTransitionTimeout = null;
+    }, ThemeService.themeTransitionDurationMs);
+  }
+
+  private prepareBackgroundImageCrossfade(root: HTMLElement, previousColors: ThemeColors): void {
+    if (this.themeTransitionFrame !== null) {
+      cancelAnimationFrame(this.themeTransitionFrame);
+      this.themeTransitionFrame = null;
+    }
+
+    root.style.setProperty(
+      '--server-theme-background-image-previous',
+      this.toCssImageValue(previousColors.backgroundImage ?? null)
+    );
+    root.style.setProperty('--server-theme-background-image-previous-blur', this.getBackgroundImageBlur(previousColors));
+    root.style.setProperty('--server-theme-background-image-previous-scale', this.getBackgroundImageScale(previousColors));
+    root.style.setProperty('--server-theme-background-image-previous-overlay', this.getBackgroundImageOverlay(previousColors));
+    root.style.setProperty('--server-theme-background-image-previous-opacity', previousColors.backgroundImage ? '1' : '0');
+    root.style.setProperty('--server-theme-background-image-opacity', '0');
+  }
+
+  private fadeInBackgroundImage(): void {
+    const root = document.documentElement;
+
+    this.themeTransitionFrame = requestAnimationFrame(() => {
+      this.themeTransitionFrame = requestAnimationFrame(() => {
+        root.style.setProperty('--server-theme-background-image-opacity', '1');
+        root.style.setProperty('--server-theme-background-image-previous-opacity', '0');
+        this.themeTransitionFrame = null;
+      });
+    });
+  }
+
+  private resetBackgroundImageCrossfade(root: HTMLElement): void {
+    if (this.themeTransitionFrame !== null) {
+      cancelAnimationFrame(this.themeTransitionFrame);
+      this.themeTransitionFrame = null;
+    }
+
+    root.style.setProperty('--server-theme-background-image-opacity', '1');
+    root.style.setProperty('--server-theme-background-image-previous', 'none');
+    root.style.setProperty('--server-theme-background-image-previous-opacity', '0');
+    root.style.setProperty('--server-theme-background-image-previous-blur', '0px');
+    root.style.setProperty('--server-theme-background-image-previous-scale', 'scale(1)');
+    root.style.setProperty('--server-theme-background-image-previous-overlay', 'transparent');
+  }
+
+  private getBackgroundImageBlur(colors: ThemeColors): string {
+    return colors.backgroundImage && colors.backgroundImageBlur ? '18px' : '0px';
+  }
+
+  private getBackgroundImageScale(colors: ThemeColors): string {
+    return colors.backgroundImage && colors.backgroundImageBlur ? 'scale(1.06)' : 'scale(1)';
+  }
+
+  private getBackgroundImageOverlay(colors: ThemeColors): string {
+    return colors.backgroundImage ? 'rgba(0, 0, 0, 0.42)' : 'transparent';
   }
 
   private isSameState(first: unknown, second: unknown): boolean {

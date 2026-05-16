@@ -23,7 +23,7 @@ type HostTakeoverChoice = 'take-control' | 'player';
 type FxShapeTool = 'polygon' | 'square' | 'circle' | 'cone' | 'erase';
 type TokenConfigTab = 'main' | 'style';
 type ActiveTool =
-  'select' | 'draw' | 'delete' |
+  'select' | 'pointer' | 'draw' | 'delete' |
   'line' | 'radius' | 'cone' |
   'fx-polygon' | 'fx-square' | 'fx-circle' | 'fx-cone' | 'fx-erase' |
   'none';
@@ -624,6 +624,7 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     if (this.playerFxPermissionSub) this.playerFxPermissionSub.unsubscribe();
     if (this.gridSettingsSub) this.gridSettingsSub.unsubscribe();
     if (this.engine) {
+      this.engine.setPointerMode(false);
       this.engine.stage.off(`tokenContextMenu${this.stageEventNamespace}`);
       this.syncService.detachEngine(this.engine, this.serverId, this.engineAttachmentId);
       this.engineAttachmentId = null;
@@ -1039,8 +1040,15 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
     this.engine.setMeasurementMode(tool, tool === 'cone' ? { coneAngle: this.coneAngle } : {});
   }
 
-  setTool(mode: 'select' | 'draw' | 'delete') {
+  setTool(mode: 'select' | 'pointer' | 'draw' | 'delete') {
     this.activeTool = mode;
+
+    if (mode === 'pointer') {
+      this.engine.setPointerMode(true);
+      return;
+    }
+
+    this.engine.setPointerMode(false);
     this.engine.setFxMode('none');
     this.engine.setMeasurementMode('none');
     if (mode === 'select') {
