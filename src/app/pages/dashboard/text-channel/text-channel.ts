@@ -19,6 +19,7 @@ import { MarkdownComponent, provideMarkdown } from 'ngx-markdown';
 import { TextFieldModule } from '@angular/cdk/text-field';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer } from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
@@ -26,6 +27,9 @@ import { IUser } from '../../../shared/models/user/user.model';
 import { IRole } from '../../../shared/models/server/role.model';
 import { FileService } from '../../../shared/services/file/file';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { Tab, TabService } from '../../../shared/services/tab/tab-service';
+import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
+import { Video } from '../../../shared/services/video/video';
 
 type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
 type LinkPreviewType = 'website' | 'image' | 'video' | 'audio' | 'embed';
@@ -83,7 +87,8 @@ interface ProviderLinkPreview {
     MarkdownComponent,
     TextFieldModule,
     MatTooltipModule,
-    MatMenuModule
+    MatMenuModule,
+    MatSnackBarModule
   ],
   providers: [provideMarkdown()]
 })
@@ -113,6 +118,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   private readonly imageExtensions = ['apng', 'avif', 'gif', 'jpg', 'jpeg', 'png', 'svg', 'webp'];
   private readonly videoExtensions = ['m4v', 'mov', 'mp4', 'mpeg', 'ogv', 'webm'];
   private readonly audioExtensions = ['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'webm'];
+  private readonly astralContentType = 'application/vnd.ddplatform.astral';
   private readonly linkPreviewCache = new Map<string, LinkPreview[]>();
 
   // Whisper state
@@ -130,7 +136,11 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     private userService: UserService,
     private serverService: ServerService,
     private fileService: FileService,
-    private sanitizer: DomSanitizer
+    private sanitizer: DomSanitizer,
+    private tabService: TabService,
+    private astralPlaybackDrop: AstralPlaybackDropService,
+    private videoService: Video,
+    private snackBar: MatSnackBar
   ) {
     this.userService.getMe().subscribe(user => {
       this.currentUserId = user._id;
@@ -407,7 +417,8 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
           id: uploaded.id,
           name: uploaded.name || uploaded.filename || file.name,
           filename: uploaded.filename || file.name,
-          contentType: uploaded.contentType || file.type || 'application/octet-stream'
+          contentType: uploaded.contentType || this.getUploadFallbackContentType(file),
+          size: uploaded.size ?? file.size
         });
       }
     } catch (err) {
@@ -469,7 +480,12 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     return this.hasContentType(attachment, 'audio/') || this.hasFileExtension(attachment, this.audioExtensions);
   }
 
+  isAstralAttachment(attachment: Attachment): boolean {
+    return this.hasContentType(attachment, this.astralContentType) || this.hasFileExtension(attachment, ['astral']);
+  }
+
   getAttachmentIcon(attachment: Attachment): string {
+    if (this.isAstralAttachment(attachment)) return 'auto_awesome_motion';
     if (this.isImageAttachment(attachment)) return 'image';
     if (this.isVideoAttachment(attachment)) return 'movie';
     if (this.isAudioAttachment(attachment)) return 'graphic_eq';
@@ -486,6 +502,63 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
     const extension = this.getExtension(attachment.url || attachment.filename || attachment.name || '');
     return extension ? extension.toUpperCase() : 'file';
+  }
+
+  formatAttachmentSize(attachment: Attachment): string {
+    const size = Number(attachment.size);
+    if (!Number.isFinite(size) || size <= 0) return '';
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = size;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+
+    return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
+  }
+
+  getAttachmentDownloadUrl(attachment: Attachment): string {
+    const url = attachment.url;
+    if (!url) return '';
+
+    try {
+      const parsed = new URL(url, typeof window === 'undefined' ? undefined : window.location.origin);
+      parsed.searchParams.set('download', '1');
+      return parsed.toString();
+    } catch {
+      return url.includes('?') ? `${url}&download=1` : `${url}?download=1`;
+    }
+  }
+
+  playAstralAttachment(attachment: Attachment, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    if (!attachment.url) {
+      this.snackBar.open('This .astral attachment is missing its download URL.', 'Close', {
+        duration: 4000
+      });
+      return;
+    }
+
+    const targetCallTab = this.resolveAstralPlaybackCallTab();
+    if (!targetCallTab) {
+      this.snackBar.open('No call channel is available for Astral playback.', 'Close', {
+        duration: 4000
+      });
+      return;
+    }
+
+    this.tabService.selectTab(targetCallTab.id);
+    window.setTimeout(() => {
+      this.astralPlaybackDrop.requestPlayback({
+        channelId: targetCallTab.id,
+        url: attachment.url,
+        filename: attachment.filename || attachment.name || 'recording.astral'
+      });
+    });
   }
 
   private extractPreviewUrls(content: string): string[] {
@@ -592,6 +665,54 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     const cleanValue = value.split(/[?#]/)[0].toLowerCase();
     const match = cleanValue.match(/\.([a-z0-9]+)$/);
     return match?.[1] ?? '';
+  }
+
+  private getUploadFallbackContentType(file: File): string {
+    return file.name.toLowerCase().endsWith('.astral')
+      ? this.astralContentType
+      : file.type || 'application/octet-stream';
+  }
+
+  private findAstralPlaybackCallTab(): Tab | null {
+    const tabs = this.tabService.getTabs();
+    const connectedCallId = this.videoService.currentChannelId;
+    return tabs.find(tab => tab.type === 'call' && connectedCallId === tab.id)
+      ?? tabs.find(tab => tab.type === 'call' && tab.active)
+      ?? tabs.find(tab => tab.type === 'call')
+      ?? null;
+  }
+
+  private resolveAstralPlaybackCallTab(): Tab | null {
+    const existingCallTab = this.findAstralPlaybackCallTab();
+    if (existingCallTab) {
+      return existingCallTab;
+    }
+
+    const callChannel = this.findDefaultCallChannel();
+    if (!callChannel?._id) {
+      return null;
+    }
+
+    const sourceTab = this.tabService.getTabs().find(tab => tab.id === this.channelId);
+    this.tabService.openTab(
+      callChannel._id,
+      callChannel.name || 'Call',
+      'call',
+      sourceTab?.pane ?? 'left'
+    );
+
+    return this.tabService.getTabs().find(tab => tab.id === callChannel._id) ?? {
+      id: callChannel._id,
+      title: callChannel.name || 'Call',
+      type: 'call',
+      pane: sourceTab?.pane ?? 'left',
+      active: true
+    };
+  }
+
+  private findDefaultCallChannel(): IChannel | null {
+    const server = this.serverService.getCurrentServer();
+    return server?.channels?.find(channel => channel.type === ChannelType.Call && !!channel._id) ?? null;
   }
 
   private getPreviewType(pathname: string): LinkPreviewType | null {

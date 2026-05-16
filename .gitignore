@@ -43,3 +43,10 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Local Tauri media tools used for bundled Astral optimization.
+# These are copied into installers at build time and are too large for GitHub.
+/src-tauri/bin/ffmpeg.exe
+/src-tauri/bin/ffprobe.exe
+/src-tauri/bin/ffmpeg
+/src-tauri/bin/ffprobe

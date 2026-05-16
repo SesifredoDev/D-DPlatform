@@ -605,6 +605,21 @@
 
   &.local video { transform: rotateY(180deg); }
 
+  .playback-still-frame {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+    pointer-events: none;
+  }
+
+  &.local .playback-still-frame {
+    transform: rotateY(180deg);
+  }
+
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   &:hover {
     transform: scale(1.01) translateY(-2px);
@@ -1407,6 +1422,174 @@
 }
 
 /* --- SPOTIFY OVERLAY (FULL SCREEN GLASS) --- */
+.astral-playback-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 360;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: fadeIn 0.22s ease-out;
+}
+
+.astral-playback-prompt {
+  position: relative;
+  width: min(520px, 100%);
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(216, 179, 90, 0.38);
+  border-left: 4px solid #d8b35a;
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(135deg, rgba(28, 27, 31, 0.96), rgba(46, 40, 50, 0.94)),
+    rgba(255, 255, 255, 0.04);
+  box-shadow: 0 34px 90px rgba(0, 0, 0, 0.62), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: white;
+}
+
+.astral-prompt-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-round);
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+
+  &:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+}
+
+.astral-prompt-mark {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(216, 179, 90, 0.38);
+  border-radius: var(--radius-l);
+  background: rgba(216, 179, 90, 0.13);
+  color: #f3d989;
+
+  mat-icon {
+    width: 32px;
+    height: 32px;
+    font-size: 32px;
+  }
+}
+
+.astral-prompt-copy {
+  min-width: 0;
+  padding-right: 26px;
+
+  h2 {
+    margin: 2px 0 8px;
+    color: white;
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1.15;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+}
+
+.astral-prompt-kicker {
+  color: #d8b35a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.astral-prompt-filename {
+  max-width: 100%;
+  overflow: hidden;
+  margin-bottom: 8px !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.astral-prompt-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.astral-prompt-primary,
+.astral-prompt-secondary {
+  min-height: 40px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.58;
+  }
+
+  mat-icon {
+    width: 19px;
+    height: 19px;
+    font-size: 19px;
+  }
+}
+
+.astral-prompt-primary {
+  border: 1px solid rgba(255, 224, 128, 0.58);
+  background: #d8b35a;
+  color: #171512;
+
+  &:hover:not(:disabled) {
+    background: #e8c66d;
+  }
+}
+
+.astral-prompt-secondary {
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+}
+
 .spotify-overlay {
   position: absolute;
   inset: 0;
@@ -1429,6 +1612,44 @@
     border-radius: var(--radius-xl);
     box-shadow: 0 40px 100px rgba(0, 0, 0, 0.6);
     overflow: hidden;
+  }
+}
+
+@media (max-width: 560px) {
+  .astral-playback-overlay {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .astral-playback-prompt {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 12px;
+    padding: 18px 14px 14px;
+    border-radius: var(--radius-l);
+  }
+
+  .astral-prompt-mark {
+    width: 46px;
+    height: 46px;
+
+    mat-icon {
+      width: 27px;
+      height: 27px;
+      font-size: 27px;
+    }
+  }
+
+  .astral-prompt-copy {
+    padding-right: 22px;
+
+    h2 {
+      font-size: 18px;
+    }
+  }
+
+  .astral-prompt-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1659,6 +1880,41 @@
     background: var(--danger);
     color: white;
   }
+}
+
+.dm-recording-toolbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 32px));
+  padding: 8px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(30, 31, 34, 0.9);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.46);
+  pointer-events: auto;
+
+  .btn-action {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+.dm-recording-status {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .recording-status-pill {

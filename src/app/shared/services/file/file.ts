@@ -9,6 +9,7 @@ interface UploadedFileResponse {
   name: string; // Added to match Attachment interface
   contentType: string;
   url: string;
+  size?: number;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -16,6 +17,7 @@ export class FileService {
   private baseUrl = `${environment.apiURL}files`;
   private CHUNK_SIZE = 512 * 1024; // 512KB chunks to be extremely safe
   private DIRECT_UPLOAD_THRESHOLD = 8 * 1024 * 1024; // Keep normal image uploads off the finalize endpoint
+  private readonly ASTRAL_CONTENT_TYPE = 'application/vnd.ddplatform.astral';
 
   constructor(private http: HttpClient) {}
 
@@ -33,8 +35,9 @@ export class FileService {
   // Direct upload for smaller files
   async uploadFile(file: File): Promise<UploadedFileResponse> {
     console.log(`[FileService] Starting direct upload for: ${file.name} (${file.size} bytes)`);
+    const uploadFile = this.withUploadContentType(file);
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', uploadFile);
 
     const response = await firstValueFrom(
       this.http.post<any>(`${this.baseUrl}/upload`, formData, { withCredentials: true })
@@ -46,13 +49,14 @@ export class FileService {
       filename: response.filename,
       name: response.filename || file.name,
       contentType: response.contentType,
-      url: this.resolveFileUrl(response.url)
+      url: this.resolveFileUrl(response.url),
+      size: response.size ?? file.size
     };
   }
 
   // Chunked upload for larger files
   async uploadFileInChunks(file: File, onProgress?: (progress: number) => void): Promise<UploadedFileResponse> {
-    if (file.size <= this.DIRECT_UPLOAD_THRESHOLD) {
+    if (!this.isAstralFile(file) && file.size <= this.DIRECT_UPLOAD_THRESHOLD) {
       return await this.uploadFile(file);
     }
 
@@ -60,6 +64,7 @@ export class FileService {
     const fileSize = file.size;
     const numberOfChunks = Math.ceil(fileSize / this.CHUNK_SIZE);
     const fileId = crypto.randomUUID();
+    const uploadContentType = this.getUploadContentType(file);
 
     for (let i = 0; i < numberOfChunks; i++) {
       const offset = i * this.CHUNK_SIZE;
@@ -70,7 +75,7 @@ export class FileService {
       formData.append('chunkIndex', i.toString());
       formData.append('totalChunks', numberOfChunks.toString());
       formData.append('fileName', file.name);
-      formData.append('fileType', file.type);
+      formData.append('fileType', uploadContentType);
       formData.append('chunk', chunk, file.name);
 
       await firstValueFrom(
@@ -84,7 +89,7 @@ export class FileService {
     const finalResponse = await firstValueFrom(
       this.http.post<any>(
         `${this.baseUrl}/finalize-upload`,
-        { fileId, fileName: file.name, fileType: file.type },
+        { fileId, fileName: file.name, fileType: uploadContentType, fileSize },
         { withCredentials: true }
       )
     );
@@ -95,7 +100,23 @@ export class FileService {
       filename: finalResponse.filename,
       name: finalResponse.filename || file.name,
       contentType: finalResponse.contentType,
-      url: this.resolveFileUrl(finalResponse.url)
+      url: this.resolveFileUrl(finalResponse.url),
+      size: finalResponse.size ?? file.size
     };
+  }
+
+  private withUploadContentType(file: File): File {
+    const contentType = this.getUploadContentType(file);
+    return contentType === file.type ? file : new File([file], file.name, { type: contentType });
+  }
+
+  private getUploadContentType(file: File): string {
+    return this.isAstralFile(file)
+      ? this.ASTRAL_CONTENT_TYPE
+      : file.type || 'application/octet-stream';
+  }
+
+  private isAstralFile(file: File): boolean {
+    return file.name.toLowerCase().endsWith('.astral');
   }
 }

@@ -33,11 +33,14 @@ import { MarkdownComponent } from 'ngx-markdown';
 import { AuthService } from '../../../shared/services/auth/auth';
 import { DeviceService, DeviceType } from '../../../shared/services/device/device';
 import { RecordedCallEnvironmentAction, SessionPlaybackState, SessionRecording, SessionRecordingMedia, SessionRecordingParticipantMedia, SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
-import { AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
+import { AstralRecordingImportResponse, AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
+import { AstralPlaybackDropRequest, AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
+import { AstralOptimizerService } from '../../../shared/services/astral-recording/astral-optimizer';
 
 interface ParticipantStream {
   id: string;
   stream?: MediaStream;
+  stillFrameUrl?: string;
   userData?: ICharacter;
   participantMeta?: CallParticipantMetadata | null;
   ping?: number;
@@ -100,6 +103,19 @@ interface PriorityGridPlacement {
   columnSpan: number;
 }
 
+type CallParticipantRecorderStopReason = 'final' | 'idle' | 'tracks-changed' | 'removed';
+
+interface CallParticipantActivitySample {
+  audioLevel: number;
+  videoMotion: number;
+  active: boolean;
+}
+
+interface CallParticipantActivityMonitor {
+  getSample: () => CallParticipantActivitySample;
+  cleanup: () => void;
+}
+
 interface CallParticipantRecorder {
   participantId: string;
   isLocal: boolean;
@@ -118,6 +134,32 @@ interface CallParticipantRecorder {
   astralSize: number;
   astralWriteChain: Promise<void>;
   astralWriteFailed: boolean;
+  stopReason: CallParticipantRecorderStopReason;
+  idleMonitor: CallParticipantActivityMonitor | null;
+  idleMonitorInterval: any;
+  idleLastActivityAt: number;
+  idleTransitionInProgress: boolean;
+  pendingIdleStillFrame: Blob | null;
+  pendingIdleStillMimeType: string | null;
+}
+
+interface CallParticipantIdleState {
+  participantId: string;
+  isLocal: boolean;
+  userData: Partial<ICharacter> | null;
+  participantMeta: CallParticipantMetadata | null;
+  volumePercent: number;
+  stream: MediaStream;
+  tracksSignature: string;
+  startedAtMs: number;
+  blob: Blob | null;
+  mimeType: string;
+  mediaUrl: string | null;
+  mediaPath: string | null;
+  size: number;
+  activityMonitor: CallParticipantActivityMonitor | null;
+  activityMonitorInterval: any;
+  resuming: boolean;
 }
 
 interface CallPlaybackSource {
@@ -285,6 +327,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   sessionRecordingError = '';
   recordedSession: SessionRecording | null = null;
   isCallPlaybackMode = false;
+  isSavingAstralRecording = false;
+  isTauriDesktop = false;
+  pendingAstralPlaybackRequest: AstralPlaybackDropRequest | null = null;
+  pendingAstralPlaybackFilename = '';
+  pendingAstralPlaybackRequiresDisconnect = false;
 
 
   isAudioMuted = false;
@@ -379,6 +426,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private sessionRecordingStateSub!: Subscription;
   private sessionRecordingLastSub!: Subscription;
   private sessionPlaybackSub!: Subscription;
+  private astralPlaybackDropSub!: Subscription;
   readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   readonly supportsRemoteAudioGain = typeof window !== 'undefined' && !!this.getAudioContextConstructor();
 
@@ -403,6 +451,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private callRecordingDurationInterval: any;
   private callRecordingDiscardOnStop = false;
   private callParticipantRecorders = new Map<string, CallParticipantRecorder>();
+  private callParticipantIdleStates = new Map<string, CallParticipantIdleState>();
   private stoppingCallParticipantRecorders = 0;
   private finalizingSessionRecording = false;
   private astralRecordingSessionId: string | null = null;
@@ -432,6 +481,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private callPlaybackClockStartTimeMs = 0;
   private visiblePlaybackSyncToken = 0;
   private lastAppliedPlaybackSpotifySignature = '';
+  private isImportingAstralPlayback = false;
+  private readonly participantIdleThresholdMs = 60000;
+  private readonly participantIdleCheckIntervalMs = 250;
+  private readonly participantIdleAudioRmsThreshold = 0.012;
+  private readonly participantIdleVideoMotionThreshold = 7;
+  private readonly participantStillFrameMimeType = 'image/webp';
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
   private readonly handleDeviceChangeBound = () => {
@@ -450,7 +505,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private deviceService: DeviceService,
     private snackBar: MatSnackBar,
     private sessionRecording: SessionRecordingService,
-    private astralRecording: AstralRecordingService
+    private astralRecording: AstralRecordingService,
+    private astralOptimizer: AstralOptimizerService,
+    private astralPlaybackDrop: AstralPlaybackDropService
   ) {
     this.activeColors = this.themeService.getColors();
     this.rememberValidThemeBackground(this.activeColors);
@@ -477,6 +534,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
 
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
+    this.isTauriDesktop = await this.astralRecording.isAvailable().catch(() => false);
     this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
     await this.restoreStoredMediaPreferences();
     this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(
@@ -798,6 +856,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
     this.sessionPlaybackSub = this.sessionRecording.playbackState$.subscribe(state => {
       this.applyCallPlaybackState(state);
+    });
+    this.astralPlaybackDropSub = this.astralPlaybackDrop.requests$.subscribe(request => {
+      if (request.channelId !== this.channelId) {
+        return;
+      }
+
+      this.promptAstralPlaybackRequest(request);
     });
 
     this.checkServerOwner();
@@ -1189,8 +1254,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return this.sessionRecordingError;
     }
 
-    if (!this.supportsSessionRecording) {
-      return 'Recording unsupported here';
+    if (!this.canUseSessionRecording) {
+      return 'Recording only available in the desktop app';
     }
 
     if (this.isSessionRecording) {
@@ -1208,6 +1273,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   get hasRecordedSessionPlayback(): boolean {
     return !!this.recordedSession && this.hasPlayableCallRecording(this.recordedSession);
+  }
+
+  get canUseSessionRecording(): boolean {
+    return this.supportsSessionRecording && this.isTauriDesktop;
+  }
+
+  get showDmRecordingToolbar(): boolean {
+    return this.isServerOwner && this.isTauriDesktop && (!!this.localStream || this.isCallPlaybackMode);
+  }
+
+  get canSaveAstralRecording(): boolean {
+    return !!this.recordedSession?.package?.path && !this.isSavingAstralRecording;
+  }
+
+  get isAstralPlaybackImporting(): boolean {
+    return this.isImportingAstralPlayback;
   }
 
   get isPlaybackVttLive(): boolean {
@@ -1228,8 +1309,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     this.sessionRecordingError = '';
-    if (!this.supportsSessionRecording) {
-      this.sessionRecordingError = 'Recording unsupported here';
+    if (!this.canUseSessionRecording) {
+      this.sessionRecordingError = 'Recording is only available in the Tauri desktop app';
       return;
     }
 
@@ -1251,6 +1332,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.recordCurrentCallEnvironmentInitialState();
     void this.recordCurrentSpotifyPlaybackState();
     this.callParticipantRecorders.clear();
+    this.callParticipantIdleStates.clear();
     this.stoppingCallParticipantRecorders = 0;
     this.finalizingSessionRecording = false;
     this.callRecordingDiscardOnStop = false;
@@ -1277,13 +1359,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   stopSessionRecording(discardRecording: boolean = false) {
-    if (!this.sessionRecording.isRecording() && !this.callParticipantRecorders.size) {
+    if (!this.sessionRecording.isRecording() && !this.callParticipantRecorders.size && !this.callParticipantIdleStates.size) {
       return;
     }
 
     this.callRecordingDiscardOnStop = this.callRecordingDiscardOnStop || discardRecording;
     this.finalizingSessionRecording = true;
     this.clearCallRecordingTimer();
+    this.endAllCallParticipantIdleStates(!this.callRecordingDiscardOnStop);
     if (!this.callParticipantRecorders.size) {
       void this.finishSessionRecordingIfReady();
       return;
@@ -1291,6 +1374,252 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.stopAllCallParticipantRecorders();
     void this.finishSessionRecordingIfReady();
+  }
+
+  async saveAstralRecording(recording: SessionRecording | null = this.recordedSession) {
+    if (this.isSavingAstralRecording) {
+      return;
+    }
+
+    const packagePath = recording?.package?.path;
+    if (!packagePath) {
+      this.snackBar.open('This recording does not have a saved .astral package. Record in the Tauri desktop app to create one.', 'Close', { duration: 5000 });
+      return;
+    }
+
+    this.isSavingAstralRecording = true;
+    try {
+      const result = await this.astralRecording.exportPackage(packagePath);
+      this.snackBar.open(`Saved .astral recording to ${result.savedPath}`, 'Close', { duration: 6000 });
+    } catch (error) {
+      console.error('Failed to save Astral recording package', error);
+      this.snackBar.open('Could not save the .astral recording.', 'Close', { duration: 4000 });
+    } finally {
+      this.isSavingAstralRecording = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private promptAstralPlaybackRequest(request: AstralPlaybackDropRequest) {
+    if (this.isSessionRecording) {
+      this.snackBar.open('Stop recording before playing an .astral file.', 'Close', {
+        duration: 4000
+      });
+      return;
+    }
+
+    if (this.isImportingAstralPlayback) {
+      this.snackBar.open('An .astral recording is already loading.', 'Close', {
+        duration: 3000
+      });
+      return;
+    }
+
+    const filename = request.filename || request.file?.name || 'dropped .astral recording';
+    this.pendingAstralPlaybackRequest = request;
+    this.pendingAstralPlaybackFilename = filename;
+    this.pendingAstralPlaybackRequiresDisconnect = this.hasActiveLiveCallConnection();
+    this.cdr.detectChanges();
+  }
+
+  cancelAstralPlaybackPrompt() {
+    this.clearAstralPlaybackPrompt();
+  }
+
+  confirmAstralPlaybackPrompt() {
+    const request = this.pendingAstralPlaybackRequest;
+    if (!request || this.isImportingAstralPlayback) {
+      return;
+    }
+
+    const shouldDisconnect = this.pendingAstralPlaybackRequiresDisconnect || this.hasActiveLiveCallConnection();
+    this.clearAstralPlaybackPrompt();
+    if (shouldDisconnect) {
+      void this.disconnectAndPlayAstralRequest(request);
+      return;
+    }
+
+    void this.importAndPlayAstralRequest(request);
+  }
+
+  private clearAstralPlaybackPrompt() {
+    this.pendingAstralPlaybackRequest = null;
+    this.pendingAstralPlaybackFilename = '';
+    this.pendingAstralPlaybackRequiresDisconnect = false;
+  }
+
+  private hasActiveLiveCallConnection(): boolean {
+    return !this.isCallPlaybackMode &&
+      this.videoService.currentChannelId === this.channelId &&
+      !!this.videoService.getLocalStream();
+  }
+
+  private async disconnectAndPlayAstralRequest(request: AstralPlaybackDropRequest) {
+    if (this.hasActiveLiveCallConnection()) {
+      await this.leaveCall();
+    }
+
+    await this.importAndPlayAstralRequest(request);
+  }
+
+  private async importAndPlayAstralRequest(request: AstralPlaybackDropRequest) {
+    if (this.isImportingAstralPlayback) {
+      return;
+    }
+
+    this.isImportingAstralPlayback = true;
+    this.sessionRecordingError = '';
+    const loadingRef = this.snackBar.open('Loading .astral recording...', 'Close');
+
+    try {
+      if (this.isCallPlaybackMode) {
+        this.stopSessionPlayback();
+      }
+
+      const imported = request.file
+        ? await this.astralRecording.importPackageFile(request.file)
+        : request.url
+          ? await this.astralRecording.importPackageFromUrl(request.url, request.filename)
+          : null;
+      if (!imported) {
+        this.sessionRecordingError = 'No .astral recording source found';
+        this.snackBar.open(this.sessionRecordingError, 'Close', { duration: 4000 });
+        return;
+      }
+
+      const recording = await this.createSessionRecordingFromAstralImport(imported);
+      if (!this.hasPlayableCallRecording(recording)) {
+        this.sessionRecordingError = 'Imported .astral file has no playable media';
+        this.snackBar.open(this.sessionRecordingError, 'Close', { duration: 5000 });
+        return;
+      }
+
+      const loadedRecording = this.sessionRecording.loadRecording(recording);
+      this.recordedSession = loadedRecording;
+      this.startSessionPlayback(loadedRecording);
+    } catch (error) {
+      console.error('Failed to import Astral recording', error);
+      this.sessionRecordingError = 'Could not load the .astral recording';
+      this.snackBar.open(this.sessionRecordingError, 'Close', {
+        duration: 5000
+      });
+    } finally {
+      loadingRef.dismiss();
+      this.isImportingAstralPlayback = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private async createSessionRecordingFromAstralImport(imported: AstralRecordingImportResponse): Promise<SessionRecording> {
+    const manifest = imported.manifest ?? {};
+    const sourceRecording = manifest.recording ?? manifest;
+    const participantMedia = await this.createImportedAstralParticipantMedia(imported, sourceRecording.participantMedia);
+    const durationMs = this.getImportedRecordingDurationMs(sourceRecording, participantMedia);
+
+    return {
+      id: `${sourceRecording.id || 'astral-recording'}:${imported.sessionId}`,
+      callRoomId: sourceRecording.callRoomId ?? null,
+      startedAt: sourceRecording.startedAt ?? manifest.packagedAt ?? new Date().toISOString(),
+      endedAt: sourceRecording.endedAt ?? null,
+      durationMs,
+      media: await this.createImportedAstralMedia(imported, sourceRecording.media),
+      participantMedia,
+      package: {
+        storage: 'astral',
+        path: imported.packagePath,
+        size: imported.packageSize,
+        formatVersion: Number(manifest.formatVersion) || 1,
+        createdAt: manifest.packagedAt ?? new Date().toISOString()
+      },
+      vtt: {
+        roomId: sourceRecording.vtt?.roomId ?? sourceRecording.callRoomId ?? null,
+        initialState: sourceRecording.vtt?.initialState ?? null,
+        actions: Array.isArray(sourceRecording.vtt?.actions) ? sourceRecording.vtt.actions : []
+      },
+      callEnvironment: {
+        initialState: sourceRecording.callEnvironment?.initialState ?? null,
+        events: Array.isArray(sourceRecording.callEnvironment?.events) ? sourceRecording.callEnvironment.events : []
+      }
+    };
+  }
+
+  private async createImportedAstralParticipantMedia(
+    imported: AstralRecordingImportResponse,
+    participantMedia: any
+  ): Promise<SessionRecordingParticipantMedia[]> {
+    if (!Array.isArray(participantMedia)) {
+      return [];
+    }
+
+    const participants = await Promise.all(participantMedia.map(async participant => {
+      const media = await this.createImportedAstralMedia(imported, participant?.media);
+      if (!participant?.participantId || !media) {
+        return null;
+      }
+
+      const startedAtMs = this.toFiniteRecordingNumber(participant.startedAtMs, 0);
+      const endedAtMs = this.toFiniteRecordingNumber(participant.endedAtMs, startedAtMs + media.durationMs);
+      return {
+        participantId: String(participant.participantId),
+        isLocal: !!participant.isLocal,
+        userData: participant.userData ?? null,
+        participantMeta: participant.participantMeta ?? null,
+        volumePercent: this.normalizeParticipantPlaybackVolume(participant.volumePercent),
+        startedAtMs,
+        endedAtMs: Math.max(startedAtMs, endedAtMs),
+        media
+      } satisfies SessionRecordingParticipantMedia;
+    }));
+
+    return participants.filter((participant): participant is SessionRecordingParticipantMedia => !!participant);
+  }
+
+  private async createImportedAstralMedia(
+    imported: AstralRecordingImportResponse,
+    mediaManifest: any
+  ): Promise<SessionRecordingMedia | null> {
+    if (!mediaManifest) {
+      return null;
+    }
+
+    const mimeType = mediaManifest.mimeType || 'video/webm';
+    const mediaPath = this.astralRecording.resolveImportedMediaPath(imported, mediaManifest.path);
+    if (!mediaPath) {
+      return null;
+    }
+
+    return {
+      blob: null,
+      storage: 'astral',
+      mimeType,
+      url: await this.astralRecording.getImportedFileUrl(imported, mediaPath, mimeType),
+      durationMs: this.toFiniteRecordingNumber(mediaManifest.durationMs, 0),
+      size: this.toFiniteRecordingNumber(mediaManifest.size, 0),
+      path: mediaPath
+    };
+  }
+
+  private getImportedRecordingDurationMs(sourceRecording: any, participantMedia: SessionRecordingParticipantMedia[]): number {
+    const participantDurationMs = participantMedia.reduce(
+      (durationMs, participant) => Math.max(durationMs, participant.endedAtMs),
+      0
+    );
+
+    return Math.max(this.toFiniteRecordingNumber(sourceRecording?.durationMs, 0), participantDurationMs);
+  }
+
+  private toFiniteRecordingNumber(value: unknown, fallback: number): number {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? Math.max(0, numericValue) : fallback;
+  }
+
+  private normalizeParticipantPlaybackVolume(volumePercent: unknown): number {
+    const numericValue = Number(volumePercent);
+    if (!Number.isFinite(numericValue)) {
+      return 100;
+    }
+
+    return Math.min(200, Math.max(0, Math.round(numericValue)));
   }
 
   private async startAstralRecordingSession() {
@@ -1337,6 +1666,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         formatVersion: 1,
         createdAt: new Date().toISOString()
       });
+      void this.astralOptimizer.optimizeRecordingPackage(recording.id, packageResult.astralPath);
       return true;
     } catch (error) {
       console.error('Failed to finalize Astral recording package', error);
@@ -2018,6 +2348,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       activeParticipantIds.add(participant.id);
+      const idleState = this.callParticipantIdleStates.get(participant.id);
+      if (idleState) {
+        idleState.userData = this.createCharacterSnapshot(participant.userData);
+        idleState.participantMeta = participant.participantMeta ?? null;
+        idleState.volumePercent = participant.volumePercent;
+
+        const tracksSignature = this.getTrackSignature(tracks);
+        if (idleState.tracksSignature === tracksSignature) {
+          return;
+        }
+
+        this.endCallParticipantIdleState(idleState, true);
+      }
+
       const existingRecorder = this.callParticipantRecorders.get(participant.id);
       if (existingRecorder && this.hasSameTrackSet(existingRecorder.stream.getTracks(), tracks)) {
         existingRecorder.userData = this.createCharacterSnapshot(participant.userData);
@@ -2027,7 +2371,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       if (existingRecorder) {
-        this.stopCallParticipantRecorder(existingRecorder);
+        this.stopCallParticipantRecorder(existingRecorder, 'tracks-changed');
       }
 
       this.startCallParticipantRecorder(participant, tracks);
@@ -2035,7 +2379,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
       if (!activeParticipantIds.has(recorder.participantId)) {
-        this.stopCallParticipantRecorder(recorder);
+        this.stopCallParticipantRecorder(recorder, 'removed');
+      }
+    });
+
+    Array.from(this.callParticipantIdleStates.values()).forEach(idleState => {
+      if (!activeParticipantIds.has(idleState.participantId)) {
+        this.endCallParticipantIdleState(idleState, true);
       }
     });
   }
@@ -2095,6 +2445,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       firstTrackIds.every((trackId, index) => trackId === secondTrackIds[index]);
   }
 
+  private getTrackSignature(tracks: MediaStreamTrack[]): string {
+    return tracks.map(track => track.id).sort().join('|');
+  }
+
   private startCallParticipantRecorder(participant: CallRecordingParticipant, tracks: MediaStreamTrack[]) {
     const stream = new MediaStream(tracks);
     const startedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt);
@@ -2132,7 +2486,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       astralFileUrl: null,
       astralSize: 0,
       astralWriteChain: Promise.resolve(),
-      astralWriteFailed: false
+      astralWriteFailed: false,
+      stopReason: 'final',
+      idleMonitor: null,
+      idleMonitorInterval: null,
+      idleLastActivityAt: Date.now(),
+      idleTransitionInProgress: false,
+      pendingIdleStillFrame: null,
+      pendingIdleStillMimeType: null
     };
 
     recorder.ondataavailable = event => {
@@ -2155,6 +2516,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     try {
       recorder.start(1000);
       this.callParticipantRecorders.set(participant.id, participantRecorder);
+      this.startCallParticipantRecorderIdleMonitor(participantRecorder);
     } catch (error) {
       console.error('Failed to start participant recorder', error);
       this.sessionRecordingError = 'Recording failed';
@@ -2205,18 +2567,480 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       });
   }
 
-  private stopAllCallParticipantRecorders() {
-    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
-      this.stopCallParticipantRecorder(recorder);
+  private startCallParticipantRecorderIdleMonitor(participantRecorder: CallParticipantRecorder) {
+    if (!participantRecorder.stream.getVideoTracks().some(track => track.readyState === 'live')) {
+      return;
+    }
+
+    const monitor = this.createParticipantActivityMonitor(participantRecorder.stream);
+    if (!monitor) {
+      return;
+    }
+
+    participantRecorder.idleMonitor = monitor;
+    participantRecorder.idleLastActivityAt = Date.now();
+    participantRecorder.idleMonitorInterval = setInterval(() => {
+      if (
+        participantRecorder.stopping ||
+        participantRecorder.idleTransitionInProgress ||
+        this.finalizingSessionRecording ||
+        !this.sessionRecording.isRecording()
+      ) {
+        return;
+      }
+
+      const sample = monitor.getSample();
+      if (sample.active) {
+        participantRecorder.idleLastActivityAt = Date.now();
+        return;
+      }
+
+      if (Date.now() - participantRecorder.idleLastActivityAt >= this.participantIdleThresholdMs) {
+        void this.transitionCallParticipantRecorderToIdle(participantRecorder);
+      }
+    }, this.participantIdleCheckIntervalMs);
+  }
+
+  private stopCallParticipantRecorderIdleMonitor(participantRecorder: CallParticipantRecorder) {
+    if (participantRecorder.idleMonitorInterval) {
+      clearInterval(participantRecorder.idleMonitorInterval);
+      participantRecorder.idleMonitorInterval = null;
+    }
+
+    participantRecorder.idleMonitor?.cleanup();
+    participantRecorder.idleMonitor = null;
+  }
+
+  private async transitionCallParticipantRecorderToIdle(participantRecorder: CallParticipantRecorder) {
+    if (
+      participantRecorder.stopping ||
+      participantRecorder.idleTransitionInProgress ||
+      this.finalizingSessionRecording ||
+      this.callRecordingDiscardOnStop ||
+      !this.sessionRecording.isRecording()
+    ) {
+      return;
+    }
+
+    participantRecorder.idleTransitionInProgress = true;
+    const stillFrame = await this.captureStillFrameFromStream(participantRecorder.stream);
+    if (
+      !stillFrame ||
+      this.callParticipantRecorders.get(participantRecorder.participantId) !== participantRecorder ||
+      participantRecorder.stopping ||
+      this.finalizingSessionRecording ||
+      this.callRecordingDiscardOnStop ||
+      !this.sessionRecording.isRecording()
+    ) {
+      participantRecorder.idleTransitionInProgress = false;
+      participantRecorder.idleLastActivityAt = Date.now();
+      return;
+    }
+
+    participantRecorder.pendingIdleStillFrame = stillFrame;
+    participantRecorder.pendingIdleStillMimeType = stillFrame.type || this.participantStillFrameMimeType;
+    this.stopCallParticipantRecorder(participantRecorder, 'idle');
+  }
+
+  private async startCallParticipantIdleState(participantRecorder: CallParticipantRecorder) {
+    const stillFrame = participantRecorder.pendingIdleStillFrame;
+    if (
+      !stillFrame ||
+      this.finalizingSessionRecording ||
+      this.callRecordingDiscardOnStop ||
+      !this.sessionRecording.isRecording()
+    ) {
+      return;
+    }
+
+    const startedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt);
+    const mimeType = participantRecorder.pendingIdleStillMimeType || stillFrame.type || this.participantStillFrameMimeType;
+    let mediaUrl: string | null = null;
+    let mediaPath: string | null = null;
+    let mediaSize = stillFrame.size;
+    let memoryBlob: Blob | null = stillFrame;
+
+    if (this.astralRecordingSessionId) {
+      try {
+        const result = await this.astralRecording.writeChunk({
+          sessionId: this.astralRecordingSessionId,
+          participantId: participantRecorder.participantId,
+          segmentIndex: this.getNextAstralParticipantSegmentIndex(participantRecorder.participantId),
+          mimeType,
+          startedAtMs,
+          chunkStartedAtMs: 0,
+          blob: stillFrame
+        });
+        mediaUrl = result.fileUrl;
+        mediaPath = result.filePath;
+        mediaSize = result.size;
+        memoryBlob = null;
+      } catch (error) {
+        console.error('Failed to persist Astral idle still frame', error);
+        this.sessionRecordingError = 'Recording failed';
+        this.stopSessionRecording(true);
+        return;
+      }
+    }
+
+    if (
+      this.finalizingSessionRecording ||
+      this.callRecordingDiscardOnStop ||
+      !this.sessionRecording.isRecording()
+    ) {
+      return;
+    }
+
+    const idleState: CallParticipantIdleState = {
+      participantId: participantRecorder.participantId,
+      isLocal: participantRecorder.isLocal,
+      userData: participantRecorder.userData,
+      participantMeta: participantRecorder.participantMeta,
+      volumePercent: participantRecorder.volumePercent,
+      stream: participantRecorder.stream,
+      tracksSignature: this.getTrackSignature(participantRecorder.stream.getTracks()),
+      startedAtMs,
+      blob: memoryBlob,
+      mimeType,
+      mediaUrl,
+      mediaPath,
+      size: mediaSize,
+      activityMonitor: null,
+      activityMonitorInterval: null,
+      resuming: false
+    };
+
+    this.callParticipantIdleStates.set(participantRecorder.participantId, idleState);
+    this.startCallParticipantIdleStateMonitor(idleState);
+  }
+
+  private startCallParticipantIdleStateMonitor(idleState: CallParticipantIdleState) {
+    const monitor = this.createParticipantActivityMonitor(idleState.stream);
+    if (!monitor) {
+      return;
+    }
+
+    idleState.activityMonitor = monitor;
+    idleState.activityMonitorInterval = setInterval(() => {
+      if (
+        idleState.resuming ||
+        this.finalizingSessionRecording ||
+        !this.sessionRecording.isRecording() ||
+        this.callParticipantIdleStates.get(idleState.participantId) !== idleState
+      ) {
+        return;
+      }
+
+      if (monitor.getSample().active) {
+        this.resumeCallParticipantRecordingFromIdle(idleState);
+      }
+    }, this.participantIdleCheckIntervalMs);
+  }
+
+  private resumeCallParticipantRecordingFromIdle(idleState: CallParticipantIdleState) {
+    if (idleState.resuming) {
+      return;
+    }
+
+    idleState.resuming = true;
+    const participant = this.getCallRecordingParticipantsForStreams()
+      .find(candidate => candidate.id === idleState.participantId);
+    this.endCallParticipantIdleState(idleState, true);
+
+    if (
+      !participant ||
+      this.finalizingSessionRecording ||
+      this.callRecordingDiscardOnStop ||
+      !this.sessionRecording.isRecording()
+    ) {
+      return;
+    }
+
+    const tracks = this.getRecordableParticipantTracks(participant);
+    if (tracks.length) {
+      this.startCallParticipantRecorder(participant, tracks);
+    }
+  }
+
+  private endAllCallParticipantIdleStates(attachMedia: boolean) {
+    Array.from(this.callParticipantIdleStates.values()).forEach(idleState => {
+      this.endCallParticipantIdleState(idleState, attachMedia);
     });
   }
 
-  private stopCallParticipantRecorder(participantRecorder: CallParticipantRecorder) {
+  private endCallParticipantIdleState(idleState: CallParticipantIdleState, attachMedia: boolean) {
+    if (idleState.activityMonitorInterval) {
+      clearInterval(idleState.activityMonitorInterval);
+      idleState.activityMonitorInterval = null;
+    }
+
+    idleState.activityMonitor?.cleanup();
+    idleState.activityMonitor = null;
+
+    if (this.callParticipantIdleStates.get(idleState.participantId) === idleState) {
+      this.callParticipantIdleStates.delete(idleState.participantId);
+    }
+
+    if (!attachMedia || this.callRecordingDiscardOnStop) {
+      return;
+    }
+
+    const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - idleState.startedAtMs);
+    const participant = {
+      participantId: idleState.participantId,
+      isLocal: idleState.isLocal,
+      userData: idleState.userData,
+      participantMeta: idleState.participantMeta,
+      volumePercent: idleState.volumePercent,
+      startedAtMs: idleState.startedAtMs
+    };
+
+    if (idleState.mediaUrl) {
+      this.sessionRecording.attachCallParticipantExternalMedia(
+        participant,
+        idleState.mediaUrl,
+        idleState.mimeType,
+        durationMs,
+        idleState.size,
+        idleState.mediaPath
+      );
+      return;
+    }
+
+    if (idleState.blob) {
+      this.sessionRecording.attachCallParticipantMedia(
+        participant,
+        idleState.blob,
+        idleState.mimeType,
+        durationMs
+      );
+    }
+  }
+
+  private createParticipantActivityMonitor(stream: MediaStream): CallParticipantActivityMonitor | null {
+    const audioTrack = stream.getAudioTracks().find(track => track.readyState === 'live') ?? null;
+    const videoTrack = stream.getVideoTracks().find(track => track.readyState === 'live') ?? null;
+    let audioContext: AudioContext | null = null;
+    let audioSource: MediaStreamAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    let audioData: Uint8Array | null = null;
+    let videoElement: HTMLVideoElement | null = null;
+    let canvas: HTMLCanvasElement | null = null;
+    let canvasContext: CanvasRenderingContext2D | null = null;
+    let previousFrame: Uint8ClampedArray | null = null;
+
+    if (audioTrack) {
+      const AudioContextConstructor = this.getAudioContextConstructor();
+      if (AudioContextConstructor) {
+        try {
+          audioContext = new AudioContextConstructor();
+          audioSource = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+          analyser = audioContext.createAnalyser();
+          analyser.fftSize = 1024;
+          analyser.smoothingTimeConstant = 0.75;
+          audioData = new Uint8Array(analyser.fftSize);
+          audioSource.connect(analyser);
+          void audioContext.resume().catch(() => undefined);
+        } catch {
+          audioContext = null;
+          audioSource = null;
+          analyser = null;
+          audioData = null;
+        }
+      }
+    }
+
+    if (videoTrack && typeof document !== 'undefined') {
+      videoElement = document.createElement('video');
+      videoElement.muted = true;
+      videoElement.playsInline = true;
+      videoElement.srcObject = new MediaStream([videoTrack]);
+      canvas = document.createElement('canvas');
+      canvas.width = 48;
+      canvas.height = 27;
+      canvasContext = canvas.getContext('2d', { willReadFrequently: true });
+      void videoElement.play().catch(() => undefined);
+    }
+
+    if (!analyser && !canvasContext) {
+      return null;
+    }
+
+    const getAudioLevel = () => {
+      if (!audioTrack || !analyser || !audioData || audioTrack.readyState !== 'live' || !audioTrack.enabled) {
+        return 0;
+      }
+
+      analyser.getByteTimeDomainData(audioData as Uint8Array<ArrayBuffer>);
+      let totalSquare = 0;
+      for (const value of audioData) {
+        const normalized = (value - 128) / 128;
+        totalSquare += normalized * normalized;
+      }
+
+      return Math.sqrt(totalSquare / audioData.length);
+    };
+
+    const getVideoMotion = () => {
+      if (
+        !videoTrack ||
+        !videoElement ||
+        !canvas ||
+        !canvasContext ||
+        videoTrack.readyState !== 'live' ||
+        videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+        !videoElement.videoWidth ||
+        !videoElement.videoHeight
+      ) {
+        return 0;
+      }
+
+      try {
+        canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+        const frame = canvasContext.getImageData(0, 0, canvas.width, canvas.height).data;
+        if (!previousFrame) {
+          previousFrame = new Uint8ClampedArray(frame);
+          return 0;
+        }
+
+        let totalDifference = 0;
+        for (let index = 0; index < frame.length; index += 4) {
+          totalDifference += Math.abs(frame[index] - previousFrame[index]);
+          totalDifference += Math.abs(frame[index + 1] - previousFrame[index + 1]);
+          totalDifference += Math.abs(frame[index + 2] - previousFrame[index + 2]);
+        }
+
+        previousFrame.set(frame);
+        return totalDifference / (canvas.width * canvas.height * 3);
+      } catch {
+        return 0;
+      }
+    };
+
+    return {
+      getSample: () => {
+        const audioLevel = getAudioLevel();
+        const videoMotion = getVideoMotion();
+        return {
+          audioLevel,
+          videoMotion,
+          active: audioLevel >= this.participantIdleAudioRmsThreshold ||
+            videoMotion >= this.participantIdleVideoMotionThreshold
+        };
+      },
+      cleanup: () => {
+        audioSource?.disconnect();
+        if (audioContext) {
+          void audioContext.close().catch(() => undefined);
+        }
+
+        if (videoElement) {
+          videoElement.pause();
+          videoElement.srcObject = null;
+          videoElement.remove();
+        }
+      }
+    };
+  }
+
+  private async captureStillFrameFromStream(stream: MediaStream): Promise<Blob | null> {
+    const videoTrack = stream.getVideoTracks().find(track => track.readyState === 'live');
+    if (!videoTrack || typeof document === 'undefined') {
+      return null;
+    }
+
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = new MediaStream([videoTrack]);
+
+    try {
+      void video.play().catch(() => undefined);
+      await this.waitForVideoFrame(video, 2500);
+      if (
+        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
+        !video.videoWidth ||
+        !video.videoHeight
+      ) {
+        return null;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        return null;
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return await this.canvasToBlob(canvas, this.participantStillFrameMimeType, 0.95) ??
+        await this.canvasToBlob(canvas, 'image/png');
+    } catch {
+      return null;
+    } finally {
+      video.pause();
+      video.srcObject = null;
+      video.remove();
+    }
+  }
+
+  private waitForVideoFrame(video: HTMLVideoElement, timeoutMs: number): Promise<void> {
+    if (
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.videoWidth > 0 &&
+      video.videoHeight > 0
+    ) {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      let resolved = false;
+      const cleanup = () => {
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('canplay', onReady);
+        video.removeEventListener('playing', onReady);
+        window.clearTimeout(timeout);
+      };
+      const onReady = () => {
+        if (resolved) {
+          return;
+        }
+
+        resolved = true;
+        cleanup();
+        resolve();
+      };
+      const timeout = window.setTimeout(onReady, timeoutMs);
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('canplay', onReady);
+      video.addEventListener('playing', onReady);
+    });
+  }
+
+  private canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob | null> {
+    return new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), mimeType, quality);
+    });
+  }
+
+  private stopAllCallParticipantRecorders() {
+    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
+      this.stopCallParticipantRecorder(recorder, 'final');
+    });
+  }
+
+  private stopCallParticipantRecorder(
+    participantRecorder: CallParticipantRecorder,
+    reason: CallParticipantRecorderStopReason = 'final'
+  ) {
     if (participantRecorder.stopping) {
       return;
     }
 
+    participantRecorder.stopReason = reason;
     participantRecorder.stopping = true;
+    this.stopCallParticipantRecorderIdleMonitor(participantRecorder);
     if (participantRecorder.recorder.state !== 'inactive') {
       this.stoppingCallParticipantRecorders += 1;
       participantRecorder.recorder.stop();
@@ -2264,11 +3088,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }, new Blob(participantRecorder.chunks, { type: participantRecorder.mimeType }), participantRecorder.mimeType, durationMs);
     }
 
+    if (participantRecorder.stopReason === 'idle') {
+      await this.startCallParticipantIdleState(participantRecorder);
+    }
+
     void this.finishSessionRecordingIfReady();
   }
 
   private async finishSessionRecordingIfReady() {
-    if (!this.finalizingSessionRecording || this.stoppingCallParticipantRecorders > 0 || this.callParticipantRecorders.size > 0) {
+    if (this.finalizingSessionRecording && this.callParticipantIdleStates.size > 0) {
+      this.endAllCallParticipantIdleStates(!this.callRecordingDiscardOnStop);
+    }
+
+    if (!this.finalizingSessionRecording || this.stoppingCallParticipantRecorders > 0 || this.callParticipantRecorders.size > 0 || this.callParticipantIdleStates.size > 0) {
       return;
     }
 
@@ -2303,7 +3135,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private cleanupCallParticipantRecorders() {
     this.clearCallRecordingTimer();
+    this.callParticipantRecorders.forEach(recorder => this.stopCallParticipantRecorderIdleMonitor(recorder));
     this.callParticipantRecorders.clear();
+    this.endAllCallParticipantIdleStates(false);
     this.stoppingCallParticipantRecorders = 0;
     this.finalizingSessionRecording = false;
     this.callRecordingStartedAt = 0;
@@ -2335,23 +3169,28 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.callPlaybackMediaHost = host;
 
     (recording.participantMedia ?? []).forEach(participant => {
+      const isStillFrame = this.isStillFrameMedia(participant.media);
       const video = document.createElement('video');
-      video.src = participant.media.url;
       video.playsInline = true;
       video.preload = 'auto';
       video.volume = Math.min(1, Math.max(0, participant.volumePercent / 100));
-      host.appendChild(video);
-      void this.applyAudioOutputToMediaElement(video);
+      if (!isStillFrame) {
+        video.src = participant.media.url;
+        host.appendChild(video);
+        void this.applyAudioOutputToMediaElement(video);
+      }
 
       const source: CallPlaybackSource = {
         participant,
         video,
-        stream: this.capturePlaybackVideoStream(video),
+        stream: isStillFrame ? null : this.capturePlaybackVideoStream(video),
         cleanup: [],
         active: false,
         ended: false
       };
-      this.bindPlaybackSourceVideoReadiness(source);
+      if (!isStillFrame) {
+        this.bindPlaybackSourceVideoReadiness(source);
+      }
       this.callPlaybackSources.push(source);
     });
 
@@ -2478,6 +3317,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.visiblePlaybackSyncToken += 1;
     this.callPlaybackSources.forEach(source => {
       source.ended = false;
+      if (this.hasStillFrameMedia(source)) {
+        return;
+      }
+
       const relativeTimeSeconds = Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000;
       this.setPlaybackMediaTime(source.video, relativeTimeSeconds);
     });
@@ -2543,7 +3386,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.refreshCallPlaybackParticipantStreams(currentTimeMs);
       if (!this.callPlaybackPaused) {
         this.callPlaybackSources
-          .filter(source => source.active && source.video.paused && !source.ended)
+          .filter(source => source.active && source.video.paused && !source.ended && !this.hasStillFrameMedia(source))
           .forEach(source => this.playPlaybackMediaSource(source));
       }
       if (currentTimeMs >= this.callPlaybackDurationMs) {
@@ -2576,6 +3419,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private playPlaybackMediaSource(source: CallPlaybackSource) {
+    if (this.hasStillFrameMedia(source)) {
+      return;
+    }
+
     if (source.ended || source.video.ended) {
       source.ended = true;
       return;
@@ -2596,13 +3443,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (!source.active) {
         source.active = true;
         source.ended = false;
-        this.setPlaybackMediaTime(source.video, Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000);
+        if (!this.hasStillFrameMedia(source)) {
+          this.setPlaybackMediaTime(source.video, Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000);
+        }
       }
     });
 
     const activeSourceMap = new Map<string, CallPlaybackSource>();
     this.callPlaybackSources
-      .filter(source => source.active && (source.stream || this.hasVideoMedia(source)))
+      .filter(source => source.active && (source.stream || this.hasVideoMedia(source) || this.hasStillFrameMedia(source)))
       .sort((first, second) => first.participant.startedAtMs - second.participant.startedAtMs)
       .forEach(source => activeSourceMap.set(source.participant.participantId, source));
 
@@ -2616,6 +3465,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return {
         id: source.participant.participantId,
         stream: source.stream ?? undefined,
+        stillFrameUrl: this.hasStillFrameMedia(source) ? source.participant.media.url : undefined,
         userData: this.toPlaybackCharacter(snapshot?.userData ?? source.participant.userData, source.participant.participantId),
         participantMeta: snapshot?.participantMeta ?? source.participant.participantMeta,
         isLocal: snapshot?.isLocal ?? source.participant.isLocal,
@@ -2677,6 +3527,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.bindVisiblePlaybackSourceVideo(video, source);
           return;
         }
+
+        if (source && this.hasStillFrameMedia(source)) {
+          this.clearVisiblePlaybackMediaElement(video);
+          video.srcObject = null;
+          video.muted = true;
+          return;
+        }
       }
       if (video && stream && video.srcObject !== stream) {
         this.clearVisiblePlaybackMediaElement(video);
@@ -2712,6 +3569,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         : null;
       if (source && this.shouldBindVisiblePlaybackMediaElement(source)) {
         this.bindVisiblePlaybackSourceVideo(video, source);
+        return;
+      }
+
+      if (source && this.hasStillFrameMedia(source)) {
+        this.clearVisiblePlaybackMediaElement(video);
+        video.srcObject = null;
+        video.muted = true;
         return;
       }
 
@@ -2877,6 +3741,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private hasVideoMedia(source: CallPlaybackSource): boolean {
     return source.participant.media.mimeType.startsWith('video/');
+  }
+
+  private hasStillFrameMedia(source: CallPlaybackSource): boolean {
+    return this.isStillFrameMedia(source.participant.media);
+  }
+
+  private isStillFrameMedia(media: SessionRecordingMedia | null | undefined): boolean {
+    return !!media?.mimeType?.startsWith('image/');
   }
 
   private correctVisiblePlaybackMediaDrift(video: HTMLVideoElement, source: CallPlaybackSource) {
@@ -3135,7 +4007,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     const source = this.getActivePlaybackSourceForParticipant(this.playbackLocalParticipantStream.id);
     return !this.hasVideoTrack(this.playbackLocalParticipantStream.stream) &&
-      !source?.participant.media.mimeType.startsWith('video/');
+      !source?.participant.media.mimeType.startsWith('video/') &&
+      !source?.participant.media.mimeType.startsWith('image/');
   }
 
   get localSceneMainCharacter(): boolean {
@@ -3961,6 +4834,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (this.sessionRecordingStateSub) this.sessionRecordingStateSub.unsubscribe();
     if (this.sessionRecordingLastSub) this.sessionRecordingLastSub.unsubscribe();
     if (this.sessionPlaybackSub) this.sessionPlaybackSub.unsubscribe();
+    if (this.astralPlaybackDropSub) this.astralPlaybackDropSub.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
 
     // Just clean up local hardware previews.

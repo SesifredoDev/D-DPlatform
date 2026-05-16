@@ -99,6 +99,10 @@ export class TabService {
     })));
   }
 
+  getTabs(): Tab[] {
+    return this.tabs.value;
+  }
+
   moveTab(tabId: string, targetPane: TabPane, targetIndex?: number) {
     targetPane = this.resolvePaneForCurrentWindow(targetPane);
     const tab = this.tabs.value.find(t => t.id === tabId);

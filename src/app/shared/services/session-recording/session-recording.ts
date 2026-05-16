@@ -87,6 +87,9 @@ export interface SessionRecordingPackage {
   size: number;
   formatVersion: number;
   createdAt: string;
+  originalPath?: string | null;
+  originalSize?: number;
+  optimizedAt?: string;
 }
 
 export interface SessionRecordingState {
@@ -312,6 +315,13 @@ export class SessionRecordingService implements OnDestroy {
     }
 
     return recording;
+  }
+
+  loadRecording(recording: SessionRecording): SessionRecording {
+    this.revokeRecordingMedia(this.lastRecordingSubject.value);
+    const loadedRecording = this.cloneForRecording(recording);
+    this.lastRecordingSubject.next(loadedRecording);
+    return loadedRecording;
   }
 
   recordVttInitialState(roomId: string | null, state: any) {

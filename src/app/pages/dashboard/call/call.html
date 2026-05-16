@@ -143,6 +143,39 @@
 
   <!-- ACTIVE CALL VIEW -->
   @if (localStream || isCallPlaybackMode) {
+    <div class="dm-recording-toolbar glass" *ngIf="showDmRecordingToolbar">
+      <span class="dm-recording-status">{{ sessionRecordingStatusText }}</span>
+      <button
+        *ngIf="!isCallPlaybackMode"
+        (click)="isSessionRecording ? stopSessionRecording() : startSessionRecording()"
+        class="btn-action btn-record-session"
+        [class.active]="isSessionRecording"
+        [class.btn-danger]="isSessionRecording"
+        [matTooltip]="sessionRecordingStatusText"
+      >
+        <mat-icon>{{ isSessionRecording ? 'stop_circle' : 'fiber_manual_record' }}</mat-icon>
+      </button>
+
+      <button
+        *ngIf="hasRecordedSessionPlayback && !isSessionRecording && !isCallPlaybackMode"
+        (click)="startSessionPlayback()"
+        class="btn-action"
+        matTooltip="Playback recording"
+      >
+        <mat-icon>play_arrow</mat-icon>
+      </button>
+
+      <button
+        *ngIf="hasRecordedSessionPlayback && !isSessionRecording"
+        (click)="saveAstralRecording()"
+        class="btn-action"
+        [disabled]="isSavingAstralRecording"
+        [matTooltip]="isSavingAstralRecording ? 'Saving .astral recording' : (recordedSession?.package ? 'Save .astral recording' : 'No .astral package available')"
+      >
+        <mat-icon>{{ isSavingAstralRecording ? 'hourglass_empty' : 'download' }}</mat-icon>
+      </button>
+    </div>
+
     <div
       #gridContainer
       class="grid count-{{ visibleParticipantCount }}"
@@ -166,6 +199,12 @@
         (contextmenu)="openLocalContextMenu($event)"
       >
         <video #localVideo autoplay playsinline [muted]="true"></video>
+        <img
+          *ngIf="isCallPlaybackMode && playbackLocalParticipantStream?.stillFrameUrl"
+          class="playback-still-frame"
+          [src]="playbackLocalParticipantStream?.stillFrameUrl"
+          alt=""
+        />
         <div class="video-placeholder" *ngIf="localVideoHidden">
           <div class="user-avatar">{{ (localDisplayCharacter.name || 'Y').charAt(0) }}</div>
         </div>
@@ -262,6 +301,12 @@
         (contextmenu)="openRemoteContextMenu($event, remote)"
       >
         <video #remoteVideo autoplay playsinline [muted]="supportsRemoteAudioGain"></video>
+        <img
+          *ngIf="isCallPlaybackMode && remote.stillFrameUrl"
+          class="playback-still-frame"
+          [src]="remote.stillFrameUrl"
+          alt=""
+        />
         <div class="scene-main-badge" *ngIf="isSceneMainLayoutActive && remote.isSceneMainCharacter" matTooltip="Scene Main Character">
           <mat-icon>star</mat-icon>
         </div>
@@ -500,26 +545,6 @@
           <button *ngIf="isServerOwner && spotifyRequests.length > 0" (click)="showSpotifyRequests = !showSpotifyRequests" class="btn-action btn-requests" [class.active]="showSpotifyRequests" matTooltip="Song Requests">
             <mat-icon [class.pulse]="spotifyRequests.length > 0">playlist_add_check</mat-icon>
             <span class="badge">{{ spotifyRequests.length }}</span>
-          </button>
-
-          <button
-            *ngIf="supportsSessionRecording"
-            (click)="isSessionRecording ? stopSessionRecording() : startSessionRecording()"
-            class="btn-action btn-record-session"
-            [class.active]="isSessionRecording"
-            [class.btn-danger]="isSessionRecording"
-            [matTooltip]="sessionRecordingStatusText"
-          >
-            <mat-icon>{{ isSessionRecording ? 'stop_circle' : 'fiber_manual_record' }}</mat-icon>
-          </button>
-
-          <button
-            *ngIf="hasRecordedSessionPlayback && !isSessionRecording"
-            (click)="startSessionPlayback()"
-            class="btn-action"
-            matTooltip="Playback recording"
-          >
-            <mat-icon>play_arrow</mat-icon>
           </button>
 
           <button (click)="toggleAudio()" [class.active]="isAudioMuted" class="btn-action" [matTooltip]="isAudioMuted ? 'Unmute' : 'Mute'">
@@ -873,6 +898,54 @@
       </div>
     </div>
   }
+
+  <div class="astral-playback-overlay" *ngIf="pendingAstralPlaybackRequest">
+    <div class="astral-playback-prompt glass" role="dialog" aria-modal="true" aria-labelledby="astralPlaybackTitle">
+      <button
+        type="button"
+        class="astral-prompt-close"
+        (click)="cancelAstralPlaybackPrompt()"
+        aria-label="Cancel Astral playback">
+        <mat-icon>close</mat-icon>
+      </button>
+
+      <div class="astral-prompt-mark">
+        <mat-icon>{{ pendingAstralPlaybackRequiresDisconnect ? 'call_end' : 'auto_stories' }}</mat-icon>
+      </div>
+
+      <div class="astral-prompt-copy">
+        <span class="astral-prompt-kicker">Astral Session Recording</span>
+        <h2 id="astralPlaybackTitle">
+          {{ pendingAstralPlaybackRequiresDisconnect ? 'Disconnect before playback' : 'Start playback?' }}
+        </h2>
+        <p class="astral-prompt-filename">{{ pendingAstralPlaybackFilename }}</p>
+        <p>
+          {{
+            pendingAstralPlaybackRequiresDisconnect
+              ? 'Leave the live call first, then load this recording into the call environment.'
+              : 'Load this recording into the call environment.'
+          }}
+        </p>
+      </div>
+
+      <div class="astral-prompt-actions">
+        <button
+          type="button"
+          class="astral-prompt-secondary"
+          (click)="cancelAstralPlaybackPrompt()">
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="astral-prompt-primary"
+          (click)="confirmAstralPlaybackPrompt()"
+          [disabled]="isAstralPlaybackImporting">
+          <mat-icon>{{ pendingAstralPlaybackRequiresDisconnect ? 'call_end' : 'play_circle' }}</mat-icon>
+          <span>{{ pendingAstralPlaybackRequiresDisconnect ? 'Disconnect and Play' : 'Play Recording' }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Spotify Overlay -->
   <div class="spotify-overlay" *ngIf="showSpotify && localStream">

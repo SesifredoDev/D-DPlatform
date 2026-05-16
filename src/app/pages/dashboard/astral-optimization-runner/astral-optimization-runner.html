@@ -1,0 +1,42 @@
+<ng-container *ngIf="visibleJobs(jobs$ | async) as jobs">
+  <div class="astral-runner-stack" *ngIf="jobs.length">
+    <section
+      class="astral-runner"
+      *ngFor="let job of jobs"
+      [class.completed]="job.status === 'completed'"
+      [class.failed]="job.status === 'failed'">
+      <div class="runner-icon" [class.spinning]="isActive(job)">
+        <mat-icon>{{ statusIcon(job) }}</mat-icon>
+      </div>
+
+      <div class="runner-body">
+        <div class="runner-header">
+          <div>
+            <div class="runner-title">Optimizing Astral Recording</div>
+            <div class="runner-stage">{{ job.message }}</div>
+          </div>
+
+          <button
+            type="button"
+            class="runner-dismiss"
+            *ngIf="!isActive(job)"
+            (click)="astralOptimizer.dismissJob(job.id)"
+            aria-label="Dismiss Astral optimization status">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+
+        <div class="runner-progress">
+          <span [style.width.%]="job.progressPercent"></span>
+        </div>
+
+        <div class="runner-meta">
+          <span *ngIf="job.total > 0">{{ job.current }}/{{ job.total }} segments</span>
+          <span *ngIf="job.status === 'completed'">{{ formatBytes(job.optimizedSize) }}</span>
+          <span *ngIf="job.status === 'completed' && sizeDelta(job)">{{ sizeDelta(job) }}</span>
+          <span *ngIf="job.status === 'failed'">{{ job.error }}</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</ng-container>

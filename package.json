@@ -12,6 +12,7 @@
     "electron:dev": "concurrently \"ng serve\" \"wait-on http://localhost:4200 && electron .\"",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:prepare-ffmpeg": "node scripts/prepare-ffmpeg-bundle.mjs",
     "tauri:build": "tauri build"
   },
   "prettier": {

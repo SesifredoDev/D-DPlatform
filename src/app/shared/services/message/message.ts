@@ -13,6 +13,7 @@ export interface Attachment {
   id?: string;
   key?: string;
   filename?: string;
+  size?: number;
 }
 
 export interface Reaction {

@@ -137,7 +137,44 @@
                 <div class="message-attachments">
                   @for(att of msg.attachments; track att.url) {
                     <div class="attachment-item">
-                      @if(isImageAttachment(att)) {
+                      @if(isAstralAttachment(att)) {
+                        <div class="attachment-file attachment-astral">
+                          <div class="attachment-astral-mark" aria-hidden="true">
+                            <mat-icon>auto_stories</mat-icon>
+                          </div>
+                          <span class="attachment-file-copy attachment-astral-copy">
+                            <span class="attachment-astral-kicker">Session Recording</span>
+                            <span class="attachment-astral-title">{{ getAttachmentDisplayName(att) }}</span>
+                            <small class="attachment-astral-meta">
+                              Astral archive
+                              @if(formatAttachmentSize(att)) {
+                                <span> · {{ formatAttachmentSize(att) }}</span>
+                              }
+                            </small>
+                          </span>
+                          <span class="attachment-actions">
+                            <button
+                              type="button"
+                              class="attachment-action attachment-action-primary"
+                              (click)="playAstralAttachment(att, $event)"
+                              matTooltip="Start call playback">
+                              <mat-icon>play_circle</mat-icon>
+                              <span>Play</span>
+                            </button>
+
+                            <a
+                              class="attachment-action attachment-action-secondary"
+                              [href]="getAttachmentDownloadUrl(att)"
+                              [attr.download]="getAttachmentDisplayName(att)"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              matTooltip="Download .astral file">
+                              <mat-icon>download</mat-icon>
+                              <span>Download</span>
+                            </a>
+                          </span>
+                        </div>
+                      } @else if(isImageAttachment(att)) {
                         <a
                           [href]="att.url"
                           target="_blank"
