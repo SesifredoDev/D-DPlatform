@@ -108,6 +108,7 @@
                     } @else {
                       <a
                         class="link-preview-card"
+                        [class.proton-link-preview]="preview.provider === 'Proton Drive'"
                         [href]="preview.url"
                         target="_blank"
                         rel="noopener noreferrer"

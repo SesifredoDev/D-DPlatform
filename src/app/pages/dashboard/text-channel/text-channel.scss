@@ -331,6 +331,24 @@
   aspect-ratio: 1 / 1;
 }
 
+.proton-link-preview {
+  width: min(520px, 100%);
+  border-color: rgba(109, 93, 252, 0.5);
+  border-left-color: #6d5dfc;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.22);
+
+  .preview-icon-box {
+    border-color: rgba(109, 93, 252, 0.28);
+    background: rgba(109, 93, 252, 0.11);
+    color: #b8afff;
+  }
+
+  &:hover {
+    border-color: rgba(109, 93, 252, 0.75);
+    background: rgba(109, 93, 252, 0.09);
+  }
+}
+
 .playable-preview-footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

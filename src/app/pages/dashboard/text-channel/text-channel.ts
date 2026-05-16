@@ -30,7 +30,14 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
 type LinkPreviewType = 'website' | 'image' | 'video' | 'audio' | 'embed';
 type LinkPreviewAspect = 'landscape' | 'portrait' | 'square';
-type LinkPreviewProvider = 'YouTube' | 'Instagram' | 'TikTok' | 'Vimeo';
+type LinkPreviewProvider =
+  | 'YouTube'
+  | 'Instagram'
+  | 'TikTok'
+  | 'Vimeo'
+  | 'Google Drive'
+  | 'OneDrive'
+  | 'Proton Drive';
 
 interface LinkPreview {
   url: string;
@@ -54,6 +61,13 @@ interface PlayableEmbedPreview {
   icon: string;
   aspect: LinkPreviewAspect;
   imageUrl?: string;
+}
+
+interface ProviderLinkPreview {
+  provider: LinkPreviewProvider;
+  title: string;
+  description: string;
+  icon: string;
 }
 
 @Component({
@@ -520,6 +534,20 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
       };
     }
 
+    const providerPreview = this.getProviderLinkPreview(parsed);
+    if (providerPreview) {
+      return {
+        url,
+        host,
+        displayUrl: this.buildDisplayUrl(parsed, host),
+        title: providerPreview.title,
+        description: providerPreview.description,
+        type: 'website',
+        icon: providerPreview.icon,
+        provider: providerPreview.provider
+      };
+    }
+
     const type = this.getPreviewType(parsed.pathname) ?? 'website';
 
     return {
@@ -615,6 +643,12 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
       };
     }
 
+    const googleDriveEmbed = this.getGoogleDriveEmbed(url);
+    if (googleDriveEmbed) return googleDriveEmbed;
+
+    const oneDriveEmbed = this.getOneDriveEmbed(url);
+    if (oneDriveEmbed) return oneDriveEmbed;
+
     return null;
   }
 
@@ -680,6 +714,146 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     const segments = url.pathname.split('/').filter(Boolean);
     const numericSegment = [...segments].reverse().find(segment => /^\d+$/.test(segment));
     return this.cleanProviderId(numericSegment, /^\d+$/);
+  }
+
+  private getGoogleDriveEmbed(url: URL): PlayableEmbedPreview | null {
+    const host = this.normalizedHost(url);
+    const fileId = this.getGoogleDriveFileId(url);
+    if (fileId) {
+      return {
+        provider: 'Google Drive',
+        embedUrl: `https://drive.google.com/file/d/${fileId}/preview`,
+        title: 'Google Drive file',
+        description: 'Inline Google Drive preview',
+        icon: 'add_to_drive',
+        aspect: 'landscape'
+      };
+    }
+
+    if (host !== 'docs.google.com') return null;
+
+    const docsMatch = url.pathname.match(
+      /^\/(document|spreadsheets|presentation|drawings)\/d\/([^/?#]+)/i
+    );
+    const app = docsMatch?.[1]?.toLowerCase();
+    const docId = this.cleanProviderId(docsMatch?.[2], /^[A-Za-z0-9_-]{10,}$/);
+    if (!app || !docId) return null;
+
+    return {
+      provider: 'Google Drive',
+      embedUrl: `https://docs.google.com/${app}/d/${docId}/preview`,
+      title: 'Google Drive file',
+      description: 'Inline Google Drive preview',
+      icon: 'add_to_drive',
+      aspect: 'landscape'
+    };
+  }
+
+  private getGoogleDriveFileId(url: URL): string | null {
+    const host = this.normalizedHost(url);
+    if (host !== 'drive.google.com') return null;
+
+    const fileMatch = url.pathname.match(/^\/file\/d\/([^/?#]+)/i);
+    const candidate =
+      fileMatch?.[1] ??
+      url.searchParams.get('id') ??
+      url.searchParams.get('fileId');
+
+    return this.cleanProviderId(candidate, /^[A-Za-z0-9_-]{10,}$/);
+  }
+
+  private getOneDriveEmbed(url: URL): PlayableEmbedPreview | null {
+    const host = this.normalizedHost(url);
+    if (host !== 'onedrive.live.com') return null;
+
+    const pathname = url.pathname.toLowerCase();
+    if (pathname === '/embed' || pathname.endsWith('/embed')) {
+      return {
+        provider: 'OneDrive',
+        embedUrl: url.toString(),
+        title: 'OneDrive file',
+        description: 'Inline OneDrive preview',
+        icon: 'cloud',
+        aspect: 'landscape'
+      };
+    }
+
+    const resourceId = this.getOneDriveResourceId(url);
+    if (!resourceId) return null;
+
+    const embedUrl = new URL('https://onedrive.live.com/embed');
+    embedUrl.searchParams.set('resid', resourceId);
+
+    const authKey = url.searchParams.get('authkey');
+    if (authKey) {
+      embedUrl.searchParams.set('authkey', authKey);
+    }
+
+    const itemHint = url.searchParams.get('ithint');
+    if (itemHint) {
+      embedUrl.searchParams.set('ithint', itemHint);
+    }
+
+    embedUrl.searchParams.set('em', '2');
+
+    return {
+      provider: 'OneDrive',
+      embedUrl: embedUrl.toString(),
+      title: 'OneDrive file',
+      description: 'Inline OneDrive preview',
+      icon: 'cloud',
+      aspect: 'landscape'
+    };
+  }
+
+  private getOneDriveResourceId(url: URL): string | null {
+    const candidate =
+      url.searchParams.get('resid') ??
+      url.searchParams.get('id');
+
+    const resourceId = this.cleanProviderId(candidate, /^[A-Za-z0-9_.!%-]+$/);
+    return resourceId?.includes('!') ? resourceId : null;
+  }
+
+  private getProviderLinkPreview(url: URL): ProviderLinkPreview | null {
+    const host = this.normalizedHost(url);
+
+    if (host === 'drive.google.com' || host === 'docs.google.com') {
+      return {
+        provider: 'Google Drive',
+        title: 'Google Drive link',
+        description: 'Open Google Drive preview in a new tab',
+        icon: 'add_to_drive'
+      };
+    }
+
+    if (
+      host === 'onedrive.live.com' ||
+      host === '1drv.ms' ||
+      host.endsWith('.sharepoint.com')
+    ) {
+      return {
+        provider: 'OneDrive',
+        title: 'OneDrive link',
+        description: 'Open OneDrive preview in a new tab',
+        icon: 'cloud'
+      };
+    }
+
+    if (host === 'drive.proton.me') {
+      return {
+        provider: 'Proton Drive',
+        title: 'Proton Drive link',
+        description: 'Open Proton Drive preview in a new tab',
+        icon: 'lock'
+      };
+    }
+
+    return null;
+  }
+
+  private normalizedHost(url: URL): string {
+    return url.hostname.replace(/^www\./i, '').toLowerCase();
   }
 
   private cleanProviderId(value: string | null | undefined, pattern: RegExp): string | null {
