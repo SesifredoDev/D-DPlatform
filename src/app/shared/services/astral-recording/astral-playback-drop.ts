@@ -1,13 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
-
-export interface AstralPlaybackDropRequest {
-  channelId: string;
-  file?: File;
-  url?: string;
-  filename?: string;
-}
-
+import type { AstralPlaybackDropRequest } from '../../models/astral-recording/astral-playback-drop.model';
+export type { AstralPlaybackDropRequest } from '../../models/astral-recording/astral-playback-drop.model';
 @Injectable({ providedIn: 'root' })
 export class AstralPlaybackDropService {
   private readonly requestSubject = new Subject<AstralPlaybackDropRequest>();

@@ -19,40 +19,8 @@ import { VttSync } from '../../shared/services/vttsync/vttsync';
 import { FileService } from '../../shared/services/file/file';
 import { UserService } from '../../shared/services/user/user';
 import { DomSanitizer, SafeHtml, SafeUrl } from '@angular/platform-browser';
-
-export interface BroadcastData {
-  file?: File;
-  text?: string;
-  htmlContent?: string;
-  imageUrl?: string;
-  source?: string;
-  filename?: string;
-  embeddedFiles?: BroadcastEmbeddedFile[];
-  preferTextForBroadcast?: boolean;
-  composeMode?: boolean;
-}
-
-export interface BroadcastEmbeddedFile {
-  tokenUrl: string;
-  file: File;
-}
-
-interface UploadedBroadcastAsset {
-  url: string;
-  filename: string;
-  contentType: string;
-}
-
-interface BroadcastProcessingContext {
-  standaloneImageForCallVtt?: string;
-  embeddedImageForVtt?: string;
-  textForCall?: string;
-  attachments: Attachment[];
-  embeddedFileMap: Map<string, File>;
-  uploadedEmbeddedFiles: Map<string, UploadedBroadcastAsset>;
-  uploadedBlobImageIndex: number;
-}
-
+import type { BroadcastData, BroadcastEmbeddedFile, UploadedBroadcastAsset, BroadcastProcessingContext } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
+export type { BroadcastData, BroadcastEmbeddedFile } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
 @Component({
   selector: 'app-broadcast-dialog',
   standalone: true,

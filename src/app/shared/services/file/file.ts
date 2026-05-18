@@ -2,16 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../environments/environment';
-
-interface UploadedFileResponse {
-  id: string;
-  filename: string;
-  name: string; // Added to match Attachment interface
-  contentType: string;
-  url: string;
-  size?: number;
-}
-
+import type { UploadedFileResponse } from '../../models/file/file.model';
 @Injectable({ providedIn: 'root' })
 export class FileService {
   private baseUrl = `${environment.apiURL}files`;

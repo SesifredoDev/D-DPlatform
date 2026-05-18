@@ -16,7 +16,7 @@ import {UserService} from '../../../shared/services/user/user';
 import {ServerService} from '../../../shared/services/server/server';
 import {IServer, ServerMember, TemporaryDmDuration} from '../../../shared/models/server/server.model';
 import {ChannelType, IChannel} from '../../../shared/models/server/channel.model';
-import {IRole, RolePermissions} from '../../../shared/models/server/role.model';
+import {IRole} from '../../../shared/models/server/role.model';
 import {ChannelService} from '../../../shared/services/channel/channel';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {MatDialog} from '@angular/material/dialog';
@@ -31,12 +31,10 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
 import {Subscription} from 'rxjs';
 import {BroadcastDialog} from '../../../objects/broadcast-dialog/broadcast-dialog';
-
-type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
-type ServerManagementPermission = Extract<
-  keyof RolePermissions,
-  'ADMINISTRATOR' | 'MANAGE_SERVER' | 'MANAGE_ROLES' | 'MANAGE_CHANNELS'
->;
+import type {
+  ChannelAccessPermission,
+  ServerManagementPermission
+} from '../../../shared/models/pages/dashboard/side-panel/side-panel.model';
 
 @Component({
 

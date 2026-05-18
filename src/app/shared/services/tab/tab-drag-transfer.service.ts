@@ -1,21 +1,7 @@
 import { Injectable } from '@angular/core';
 import type { Tab } from './tab-service';
-
-export interface TabDragPayload {
-  tabId: string;
-  sourcePane: string;
-  sourceWindowId: string;
-  type: Tab['type'];
-  title: string;
-  startedAt: number;
-  hasLiveConnection?: boolean;
-}
-
-interface TabDragHandledPayload {
-  tabId: string;
-  handledAt: number;
-}
-
+import type { TabDragPayload, TabDragHandledPayload } from '../../models/tab/tab-drag-transfer.service.model';
+export type { TabDragPayload } from '../../models/tab/tab-drag-transfer.service.model';
 @Injectable({ providedIn: 'root' })
 export class TabDragTransferService {
   private static readonly mimeType = 'application/x-dd-platform-tab';

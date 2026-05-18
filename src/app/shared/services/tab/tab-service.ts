@@ -4,35 +4,8 @@ import { ICharacter } from '../../models/user/character.model';
 import { Video } from '../video/video';
 import { ThemeService } from '../theme/theme.service';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-
-export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper' | 'obsidian';
-export type MainTabPane = 'left' | 'right';
-export type TabPane = MainTabPane | (string & {});
-
-export interface Tab {
-  id: string;
-  title: string;
-  type: TabType;
-  pane: TabPane;
-  active: boolean;
-  character?: ICharacter;
-  whisperRecipient?: any;
-  data?: any; // Added to support arbitrary data for different tab types
-}
-
-export interface TabPanel {
-  id: string;
-  title: string;
-  createdAt: number;
-}
-
-interface TabSyncMessage {
-  type: 'state' | 'state-request';
-  sourceId: string;
-  tabs?: Tab[];
-  panels?: TabPanel[];
-}
-
+import type { TabType, MainTabPane, TabPane, Tab, TabPanel, TabSyncMessage } from '../../models/tab/tab-service.model';
+export type { TabType, MainTabPane, TabPane, Tab, TabPanel } from '../../models/tab/tab-service.model';
 @Injectable({ providedIn: 'root' })
 export class TabService {
   private static readonly tabSyncEvent = 'dd-platform-tabs-sync';

@@ -25,35 +25,7 @@ import {
   SERVER_THEME_FONT_OPTIONS,
   normalizeServerTheme
 } from '../../shared/services/theme/theme.service';
-
-type SettingsTab = 'overview' | 'roles' | 'members' | 'channels';
-type ServerDangerAction = 'leave' | 'delete';
-type EditableChannelType = ChannelType.Text | ChannelType.Call;
-type ChannelPermissionKey = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
-type ChannelPermissionState = 'inherit' | 'allow' | 'deny';
-
-interface PermissionControl {
-  key: keyof RolePermissions;
-  label: string;
-  description: string;
-  defaultValue: boolean;
-}
-
-interface ChannelTypeOption {
-  value: EditableChannelType;
-  label: string;
-  icon: string;
-  description: string;
-  defaultIcon: string;
-}
-
-interface ChannelPermissionControl {
-  key: ChannelPermissionKey;
-  label: string;
-  icon: string;
-  description: string;
-}
-
+import type { SettingsTab, ServerDangerAction, EditableChannelType, ChannelPermissionKey, ChannelPermissionState, PermissionControl, ChannelTypeOption, ChannelPermissionControl } from '../../shared/models/objects/server-settings-dialog-component/server-settings-dialog-component.model';
 @Component({
   selector: 'app-server-settings-dialog',
   standalone: true,

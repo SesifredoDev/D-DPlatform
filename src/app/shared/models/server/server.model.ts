@@ -1,7 +1,7 @@
-import {IRole} from './role.model';
-import {IUser} from '../user/user.model';
-import {IChannel} from './channel.model';
-import {ICharacter} from '../user/character.model';
+import type { IRole } from './role.model';
+import type { IUser } from '../user/user.model';
+import type { IChannel } from './channel.model';
+import type { ICharacter } from '../user/character.model';
 
 export type TemporaryDmDuration = 'day' | 'week' | 'month' | 'permanent' | 'none';
 

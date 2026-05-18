@@ -1,25 +1,11 @@
 import { Component, DoCheck, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
-import { SpotifyService, SpotifySearchResult } from '../../../../shared/services/playlist/spotify.service';
+import { SoundCloudService, SoundCloudSearchResult } from '../../../../shared/services/playlist/soundcloud.service';
 import { TabService } from '../../../../shared/services/tab/tab-service';
 import { Video } from '../../../../shared/services/video/video';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
-
-type ResultGroup = { [key: string]: SpotifySearchResult[] };
-type SidebarTab = 'playlists' | 'recent' | 'pinned';
-
-interface SpotifyPlayerUiState {
-  spotifySearch: string;
-  groupedResults: ResultGroup;
-  activeCategory: string;
-  showDevicePicker: boolean;
-  showQueue: boolean;
-  activeSidebarTab: SidebarTab;
-  showProfile: boolean;
-  profileData: any;
-  profileItems: SpotifySearchResult[];
-}
-
+import { Subscription } from 'rxjs';
+import type { ResultGroup, SidebarTab, SoundCloudPlayerUiState } from '../../../../shared/models/pages/dashboard/call/spotify-player/spotify-player.model';
 @Component({
   selector: 'app-spotify-player',
   templateUrl: './spotify-player.html',
@@ -28,7 +14,7 @@ interface SpotifyPlayerUiState {
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe]
 })
 export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
-  private static readonly uiStateStorageKey = 'dd-platform.spotify-player.tab-ui-state';
+  private static readonly uiStateStorageKey = 'dd-platform.soundcloud-player.tab-ui-state';
 
   @Input() isCallActive: boolean = false;
   @Input() isTab: boolean = false;
@@ -43,32 +29,37 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   showPinnedPulldown: boolean = false;
   showQueue: boolean = false;
   isLoading: boolean = false;
+  isRefreshingThumbnails: boolean = false;
   activeSidebarTab: SidebarTab = 'playlists';
+  libraryMessage: string = '';
+  highlightedUris = new Set<string>();
 
   // Profile View
   showProfile: boolean = false;
   profileData: any = null;
-  profileItems: SpotifySearchResult[] = [];
+  profileItems: SoundCloudSearchResult[] = [];
 
   readonly categories = [
     { id: 'all', label: 'All' },
     { id: 'track', label: 'Tracks' },
-    { id: 'playlist', label: 'Playlists' },
-    { id: 'album', label: 'Albums' },
-    { id: 'artist', label: 'Artists' },
-    { id: 'show', label: 'Podcasts' }
+    { id: 'playlist', label: 'Playlists' }
   ];
 
   constructor(
-    public spotify: SpotifyService,
+    public spotify: SoundCloudService,
     private tabService: TabService,
     private videoService: Video
   ) {}
 
   private lastPersistedUiState = '';
+  private savedItemsSub?: Subscription;
+  private highlightTimeout?: ReturnType<typeof setTimeout>;
 
   ngOnInit() {
     this.restoreUiState();
+    this.savedItemsSub = this.spotify.savedItems$.subscribe(() => {
+      void this.refreshSavedSearch();
+    });
   }
 
   ngDoCheck() {
@@ -76,51 +67,187 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   async doSpotifySearch() {
-    if (!this.spotifySearch) return;
+    const query = this.spotifySearch.trim();
 
-    if (this.spotifySearch.includes('open.spotify.com/') || this.spotifySearch.startsWith('spotify:')) {
-      await this.handleSpotifyLink(this.spotifySearch);
+    if (!query) {
+      this.libraryMessage = '';
+      await this.refreshSavedSearch();
+      return;
+    }
+
+    if (this.isSoundCloudLink(query) && this.spotify.isUserPlaylistSourceUrl(query)) {
+      await this.importUserPlaylists(query);
+      return;
+    }
+
+    if (this.isSoundCloudLink(query)) {
+      await this.saveSoundCloudLink(query);
       return;
     }
 
     this.isLoading = true;
     this.showProfile = false;
+    this.showQueue = false;
     try {
-      const results = await this.spotify.search(this.spotifySearch);
-
-      this.groupedResults = results.reduce((acc: ResultGroup, item) => {
-        const type = (item.type === 'episode' || item.type === 'audiobook') ? 'show' : item.type;
-        if (!acc[type]) acc[type] = [];
-        acc[type].push(item);
-        return acc;
-      }, {});
-
+      const results = await this.spotify.search(query);
+      this.applyResults(results);
       this.activeCategory = 'all';
-      this.showQueue = false;
+      this.libraryMessage = results.length ? '' : `No saved SoundCloud items match "${query}".`;
     } finally {
       this.isLoading = false;
     }
   }
 
-  private async handleSpotifyLink(link: string) {
-    let uri = link;
-    if (link.includes('open.spotify.com/')) {
-      const parts = link.split('?')[0].split('/');
-      const type = parts[parts.length - 2];
-      const id = parts[parts.length - 1];
-      uri = `spotify:${type}:${id}`;
-    }
+  private async saveSoundCloudLink(uri: string) {
+    this.isLoading = true;
+    this.showProfile = false;
+    this.showQueue = false;
+    try {
+      const existingItem = this.spotify.getSavedItemFromUrl(uri);
+      if (existingItem) {
+        this.spotifySearch = '';
+        this.highlightItems([existingItem]);
+        this.libraryMessage = `Already saved: ${existingItem.name}`;
+        await this.refreshSavedSearch();
+        this.activeCategory = existingItem.type;
+        return;
+      }
 
-    if (this.isServerOwner) {
-        await this.spotify.play(uri);
-    } else {
-        // If not server owner, request the song/playlist
-        this.videoService.sendSpotifyRequest({ uri, name: 'Spotify Link' }, this.userName);
+      const item = await this.spotify.addSavedItemFromUrl(uri);
+      this.spotifySearch = '';
+      this.libraryMessage = `Saved ${item.type}: ${item.name}`;
+      await this.refreshSavedSearch();
+    } finally {
+      this.isLoading = false;
     }
-    this.spotifySearch = '';
   }
 
-  get filteredResults(): SpotifySearchResult[] {
+  private async importUserPlaylists(uri: string) {
+    this.isLoading = true;
+    this.showProfile = false;
+    this.showQueue = false;
+    this.libraryMessage = 'Importing public SoundCloud playlists...';
+    try {
+      const result = await this.spotify.addUserPlaylistsFromUrl(uri);
+      this.spotifySearch = '';
+      await this.refreshSavedSearch();
+      this.activeCategory = 'playlist';
+
+      if (result.duplicates.length) {
+        this.highlightItems(result.duplicates);
+      }
+
+      if (!result.discoveredCount) {
+        this.libraryMessage = 'No public playlists were found for that SoundCloud user.';
+        return;
+      }
+
+      if (!result.added.length && result.duplicates.length) {
+        this.libraryMessage = `No new playlists added. Highlighted ${result.duplicates.length} already saved playlist${result.duplicates.length === 1 ? '' : 's'}.`;
+        return;
+      }
+
+      this.libraryMessage = `Added ${result.added.length} playlist${result.added.length === 1 ? '' : 's'}${result.duplicates.length ? ` and highlighted ${result.duplicates.length} duplicate${result.duplicates.length === 1 ? '' : 's'}` : ''}.`;
+    } catch {
+      this.libraryMessage = 'Could not import playlists for that SoundCloud user.';
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  async refreshSavedSearch() {
+    const query = this.isSoundCloudLink(this.spotifySearch) ? '' : this.spotifySearch.trim();
+    const results = await this.spotify.search(query);
+    this.applyResults(results);
+    this.activeCategory = 'all';
+  }
+
+  onSearchInputChange() {
+    this.libraryMessage = '';
+    void this.refreshSavedSearch();
+  }
+
+  private applyResults(results: SoundCloudSearchResult[]) {
+    this.groupedResults = results.reduce((acc: ResultGroup, item) => {
+      const type = item.type;
+      if (!acc[type]) acc[type] = [];
+      acc[type].push(item);
+      return acc;
+    }, {});
+  }
+
+  async removeSavedItem(item: SoundCloudSearchResult | any, event?: Event) {
+    event?.stopPropagation();
+    const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url;
+    if (!uri) return;
+
+    this.spotify.removeSavedItem(uri);
+    this.libraryMessage = 'Removed from saved SoundCloud library.';
+    await this.refreshSavedSearch();
+  }
+
+  onImageError(event: Event, fallback: string = 'assets/spotify-placeholder.png') {
+    const image = event.target as HTMLImageElement | null;
+    if (!image || image.getAttribute('src') === fallback) return;
+
+    image.src = fallback;
+  }
+
+  isHighlighted(item: any): boolean {
+    const uri = item?.uri || item?.permalink_url || item?.track?.uri || item?.track?.permalink_url;
+    return !!uri && this.highlightedUris.has(uri);
+  }
+
+  private highlightItems(items: any[]) {
+    if (this.highlightTimeout) {
+      clearTimeout(this.highlightTimeout);
+    }
+
+    this.highlightedUris = new Set(
+      items
+        .map(item => item?.uri || item?.permalink_url || item?.track?.uri || item?.track?.permalink_url)
+        .filter((uri): uri is string => typeof uri === 'string' && !!uri)
+    );
+
+    this.highlightTimeout = setTimeout(() => {
+      this.highlightedUris = new Set<string>();
+      this.highlightTimeout = undefined;
+    }, 5500);
+  }
+
+  async refreshThumbnails() {
+    if (this.isRefreshingThumbnails) return;
+
+    this.isRefreshingThumbnails = true;
+    this.libraryMessage = 'Refreshing SoundCloud thumbnails...';
+    try {
+      const refreshedCount = await this.spotify.refreshSavedThumbnails();
+      await this.refreshSavedSearch();
+      this.libraryMessage = refreshedCount
+        ? `Refreshed thumbnails for ${refreshedCount} saved item${refreshedCount === 1 ? '' : 's'}.`
+        : 'No saved SoundCloud items to refresh.';
+    } catch {
+      this.libraryMessage = 'Could not refresh thumbnails right now.';
+    } finally {
+      this.isRefreshingThumbnails = false;
+    }
+  }
+
+  get searchActionLabel(): string {
+    if (this.spotify.isUserPlaylistSourceUrl(this.spotifySearch.trim())) {
+      return 'Import';
+    }
+
+    return this.isSoundCloudLink(this.spotifySearch.trim()) ? 'Add' : 'Search';
+  }
+
+  clearSearch() {
+    this.spotifySearch = '';
+    this.libraryMessage = '';
+    void this.refreshSavedSearch();
+  }
+
+  get filteredResults(): SoundCloudSearchResult[] {
     if (this.activeCategory === 'all') {
       return Object.values(this.groupedResults).flat().slice(0, 30);
     }
@@ -128,36 +255,40 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   openAsTab() {
-    this.tabService.openTab('spotify-main', 'Spotify', 'spotify', 'right');
+    this.tabService.openTab('soundcloud-main', 'SoundCloud', 'spotify', 'right');
     this.close.emit();
   }
 
   async playTrack(item: any) {
-    const uri = item.uri || item.track?.uri || item.item?.uri;
+    const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url || item.item?.uri;
+    if (!uri) return;
+
     if (this.isServerOwner || !this.isCallActive) {
         await this.spotify.play(uri);
     } else {
-        this.videoService.sendSpotifyRequest(item, this.userName);
+        this.videoService.sendSoundCloudRequest(item, this.userName);
     }
 
     if (this.spotifySearch) {
-      this.groupedResults = {};
       this.spotifySearch = '';
+      await this.refreshSavedSearch();
     }
     this.showPinnedPulldown = false;
     this.showQueue = false;
   }
 
   async requestTrack(item: any) {
-    const uri = item.uri || item.track?.uri || item.item?.uri;
+    const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url || item.item?.uri;
+    if (!uri) return;
+
     if (this.isServerOwner) {
       await this.spotify.addToQueue(uri);
     } else {
-      this.videoService.sendSpotifyRequest(item, this.userName);
+      this.videoService.sendSoundCloudRequest(item, this.userName);
     }
     if (this.spotifySearch) {
-      this.groupedResults = {};
       this.spotifySearch = '';
+      await this.refreshSavedSearch();
     }
     this.showPinnedPulldown = false;
     this.showQueue = false;
@@ -165,6 +296,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   async viewProfile(id: string | undefined, type: "artist" | "user") {
     if (!id) return;
+
     this.isLoading = true;
     this.showQueue = false;
     this.showProfile = true;
@@ -211,6 +343,11 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   ngOnDestroy() {
+    if (this.highlightTimeout) {
+      clearTimeout(this.highlightTimeout);
+    }
+
+    this.savedItemsSub?.unsubscribe();
     this.persistUiState();
   }
 
@@ -221,13 +358,15 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       const rawState = localStorage.getItem(SpotifyPlayer.uiStateStorageKey);
       if (!rawState) return;
 
-      const state = JSON.parse(rawState) as Partial<SpotifyPlayerUiState>;
+      const state = JSON.parse(rawState) as Partial<SoundCloudPlayerUiState>;
       this.spotifySearch = typeof state.spotifySearch === 'string' ? state.spotifySearch : '';
       this.groupedResults = this.isResultGroup(state.groupedResults) ? state.groupedResults : {};
       this.activeCategory = this.isKnownCategory(state.activeCategory) ? state.activeCategory : 'all';
       this.showDevicePicker = state.showDevicePicker === true;
       this.showQueue = state.showQueue === true;
-      this.activeSidebarTab = this.isSidebarTab(state.activeSidebarTab) ? state.activeSidebarTab : 'playlists';
+      const storedTab = state.activeSidebarTab as unknown;
+      const restoredTab = storedTab === 'recent' ? 'tracks' : storedTab;
+      this.activeSidebarTab = this.isSidebarTab(restoredTab) ? restoredTab : 'playlists';
       this.showProfile = state.showProfile === true;
       this.profileData = state.profileData ?? null;
       this.profileItems = Array.isArray(state.profileItems) ? state.profileItems : [];
@@ -246,11 +385,11 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       localStorage.setItem(SpotifyPlayer.uiStateStorageKey, serialized);
       this.lastPersistedUiState = serialized;
     } catch {
-      // Persistence is best effort only; Spotify auth/playback state is still handled by SpotifyService.
+      // Persistence is best effort only; SoundCloud library/playback state is still handled by SoundCloudService.
     }
   }
 
-  private getUiState(): SpotifyPlayerUiState {
+  private getUiState(): SoundCloudPlayerUiState {
     return {
       spotifySearch: this.spotifySearch,
       groupedResults: this.groupedResults,
@@ -278,10 +417,14 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   private isSidebarTab(value: unknown): value is SidebarTab {
-    return value === 'playlists' || value === 'recent' || value === 'pinned';
+    return value === 'playlists' || value === 'tracks' || value === 'pinned';
   }
 
   private isResultGroup(value: unknown): value is ResultGroup {
     return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  private isSoundCloudLink(value: string): boolean {
+    return value.includes('soundcloud.com/') || value.startsWith('soundcloud:');
   }
 }

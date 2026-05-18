@@ -22,72 +22,8 @@ import { ThemeColors } from '../theme/theme.service';
 import { DeviceInfo, DeviceService } from '../device/device';
 import { TokenService } from '../auth/token';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
-
-export type CallDeviceRole = 'desktop-main' | 'phone-camera';
-export type CompanionSourceId = 'desktop-local' | string;
-export type RemoteVideoQualityPreference = 'low' | 'medium' | 'high';
-export type ParticipantVolumeMap = Record<string, number>;
-
-export interface SceneMainCharacterState {
-  participantIds: string[];
-  updatedAt: number;
-  updatedBy?: string;
-}
-
-export interface CallParticipantMetadata {
-  userId: string;
-  deviceId: string;
-  deviceType: DeviceInfo['deviceType'];
-  deviceRole: CallDeviceRole;
-  character: any;
-  selectedVideoSource?: CompanionSourceId;
-  selectedAudioSource?: CompanionSourceId;
-  sceneMainCharacters?: SceneMainCharacterState;
-}
-
-export interface CompanionDeviceOption {
-  identity: string;
-  deviceId: string;
-  deviceType: DeviceInfo['deviceType'];
-  label: string;
-  hasVideo: boolean;
-  hasAudio: boolean;
-}
-
-export interface MediaTrackDiagnostics {
-  kind: 'audio' | 'video';
-  bitrateKbps: number | null;
-  packetLossPct: number | null;
-  jitterMs: number | null;
-  width?: number | null;
-  height?: number | null;
-  frameRate?: number | null;
-  enabled: boolean;
-  muted: boolean;
-}
-
-export interface ParticipantMediaDiagnostics {
-  connectionQuality: ConnectionQuality;
-  connectionState: string;
-  rttMs: number | null;
-  audio?: MediaTrackDiagnostics;
-  video?: MediaTrackDiagnostics;
-}
-
-export interface CallRecordingParticipant {
-  id: string;
-  stream?: MediaStream;
-  userData?: any;
-  participantMeta?: CallParticipantMetadata | null;
-  isLocal: boolean;
-  volumePercent: number;
-}
-
-interface LiveKitConnectionInfo {
-  token: string;
-  iceServers?: RTCIceServer[];
-}
-
+import type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant, LiveKitConnectionInfo } from '../../models/video/video.model';
+export type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly vttSessionStateKey = 'video:vtt-session';
@@ -164,9 +100,12 @@ export class Video {
 
   private room: Room;
   public remoteStreams$ = new BehaviorSubject<any[]>([]);
-  public spotifySync$ = new Subject<any>();
-  public spotifyStateRequest$ = new Subject<{ from: string }>();
-  public spotifyRequest$ = new Subject<any>();
+  public soundCloudSync$ = new Subject<any>();
+  public soundCloudStateRequest$ = new Subject<{ from: string }>();
+  public soundCloudRequest$ = new Subject<any>();
+  public spotifySync$ = this.soundCloudSync$;
+  public spotifyStateRequest$ = this.soundCloudStateRequest$;
+  public spotifyRequest$ = this.soundCloudRequest$;
   public themeSync$ = new Subject<ThemeColors>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
   public overlayImage$ = new Subject<string | null>();
@@ -363,17 +302,17 @@ export class Video {
       .on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
         try {
           const data = JSON.parse(new TextDecoder().decode(payload));
-          if (data.type === 'spotify-sync') {
-            this.spotifySync$.next({
+          if (data.type === 'soundcloud-sync' || data.type === 'spotify-sync') {
+            this.soundCloudSync$.next({
               ...data.data,
               from: participant?.identity,
               command: data.command,
               source: data.source || 'manual'
             });
-          } else if (data.type === 'spotify-state-request') {
-            this.spotifyStateRequest$.next({ from: participant?.identity || '' });
-          } else if (data.type === 'spotify-request') {
-            this.spotifyRequest$.next({
+          } else if (data.type === 'soundcloud-state-request' || data.type === 'spotify-state-request') {
+            this.soundCloudStateRequest$.next({ from: participant?.identity || '' });
+          } else if (data.type === 'soundcloud-request' || data.type === 'spotify-request') {
+            this.soundCloudRequest$.next({
               ...data.data,
               from: participant?.identity || 'Unknown',
               fromName: data.fromName || 'Unknown Player'
@@ -660,10 +599,10 @@ export class Video {
     return this.participantStreams.get(this.selectedAudioSource$.value) || null;
   }
 
-  sendSpotifyCommand(command: string, data: any, source: string = 'manual') {
+  sendSoundCloudCommand(command: string, data: any, source: string = 'manual') {
     if (this.room.state !== 'connected') return;
     const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'spotify-sync',
+      type: 'soundcloud-sync',
       command,
       source,
       data: { ...data, timestamp: Date.now() }
@@ -671,19 +610,28 @@ export class Video {
     this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
-  sendSpotifyRequest(item: any, fromName: string) {
+  sendSpotifyCommand(command: string, data: any, source: string = 'manual') {
+    this.sendSoundCloudCommand(command, data, source);
+  }
+
+  sendSoundCloudRequest(item: any, fromName: string) {
     if (this.room.state !== 'connected') return;
+    const track = item.track || item.item || item;
     const payload = new TextEncoder().encode(JSON.stringify({
-      type: 'spotify-request',
+      type: 'soundcloud-request',
       fromName,
       data: {
-        uri: item.uri,
-        name: item.name,
-        artist: item.artist || item.owner || '',
-        image: item.image || item.images?.[0]?.url || item.album?.images?.[0]?.url || ''
+        uri: track.uri || track.permalink_url,
+        name: track.name || track.title,
+        artist: track.artist || track.owner || track.user?.username || '',
+        image: track.image || track.artwork_url || track.images?.[0]?.url || track.album?.images?.[0]?.url || track.user?.avatar_url || ''
       }
     }));
     this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  sendSpotifyRequest(item: any, fromName: string) {
+    this.sendSoundCloudRequest(item, fromName);
   }
 
   sendThemeUpdate(theme: ThemeColors) {
@@ -692,10 +640,14 @@ export class Video {
     this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
-  requestSpotifyState() {
+  requestSoundCloudState() {
     if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({ type: 'spotify-state-request' }));
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'soundcloud-state-request' }));
     this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  requestSpotifyState() {
+    this.requestSoundCloudState();
   }
 
   sendVttCommand(command: 'start' | 'stop', roomId: string) {

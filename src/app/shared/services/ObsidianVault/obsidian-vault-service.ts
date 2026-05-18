@@ -2,25 +2,8 @@ import { Injectable } from '@angular/core';
 import { IServer } from '../../models/server/server.model';
 import { ChannelType, IChannel } from '../../models/server/channel.model';
 import { get, set, del } from 'idb-keyval';
-
-export interface VaultEntry {
-  name: string;
-  kind: 'file' | 'directory';
-  handle: FileSystemHandle;
-  relativePath: string;
-  parentPath: string;
-  children?: VaultEntry[];
-}
-
-export interface VaultSearchResult {
-  serverId: string;
-  name: string;
-  relativePath: string;
-  snippet: string;
-  matchType: 'title' | 'path' | 'content';
-  score: number;
-}
-
+import type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/obsidian-vault-service.model';
+export type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/obsidian-vault-service.model';
 @Injectable({
   providedIn: 'root',
 })

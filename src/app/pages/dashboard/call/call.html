@@ -25,30 +25,6 @@
           <h2>Ready to join?</h2>
           <p>Configure your devices before entering the call.</p>
 
-          <!-- Spotify Authorization Prompt -->
-          <div class="spotify-auth-prompt" [class.connected]="(spotify.isAuthorized$ | async)">
-            <div class="spotify-status">
-              <div class="spotify-icon-bg">
-                <mat-icon>music_note</mat-icon>
-              </div>
-              <div class="status-text">
-                <strong>Spotify Sync</strong>
-                <span>{{ (spotify.isAuthorized$ | async) ? 'Account connected' : 'Connect to sync music with others' }}</span>
-              </div>
-            </div>
-            @if (!(spotify.isAuthorized$ | async)) {
-              <button class="btn-spotify-login" (click)="spotify.login()">
-                <mat-icon>login</mat-icon>
-                <span>Connect Spotify</span>
-              </button>
-            } @else {
-              <div class="connected-badge">
-                <mat-icon>check_circle</mat-icon>
-                <span>Ready</span>
-              </div>
-            }
-          </div>
-
           <div class="settings-grid">
             <div class="device-select">
               <mat-icon>videocam</mat-icon>
@@ -166,11 +142,11 @@
       </button>
 
       <button
-        *ngIf="hasRecordedSessionPlayback && !isSessionRecording"
+        *ngIf="hasRecordedSessionPlayback && !isSessionRecording && hasDownloadableAstralRecording"
         (click)="saveAstralRecording()"
         class="btn-action"
         [disabled]="isSavingAstralRecording"
-        [matTooltip]="isSavingAstralRecording ? 'Saving .astral recording' : (recordedSession?.package ? 'Save .astral recording' : 'No .astral package available')"
+        [matTooltip]="isSavingAstralRecording ? 'Saving .astral recording' : (hasOptimizedAstralRecording ? 'Save optimized .astral recording' : 'Save .astral recording')"
       >
         <mat-icon>{{ isSavingAstralRecording ? 'hourglass_empty' : 'download' }}</mat-icon>
       </button>
@@ -435,33 +411,6 @@
             </button>
           </div>
 
-          <div class="remote-menu-section" *ngIf="canShowTemporaryDmMenu(activeRemote)">
-            <div class="remote-menu-label">
-              <mat-icon>admin_panel_settings</mat-icon>
-              <span>Temporary DM</span>
-            </div>
-            <button
-              *ngFor="let option of temporaryDmDurations"
-              type="button"
-              class="remote-menu-action"
-              role="menuitem"
-              (click)="setTemporaryDmFromCall(activeRemote, option.duration)"
-            >
-              <mat-icon>schedule</mat-icon>
-              <span>{{ option.label }}</span>
-            </button>
-            <button
-              *ngIf="isParticipantTemporaryDm(activeRemote)"
-              type="button"
-              class="remote-menu-action"
-              role="menuitem"
-              (click)="setTemporaryDmFromCall(activeRemote, 'none')"
-            >
-              <mat-icon>person_remove</mat-icon>
-              <span>Remove temporary DM</span>
-            </button>
-          </div>
-
           <div class="remote-menu-section remote-volume-menu-item" *ngIf="canShowParticipantVolumeControl(activeRemote)">
             <div class="remote-menu-label">
               <mat-icon>{{ getRemoteVolumeIcon(activeRemote) }}</mat-icon>
@@ -716,18 +665,40 @@
 
       <div class="color-scroll-area" (click)="$event.stopPropagation()">
         <div class="device-routing-section">
-          <div class="section-title">Desktop Hardware</div>
+          <div class="section-title">Input Sources</div>
           <div class="settings-grid compact">
             <div class="device-select">
               <mat-icon>videocam</mat-icon>
-              <select [(ngModel)]="selectedVideoId" (change)="onDeviceChange()">
-                <option *ngFor="let d of videoDevices" [value]="d.deviceId">{{ d.label }}</option>
+              <select [ngModel]="selectedVideoInputRoute" (ngModelChange)="changeVideoInputRoute($event)">
+                <optgroup label="Desktop cameras">
+                  <option *ngIf="!videoDevices.length" [value]="getLocalInputRouteValue('')" disabled>No desktop cameras available</option>
+                  <option *ngFor="let d of videoDevices" [value]="getLocalInputRouteValue(d.deviceId)">
+                    {{ d.label || 'Default Camera' }}
+                  </option>
+                </optgroup>
+                <optgroup label="Phone companions">
+                  <option *ngIf="!companionDevices.length" [value]="getCompanionInputRouteValue('')" disabled>No phones connected</option>
+                  <option *ngFor="let device of companionDevices" [value]="getCompanionInputRouteValue(device.identity)" [disabled]="!device.hasVideo">
+                    {{ device.label }} camera{{ device.hasVideo ? '' : ' unavailable' }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="device-select">
               <mat-icon>mic</mat-icon>
-              <select [(ngModel)]="selectedAudioId" (change)="onDeviceChange()">
-                <option *ngFor="let d of audioDevices" [value]="d.deviceId">{{ d.label }}</option>
+              <select [ngModel]="selectedAudioInputRoute" (ngModelChange)="changeAudioInputRoute($event)">
+                <optgroup label="Desktop microphones">
+                  <option *ngIf="!audioDevices.length" [value]="getLocalInputRouteValue('')" disabled>No desktop microphones available</option>
+                  <option *ngFor="let d of audioDevices" [value]="getLocalInputRouteValue(d.deviceId)">
+                    {{ d.label || 'Default Microphone' }}
+                  </option>
+                </optgroup>
+                <optgroup label="Phone companions">
+                  <option *ngIf="!companionDevices.length" [value]="getCompanionInputRouteValue('')" disabled>No phones connected</option>
+                  <option *ngFor="let device of companionDevices" [value]="getCompanionInputRouteValue(device.identity)" [disabled]="!device.hasAudio">
+                    {{ device.label }} microphone{{ device.hasAudio ? '' : ' unavailable' }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="device-select">
@@ -743,6 +714,9 @@
               </select>
             </div>
           </div>
+          <p class="device-routing-note" *ngIf="!companionDevices.length">
+            Connected phone companions will appear here so the PC can use them as its camera or microphone source.
+          </p>
         </div>
 
         <div class="device-routing-section">
@@ -773,33 +747,6 @@
               </span>
             </div>
           </div>
-        </div>
-
-        <div class="device-routing-section">
-          <div class="section-title">Published Sources</div>
-          <div class="settings-grid compact">
-            <div class="device-select">
-              <mat-icon>switch_video</mat-icon>
-              <select [(ngModel)]="selectedPcVideoSource" (change)="changePcVideoSource(selectedPcVideoSource)">
-                <option value="desktop-local">Desktop camera</option>
-                <option *ngFor="let device of companionDevices" [value]="device.identity" [disabled]="!device.hasVideo">
-                  {{ device.label }} camera{{ device.hasVideo ? '' : ' unavailable' }}
-                </option>
-              </select>
-            </div>
-            <div class="device-select">
-              <mat-icon>mic_external_on</mat-icon>
-              <select [(ngModel)]="selectedPcAudioSource" (change)="changePcAudioSource(selectedPcAudioSource)">
-                <option value="desktop-local">Desktop microphone</option>
-                <option *ngFor="let device of companionDevices" [value]="device.identity" [disabled]="!device.hasAudio">
-                  {{ device.label }} microphone{{ device.hasAudio ? '' : ' unavailable' }}
-                </option>
-              </select>
-            </div>
-          </div>
-          <p class="device-routing-note" *ngIf="!companionDevices.length">
-            Connected phone companions will appear here so the PC can use them as its camera or microphone source.
-          </p>
         </div>
 
         <div class="device-routing-section">

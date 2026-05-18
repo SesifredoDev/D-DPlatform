@@ -60,7 +60,7 @@
       color: #fff;
       font-size: 1rem;
       font-weight: 700;
-      letter-spacing: -0.02em;
+      letter-spacing: 0;
     }
     .spotify-icon { color: var(--spotify-green); }
   }
@@ -86,10 +86,33 @@
          color: white;
          background: var(--surface-light);
        }
+       &:disabled {
+         cursor: progress;
+         opacity: 0.6;
+       }
        &.active { color: var(--spotify-green); }
        &.close-btn { font-size: 20px; line-height: 1; }
      }
   }
+}
+
+.refresh-icon.spinning {
+  animation: soundcloud-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes soundcloud-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+.highlighted {
+  outline: 2px solid #ff9d2e;
+  background: rgba(255, 157, 46, 0.16) !important;
+  animation: soundcloud-highlight-pulse 1.2s ease-in-out 4;
+}
+
+@keyframes soundcloud-highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(255, 157, 46, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(255, 157, 46, 0.2); }
 }
 
 .pinned-pulldown {
@@ -227,6 +250,10 @@
         &:hover { color: var(--spotify-green); transform: scale(1.1); }
         &.pinned { opacity: 1; color: var(--spotify-green); }
       }
+
+      .remove-btn:hover {
+        color: #ff7676;
+      }
     }
   }
 }
@@ -284,6 +311,16 @@
     transition: transform 0.1s;
     &:active { transform: scale(0.95); }
   }
+}
+
+.library-message {
+  margin: -4px 0 14px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--spotify-text-muted);
+  font-size: 0.78rem;
 }
 
 .workspace-tabs {
@@ -374,8 +411,9 @@
 
     .result-actions {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: center;
+      gap: 6px;
       margin-top: auto;
 
       .type-badge {
@@ -383,12 +421,14 @@
         color: var(--spotify-text-muted);
         text-transform: uppercase;
         font-weight: 700;
+        margin-right: auto;
       }
 
       button {
         background: none; border: none; color: var(--spotify-text-muted); cursor: pointer; padding: 2px;
         &:hover { color: var(--spotify-green); }
         &.pinned { color: var(--spotify-green); }
+        &.remove-btn:hover { color: #ff7676; }
       }
     }
   }
@@ -544,38 +584,6 @@
         font-size: 0.75rem; color: var(--spotify-text-muted);
         &:hover { text-decoration: underline; color: #fff; cursor: pointer; }
       }
-    }
-  }
-}
-
-.auth-box {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  text-align: center;
-  gap: 24px;
-
-  p { color: var(--spotify-text-muted); font-size: 0.9rem; line-height: 1.5; }
-
-  .spotify-login-btn {
-    background: var(--spotify-green);
-    color: #000;
-    border: none;
-    padding: 14px 32px;
-    border-radius: 30px;
-    font-weight: 700;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    cursor: pointer;
-    transition: transform 0.2s, background-color 0.2s;
-
-    &:hover {
-      background: var(--spotify-green-hover);
-      transform: scale(1.05);
     }
   }
 }

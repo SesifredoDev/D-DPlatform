@@ -2236,5 +2236,3 @@ export const MATERIAL_ICON_NAMES = [
   'zoom_out',
   'zoom_out_map',
 ] as const;
-
-export type MaterialIconName = typeof MATERIAL_ICON_NAMES[number];

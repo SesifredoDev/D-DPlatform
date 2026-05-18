@@ -11,3 +11,8 @@ export interface IUser extends IUserBase {
   profileIconUrl?: string | null;
   profileIconKey?: string | null;
 }
+
+export interface ProfileIconUploadResponse {
+  message: string;
+  user: IUser;
+}

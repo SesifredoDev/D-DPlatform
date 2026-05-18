@@ -7,37 +7,8 @@ import {
   AstralRecordingService
 } from './astral-recording';
 import { SessionRecordingService } from '../session-recording/session-recording';
-
-export type AstralOptimizationJobStatus = 'queued' | 'running' | 'completed' | 'failed';
-
-export interface AstralOptimizationJob {
-  id: string;
-  recordingId: string | null;
-  packagePath: string;
-  status: AstralOptimizationJobStatus;
-  stage: string;
-  message: string;
-  current: number;
-  total: number;
-  progressPercent: number;
-  startedAt: number;
-  finishedAt?: number;
-  originalSize?: number;
-  optimizedSize?: number;
-  optimizedPath?: string;
-  optimizedSegmentCount?: number;
-  skippedSegmentCount?: number;
-  error?: string;
-}
-
-interface AstralOptimizationProgressEvent {
-  jobId: string;
-  stage: string;
-  message: string;
-  current: number;
-  total: number;
-}
-
+import type { AstralOptimizationJobStatus, AstralOptimizationJob, AstralOptimizationProgressEvent } from '../../models/astral-recording/astral-optimizer.model';
+export type { AstralOptimizationJobStatus, AstralOptimizationJob } from '../../models/astral-recording/astral-optimizer.model';
 @Injectable({ providedIn: 'root' })
 export class AstralOptimizerService implements OnDestroy {
   private readonly jobsSubject = new BehaviorSubject<AstralOptimizationJob[]>([]);

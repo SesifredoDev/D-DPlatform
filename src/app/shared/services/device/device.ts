@@ -1,13 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-
-export type DeviceType = 'desktop' | 'mobile' | 'tablet' | 'unknown';
-
-export interface DeviceInfo {
-  deviceId: string;
-  deviceType: DeviceType;
-}
-
+import type { DeviceType, DeviceInfo } from '../../models/device/device.model';
+export type { DeviceType, DeviceInfo } from '../../models/device/device.model';
 const DEVICE_ID_KEY = 'device_id';
 const DEVICE_TYPE_OVERRIDE_KEY = 'device_type_override';
 

@@ -5,51 +5,8 @@ import { startWith, switchMap, catchError, map, tap } from 'rxjs/operators';
 
 import {environment} from '../../../../environments/environment';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
-
-declare global {
-  interface Window { onSpotifyWebPlaybackSDKReady: () => void; Spotify: any; }
-}
-
-export interface SpotifySearchResult {
-  id: string;
-  name: string;
-  uri: string;
-  type: 'track' | 'playlist' | 'album' | 'artist' | 'show' | 'episode' | 'audiobook' | 'user';
-  image: string;
-  artist?: string;
-  artistId?: string;
-  owner?: string;
-  ownerId?: string;
-  publisher?: string;
-}
-
-export interface SpotifyDevice {
-  id: string;
-  is_active: boolean;
-  is_private_session: boolean;
-  is_restricted: boolean;
-  name: string;
-  type: string;
-  volume_percent: number;
-}
-
-export interface SpotifySyncEvent {
-  command: string;
-  data: any;
-  source: 'manual' | 'auto';
-}
-
-interface SpotifyRefreshResponse {
-  accessToken?: string;
-  access_token?: string;
-  refreshToken?: string;
-  refresh_token?: string;
-}
-
-interface SpotifyTokenState {
-  accessToken: string | null;
-  refreshToken: string | null;
-}
+import type { SpotifySearchResult, SpotifyDevice, SpotifySyncEvent, SpotifyRefreshResponse, SpotifyTokenState } from '../../models/playlist/spotify.service.model';
+export type { SpotifySearchResult, SpotifyDevice, SpotifySyncEvent } from '../../models/playlist/spotify.service.model';
 
 @Injectable({ providedIn: 'root' })
 export class SpotifyService {

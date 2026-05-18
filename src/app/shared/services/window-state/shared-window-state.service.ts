@@ -1,19 +1,7 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-
-interface SharedStateEnvelope<T = unknown> {
-  key: string;
-  value: T | null;
-  sourceId: string;
-  updatedAt: number;
-  sequence: number;
-}
-
-type SharedStateMessage<T = unknown> =
-  | ({ type: 'state' } & SharedStateEnvelope<T>)
-  | { type: 'state-request'; sourceId: string; requestedAt: number };
-
+import type { SharedStateEnvelope, SharedStateMessage } from '../../models/window-state/shared-window-state.service.model';
 @Injectable({ providedIn: 'root' })
 export class SharedWindowStateService implements OnDestroy {
   private static readonly channelName = 'dd-platform-window-state';

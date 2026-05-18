@@ -2,27 +2,8 @@ import { Injectable, Renderer2, RendererFactory2 } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import type { IServerTheme } from '../../models/server/server.model';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
-
-export interface ThemeColors {
-  primary: string;
-  background: string;
-  textColor?: string;
-  fontFamily?: string;
-  backgroundImage?: string | null;
-  backgroundImageBlur?: boolean;
-}
-
-export interface ServerThemeFontOption {
-  label: string;
-  value: string;
-}
-
-export interface PinnedTheme {
-  id: string;
-  name: string;
-  colors: ThemeColors;
-}
-
+import type { ThemeColors, ServerThemeFontOption, PinnedTheme } from '../../models/theme/theme.service.model';
+export type { ThemeColors, ServerThemeFontOption, PinnedTheme } from '../../models/theme/theme.service.model';
 export const SERVER_THEME_FONT_OPTIONS: readonly ServerThemeFontOption[] = [
   {
     label: 'Inter / System',

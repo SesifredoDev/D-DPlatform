@@ -4,12 +4,8 @@ import { tap } from 'rxjs/operators';
 import { Observable } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { IUser } from '../../models/user/user.model';
-
-export interface ProfileIconUploadResponse {
-  message: string;
-  user: IUser;
-}
-
+import type { ProfileIconUploadResponse } from '../../models/user/user.model';
+export type { ProfileIconUploadResponse } from '../../models/user/user.model';
 @Injectable({
   providedIn: 'root',
 })

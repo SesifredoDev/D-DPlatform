@@ -1,4 +1,4 @@
-import {ICharacter} from '../user/character.model';
+import type { ICharacter } from '../user/character.model';
 
 export enum ChannelType {
   Text = 'text',

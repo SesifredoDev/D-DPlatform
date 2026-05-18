@@ -19,41 +19,7 @@ import {Subscription, Observable, firstValueFrom} from 'rxjs';
 import {TabService} from '../../../shared/services/tab/tab-service';
 import {ServerService} from '../../../shared/services/server/server';
 import { SessionPlaybackState, SessionRecording, SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
-
-type HostTakeoverChoice = 'take-control' | 'player';
-type FxShapeTool = 'polygon' | 'square' | 'circle' | 'cone' | 'erase';
-type TokenConfigTab = 'main' | 'style';
-type ActiveTool =
-  'select' | 'pointer' | 'draw' | 'delete' |
-  'line' | 'radius' | 'cone' |
-  'fx-polygon' | 'fx-square' | 'fx-circle' | 'fx-cone' | 'fx-erase' |
-  'none';
-
-interface TokenEffect {
-  id: string;
-  name: string;
-  color: string;
-}
-
-interface TokenEditConfig {
-  name: string;
-  icon: string | null;
-  iconFile: File | null;
-  size: number;
-  forceBorder: boolean;
-  borderColor: string;
-  color: string;
-  notes: string;
-  currentHealth: number | null;
-  maxHealth: number | null;
-  healthDelta: number;
-  effects: TokenEffect[];
-  newEffectName: string;
-  newEffectColor: string;
-}
-
-type TokenConfigPayload = Omit<TokenEditConfig, 'healthDelta' | 'newEffectName' | 'newEffectColor'>;
-
+import type { HostTakeoverChoice, FxShapeTool, TokenConfigTab, ActiveTool, TokenEffect, TokenEditConfig, TokenConfigPayload } from '../../../shared/models/pages/dashboard/vtt-canvas/vtt-canvas.model';
 @Component({
   selector: 'app-vtt-host-takeover-dialog',
   imports: [MatDialogModule, MatButton, MatIcon],

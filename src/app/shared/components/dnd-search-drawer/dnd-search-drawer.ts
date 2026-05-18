@@ -23,40 +23,7 @@ import {
 } from '../../services/ObsidianVault/obsidian-vault-service';
 import { ServerService } from '../../services/server/server';
 import { TabService } from '../../services/tab/tab-service';
-
-interface DetailFact {
-  label: string;
-  value: string;
-}
-
-interface DetailSection {
-  title: string;
-  entries: string[];
-}
-
-interface RichTextBlock {
-  text: string;
-  html: string;
-  isMarkdown: boolean;
-}
-
-interface RichDetailSection {
-  title: string;
-  entries: RichTextBlock[];
-  hasMarkdown: boolean;
-}
-
-interface SearchResultItem {
-  id: string;
-  source: 'open5e' | 'vault';
-  title: string;
-  category: string;
-  subtitle: string;
-  snippet: string;
-  open5e?: Open5eSearchResult;
-  vault?: VaultSearchResult;
-}
-
+import type { DetailFact, DetailSection, RichTextBlock, RichDetailSection, SearchResultItem } from '../../models/components/dnd-search-drawer/dnd-search-drawer.model';
 @Component({
   selector: 'app-dnd-search-drawer',
   standalone: true,

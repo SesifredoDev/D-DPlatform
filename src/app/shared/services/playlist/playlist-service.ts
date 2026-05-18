@@ -1,10 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 
-declare global {
-  interface Window { onSpotifyWebPlaybackSDKReady: () => void; Spotify: any; }
-}
-
 @Injectable({ providedIn: 'root' })
 export class PlaylistService {
   private player: any;

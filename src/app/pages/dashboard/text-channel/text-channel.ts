@@ -30,50 +30,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { Tab, TabService } from '../../../shared/services/tab/tab-service';
 import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
 import { Video } from '../../../shared/services/video/video';
-
-type ChannelAccessPermission = 'READ_MESSAGE_HISTORY' | 'SEND_MESSAGES' | 'CONNECT';
-type LinkPreviewType = 'website' | 'image' | 'video' | 'audio' | 'embed';
-type LinkPreviewAspect = 'landscape' | 'portrait' | 'square';
-type LinkPreviewProvider =
-  | 'YouTube'
-  | 'Instagram'
-  | 'TikTok'
-  | 'Vimeo'
-  | 'Google Drive'
-  | 'OneDrive'
-  | 'Proton Drive';
-
-interface LinkPreview {
-  url: string;
-  host: string;
-  displayUrl: string;
-  title: string;
-  description: string;
-  type: LinkPreviewType;
-  icon: string;
-  imageUrl?: string;
-  embedUrl?: SafeResourceUrl;
-  embedAspect?: LinkPreviewAspect;
-  provider?: LinkPreviewProvider;
-}
-
-interface PlayableEmbedPreview {
-  provider: LinkPreviewProvider;
-  embedUrl: string;
-  title: string;
-  description: string;
-  icon: string;
-  aspect: LinkPreviewAspect;
-  imageUrl?: string;
-}
-
-interface ProviderLinkPreview {
-  provider: LinkPreviewProvider;
-  title: string;
-  description: string;
-  icon: string;
-}
-
+import type { ChannelAccessPermission, LinkPreviewType, LinkPreviewAspect, LinkPreviewProvider, LinkPreview, PlayableEmbedPreview, ProviderLinkPreview } from '../../../shared/models/pages/dashboard/text-channel/text-channel.model';
 @Component({
   selector: 'app-text-channel',
   templateUrl: 'text-channel.html',

@@ -13,255 +13,123 @@ import {
   EventEmitter,
   ChangeDetectorRef,
 } from '@angular/core';
-import { CallParticipantMetadata, CallRecordingParticipant, CompanionDeviceOption, CompanionSourceId, ParticipantMediaDiagnostics, RemoteVideoQualityPreference, Video } from '../../../shared/services/video/video';
+import { Video } from '../../../shared/services/video/video';
+import type {
+  CallParticipantMetadata,
+  CallRecordingParticipant,
+  CompanionDeviceOption,
+  CompanionSourceId,
+  ParticipantMediaDiagnostics
+} from '../../../shared/models/video/video.model';
 import { Subscription } from 'rxjs';
 import { FormsModule } from '@angular/forms';
-import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
+import { NgForOf, NgIf } from '@angular/common';
 import { ICharacter } from '../../../shared/models/user/character.model';
 import { TabService } from '../../../shared/services/tab/tab-service';
-import { SpotifyService } from '../../../shared/services/playlist/spotify.service';
+import { SoundCloudService } from '../../../shared/services/playlist/soundcloud.service';
 import { ActivatedRoute } from '@angular/router';
 import { SpotifyPlayer } from './spotify-player/spotify-player';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { PinnedTheme, ThemeColors, ThemeService } from '../../../shared/services/theme/theme.service';
+import { ThemeService } from '../../../shared/services/theme/theme.service';
+import type { PinnedTheme, ThemeColors } from '../../../shared/models/theme/theme.service.model';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer, TemporaryDmDuration } from '../../../shared/models/server/server.model';
 import { MarkdownComponent } from 'ngx-markdown';
 import { AuthService } from '../../../shared/services/auth/auth';
-import { DeviceService, DeviceType } from '../../../shared/services/device/device';
-import { RecordedCallEnvironmentAction, SessionPlaybackState, SessionRecording, SessionRecordingMedia, SessionRecordingParticipantMedia, SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
-import { AstralRecordingImportResponse, AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
-import { AstralPlaybackDropRequest, AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
+import { DeviceService } from '../../../shared/services/device/device';
+import { SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
+import type {
+  RecordedCallEnvironmentAction,
+  SessionPlaybackState,
+  SessionRecording,
+  SessionRecordingMedia,
+  SessionRecordingParticipantMedia
+} from '../../../shared/models/session-recording/session-recording.model';
+import { AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
+import type { AstralRecordingImportResponse } from '../../../shared/models/astral-recording/astral-recording.model';
+import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
+import type { AstralPlaybackDropRequest } from '../../../shared/models/astral-recording/astral-playback-drop.model';
 import { AstralOptimizerService } from '../../../shared/services/astral-recording/astral-optimizer';
-
-interface ParticipantStream {
-  id: string;
-  stream?: MediaStream;
-  stillFrameUrl?: string;
-  userData?: ICharacter;
-  participantMeta?: CallParticipantMetadata | null;
-  ping?: number;
-  isLocal?: boolean;
-  diagnostics?: ParticipantMediaDiagnostics;
-  volumePercent: number;
-  isSceneMainCharacter: boolean;
-}
-
-export interface VttStopEvent {
-  roomId: string;
-  endSession: boolean;
-}
-
-export interface VttPlaybackEvent {
-  roomId: string;
-  active: boolean;
-}
-
-interface VttSessionState {
-  active: boolean;
-  roomId: string | null;
-  hostId: string | null;
-}
-
-type MicrophoneProcessingMode = 'studio' | 'processed';
-type RemoteVideoQualityLevel = 0 | 1 | 2;
-
-interface StoredCallMediaPreferences {
-  selectedVideoId?: string;
-  selectedAudioId?: string;
-  selectedOutputId?: string;
-  microphoneProcessingMode?: MicrophoneProcessingMode;
-  remoteVideoQualityPreference?: RemoteVideoQualityPreference;
-  selectedPcVideoSource?: CompanionSourceId;
-  selectedPcAudioSource?: CompanionSourceId;
-  isPreviewMuted?: boolean;
-  isPreviewVideoOff?: boolean;
-  experimentalMobile1080pEnabled?: boolean;
-}
-
-interface RemoteAudioOutput {
-  stream: MediaStream;
-  audioTrackId: string;
-  source: MediaStreamAudioSourceNode;
-  gain: GainNode;
-  destination: MediaStreamAudioDestinationNode;
-  audioElement: HTMLAudioElement;
-}
-
-interface RemoteContextMenuState {
-  remoteId: string;
-  x: number;
-  y: number;
-}
-
-interface PriorityGridPlacement {
-  row: number;
-  column: number;
-  columnSpan: number;
-}
-
-type CallParticipantRecorderStopReason = 'final' | 'idle' | 'tracks-changed' | 'removed';
-
-interface CallParticipantActivitySample {
-  audioLevel: number;
-  videoMotion: number;
-  active: boolean;
-}
-
-interface CallParticipantActivityMonitor {
-  getSample: () => CallParticipantActivitySample;
-  cleanup: () => void;
-}
-
-interface CallParticipantRecorder {
-  participantId: string;
-  isLocal: boolean;
-  userData: Partial<ICharacter> | null;
-  participantMeta: CallParticipantMetadata | null;
-  volumePercent: number;
-  stream: MediaStream;
-  recorder: MediaRecorder;
-  chunks: Blob[];
-  mimeType: string;
-  startedAtMs: number;
-  stopping: boolean;
-  astralSegmentIndex: number | null;
-  astralFilePath: string | null;
-  astralFileUrl: string | null;
-  astralSize: number;
-  astralWriteChain: Promise<void>;
-  astralWriteFailed: boolean;
-  stopReason: CallParticipantRecorderStopReason;
-  idleMonitor: CallParticipantActivityMonitor | null;
-  idleMonitorInterval: any;
-  idleLastActivityAt: number;
-  idleTransitionInProgress: boolean;
-  pendingIdleStillFrame: Blob | null;
-  pendingIdleStillMimeType: string | null;
-}
-
-interface CallParticipantIdleState {
-  participantId: string;
-  isLocal: boolean;
-  userData: Partial<ICharacter> | null;
-  participantMeta: CallParticipantMetadata | null;
-  volumePercent: number;
-  stream: MediaStream;
-  tracksSignature: string;
-  startedAtMs: number;
-  blob: Blob | null;
-  mimeType: string;
-  mediaUrl: string | null;
-  mediaPath: string | null;
-  size: number;
-  activityMonitor: CallParticipantActivityMonitor | null;
-  activityMonitorInterval: any;
-  resuming: boolean;
-}
-
-interface CallPlaybackSource {
-  participant: SessionRecordingParticipantMedia;
-  video: HTMLVideoElement;
-  stream: MediaStream | null;
-  cleanup: Array<() => void>;
-  active: boolean;
-  ended: boolean;
-}
-
-interface RecordedCallParticipantSnapshot {
-  id: string;
-  isLocal: boolean;
-  userData: Partial<ICharacter> | null;
-  participantMeta: CallParticipantMetadata | null;
-  ping?: number;
-  volumePercent: number;
-  isSceneMainCharacter: boolean;
-  hasAudio: boolean;
-  hasVideo: boolean;
-}
-
-interface RecordedSpotifyState {
-  uri: string | null;
-  name: string;
-  artist: string;
-  image: string;
-  position: number;
-  playing: boolean;
-  paused: boolean;
-  contextUri: string | null;
-  shuffle: boolean;
-  volumePercent: number;
-}
-
-interface RecordedCallEnvironmentState {
-  activeColors: ThemeColors;
-  activeOverlayImage: string | null;
-  activeOverlayText: string | null;
-  activeTemporaryAtmosphereBackground: string | null;
-  sceneMainCharacterIds: string[];
-  isDmMode: boolean;
-  vttSession: VttSessionState;
-  spotify: RecordedSpotifyState | null;
-  spotifyRequests: any[];
-  participants: RecordedCallParticipantSnapshot[];
-}
-
+import { CallSessionRecordingWorker, MicTestRecordingWorker } from './call-recording.workers';
+import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
+import {
+  CALL_DEFAULT_PC_SOURCE,
+  CALL_DM_CHARACTER,
+  CALL_MAX_THEME_SYNC_PAYLOAD_BYTES,
+  CALL_MIC_TEST_MAX_DURATION_MS,
+  CALL_MICROPHONE_PROCESSING_OPTIONS,
+  CALL_REMOTE_VIDEO_QUALITY_OPTIONS,
+  CALL_TEMPORARY_DM_DURATIONS
+} from './call.constants';
+import {
+  buildCallMediaConstraints,
+  getRemoteVideoQualityPreference,
+  isMicrophoneProcessingMode,
+  isRemoteVideoQualityPreference,
+  normalizeRemoteVideoQualityLevel,
+  parseDeviceTypeParam,
+  preferenceToRemoteVideoQualityLevel,
+  readStoredCallMediaPreferences,
+  resolveAvailableDeviceId,
+  writeStoredCallMediaPreferences
+} from './call-media-preferences';
+import {
+  getPriorityGridMaxHeightPx,
+  getPriorityGridPlacement as getScenePriorityGridPlacement,
+  getSceneMainAreaHeightPx,
+  getSceneMainAreaHeightRatio,
+  getSceneMainGridRowCount,
+  getSceneMainRowHeightCss,
+  getSceneMainRowHeightPx,
+  getSceneSideRowCount,
+  getSceneSideRowHeightCss,
+  getSceneSideRowHeightPx,
+  getSceneSideTileMaxWidthCss,
+  measureSceneGridContent
+} from './call-scene-grid';
+import * as callDiagnostics from './call-diagnostics-formatters';
+import { CallRemoteAudioRouter } from './call-remote-audio-router';
+import {
+  cloneThemeColors,
+  compressThemeBackgroundImage,
+  getRevertedThemeBackground,
+  getTemporaryAtmosphereTheme,
+  isThemePayloadSizeError,
+  isThemeSyncPayloadTooLarge,
+  toCssImageValue
+} from './call-theme.helpers';
+import {
+  cloneSpotifyRequests,
+  createRecordedSpotifyState,
+  createRecordedSpotifyStateFromCurrent,
+  createRecordedSpotifyStateFromPlaybackState,
+  createRecordedSpotifyStateFromSyncPayload,
+  normalizeSpotifyVolume
+} from './call-recorded-spotify';
+import {
+  createCharacterSnapshot,
+  getDownloadableAstralPackagePath,
+  getImportedRecordingDurationMs,
+  getRecordingPlaybackDurationMs,
+  hasOptimizedAstralPackage,
+  hasPlayableCallRecording,
+  hasSameTrackSet,
+  isAstralPackageAwaitingOptimization,
+  normalizeParticipantPlaybackVolume,
+  toFiniteRecordingNumber
+} from './call-session-recording.helpers';
+export type { VttStopEvent, VttPlaybackEvent } from '../../../shared/models/pages/dashboard/call/call.model';
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, AsyncPipe, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent]
+  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
-  private static readonly mediaPreferencesStorageKey = 'd-d-platform.call.media-preferences';
-  private static readonly micTestMaxDurationMs = 8000;
-  private static readonly minSceneMainLayoutWidthPx = 720;
-  private static readonly minSceneMainLayoutHeightPx = 420;
-  private static readonly scenePriorityGridColumns = 12;
-  private static readonly sceneMainColumnsPerRow = 2;
-  private static readonly sceneSideColumnsPerRow = 4;
-  private static readonly sceneGridGapPx = 12;
-  private static readonly sceneMainMinAspectRatio = 1 / 1;
-  private static readonly sceneDefaultMainAreaRatio = 0.5;
-  private static readonly sceneExpandedMainAreaRatio = 0.8;
-  private static readonly maxThemeSyncPayloadBytes = 60_000;
-  private static readonly desktopVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 1920, max: 1920 },
-    height: { ideal: 1080, max: 1080 },
-    frameRate: { ideal: 30, max: 30 },
-    aspectRatio: { ideal: 16 / 9 }
-  };
-  private static readonly studioAudioConstraints: MediaTrackConstraints = {
-    echoCancellation: false,
-    noiseSuppression: false,
-    autoGainControl: false,
-    channelCount: { ideal: 2 },
-    sampleRate: { ideal: 48000 }
-  };
-  private static readonly processedAudioConstraints: MediaTrackConstraints = {
-    echoCancellation: true,
-    noiseSuppression: true,
-    autoGainControl: false,
-    channelCount: { ideal: 1 },
-    sampleRate: { ideal: 48000 }
-  };
-  private static readonly standardMobileVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 1280, max: 1280 },
-    height: { ideal: 720, max: 720 },
-    frameRate: { ideal: 30, max: 30 },
-    aspectRatio: { ideal: 16 / 9 }
-  };
-  private static readonly experimentalMobileVideoConstraints: MediaTrackConstraints = {
-    width: { ideal: 1920, max: 1920 },
-    height: { ideal: 1080, max: 1080 },
-    frameRate: { ideal: 30, max: 30 },
-    aspectRatio: { ideal: 16 / 9 }
-  };
-
   @Input() channelId!: string;
   @Input() character!: ICharacter;
 
@@ -287,22 +155,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   selectedOutputId: string = '';
   microphoneProcessingMode: MicrophoneProcessingMode = 'studio';
   remoteVideoQualityLevel: RemoteVideoQualityLevel = 1;
-  selectedPcVideoSource: CompanionSourceId = 'desktop-local';
-  selectedPcAudioSource: CompanionSourceId = 'desktop-local';
+  selectedPcVideoSource: CompanionSourceId = CALL_DEFAULT_PC_SOURCE;
+  selectedPcAudioSource: CompanionSourceId = CALL_DEFAULT_PC_SOURCE;
   companionDevices: CompanionDeviceOption[] = [];
-  readonly microphoneProcessingOptions: ReadonlyArray<{ value: MicrophoneProcessingMode; label: string }> = [
-    { value: 'studio', label: 'Studio mic' },
-    { value: 'processed', label: 'Voice processed' }
-  ];
-  readonly remoteVideoQualityOptions: ReadonlyArray<{
-    level: RemoteVideoQualityLevel;
-    value: RemoteVideoQualityPreference;
-    label: string;
-  }> = [
-    { level: 0, value: 'low', label: 'Data saver' },
-    { level: 1, value: 'medium', label: 'Balanced' },
-    { level: 2, value: 'high', label: 'Max detail' }
-  ];
+  readonly microphoneProcessingOptions = CALL_MICROPHONE_PROCESSING_OPTIONS;
+  readonly remoteVideoQualityOptions = CALL_REMOTE_VIDEO_QUALITY_OPTIONS;
   readonly supportsMicTestRecording = typeof MediaRecorder !== 'undefined';
   readonly supportsSessionRecording = typeof MediaRecorder !== 'undefined';
 
@@ -318,10 +175,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   localParticipantPing: number | undefined;
   localParticipantDiagnostics?: ParticipantMediaDiagnostics;
   micInputLevel = 0;
-  isMicTestRecording = false;
-  micTestDurationSeconds = 0;
-  micTestPlaybackUrl: string | null = null;
-  micTestError = '';
   isSessionRecording = false;
   sessionRecordingDurationSeconds = 0;
   sessionRecordingError = '';
@@ -383,61 +236,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isServerOwner: boolean = false;
   canManageTemporaryDms: boolean = false;
   isDmMode: boolean = false;
-  temporaryDmDurations: Array<{ duration: TemporaryDmDuration; label: string }> = [
-    { duration: 'day', label: 'DM for 1 day' },
-    { duration: 'week', label: 'DM for 1 week' },
-    { duration: 'month', label: 'DM for 1 month' },
-    { duration: 'permanent', label: 'DM permanently' }
-  ];
-  dmCharacter: ICharacter = {
-    _id: 'dm-character-id',
-    ownerId: '',
-    servers: [],
-    name: 'DM',
-    race: 'Dungeon Master',
-    icon: null,
-    baseStats: { strength: 0, dexterity: 0, constitution: 0, intelligence: 0, wisdom: 0, charisma: 0 },
-    classes: [{ className: 'Dungeon Master', level: 20 }]
-  };
+  temporaryDmDurations: Array<{ duration: TemporaryDmDuration; label: string }> = CALL_TEMPORARY_DM_DURATIONS;
+  dmCharacter: ICharacter = CALL_DM_CHARACTER;
 
-  private streamSub!: Subscription;
-  private spotifySyncSub!: Subscription;
-  private spotifyActionSub!: Subscription;
-  private spotifyStateRequestSub!: Subscription;
-  private spotifyRequestSub!: Subscription;
+  private readonly subscriptions = new Subscription();
   private syncDebounceTimer: any = null;
   private isSyncing: boolean = false;
-
-
-  private themeSyncSub!: Subscription;
-  private pinnedThemesSub!: Subscription;
-  private vttSub!: Subscription;
-  private overlaySub!: Subscription;
-  private overlayTextSub!: Subscription;
-  private temporaryAtmosphereBackgroundSub!: Subscription;
-  private serverDetailsSub!: Subscription;
-  private callKickedSub!: Subscription;
-  private companionDevicesSub!: Subscription;
-  private selectedVideoSourceSub!: Subscription;
-  private selectedAudioSourceSub!: Subscription;
-  private remoteVideoQualitySub!: Subscription;
-  private participantVolumesSub!: Subscription;
-  private sceneMainCharactersSub!: Subscription;
-  private sessionRecordingStateSub!: Subscription;
-  private sessionRecordingLastSub!: Subscription;
-  private sessionPlaybackSub!: Subscription;
-  private astralPlaybackDropSub!: Subscription;
-  readonly supportsAudioOutputSelection = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
-  readonly supportsRemoteAudioGain = typeof window !== 'undefined' && !!this.getAudioContextConstructor();
+  private readonly remoteAudioRouter = new CallRemoteAudioRouter(() => this.selectedOutputId);
+  readonly supportsAudioOutputSelection = this.remoteAudioRouter.supportsAudioOutputSelection;
+  readonly supportsRemoteAudioGain = this.remoteAudioRouter.supportsRemoteAudioGain;
 
   private isComponentDestroying = false;
   private lastAutoSelectedCompanionVideoId: string | null = null;
-  private micTestRecorder: MediaRecorder | null = null;
-  private micTestRecorderStream: MediaStream | null = null;
-  private micTestChunks: Blob[] = [];
-  private micTestDurationInterval: any;
-  private micTestAutoStopTimeout: any;
-  private micTestDiscardOnStop = false;
+  private micTestRecordingWorker!: MicTestRecordingWorker;
   private micLevelAudioContext: AudioContext | null = null;
   private micLevelAnalyser: AnalyserNode | null = null;
   private micLevelSource: MediaStreamAudioSourceNode | null = null;
@@ -445,18 +256,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private micLevelData: Uint8Array | null = null;
   private micLevelInterval: any;
   private monitoredMicTrack: MediaStreamTrack | null = null;
-  private remoteAudioContext: AudioContext | null = null;
-  private remoteAudioOutputs = new Map<string, RemoteAudioOutput>();
-  private callRecordingStartedAt = 0;
-  private callRecordingDurationInterval: any;
-  private callRecordingDiscardOnStop = false;
-  private callParticipantRecorders = new Map<string, CallParticipantRecorder>();
-  private callParticipantIdleStates = new Map<string, CallParticipantIdleState>();
-  private stoppingCallParticipantRecorders = 0;
-  private finalizingSessionRecording = false;
-  private astralRecordingSessionId: string | null = null;
-  private astralParticipantSegmentCounters = new Map<string, number>();
-  astralRecordingPath: string | null = null;
+  private callRecordingWorker!: CallSessionRecordingWorker;
   private callPlaybackRecordingId: string | null = null;
   private callPlaybackEnvironmentEventIndex = 0;
   private callPlaybackLastTimeMs = 0;
@@ -482,11 +282,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private visiblePlaybackSyncToken = 0;
   private lastAppliedPlaybackSpotifySignature = '';
   private isImportingAstralPlayback = false;
-  private readonly participantIdleThresholdMs = 60000;
-  private readonly participantIdleCheckIntervalMs = 250;
-  private readonly participantIdleAudioRmsThreshold = 0.012;
-  private readonly participantIdleVideoMotionThreshold = 7;
-  private readonly participantStillFrameMimeType = 'image/webp';
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
   private readonly handleDeviceChangeBound = () => {
@@ -496,7 +291,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   constructor(
     private videoService: Video,
     private tabService: TabService,
-    public spotify: SpotifyService,
+    public spotify: SoundCloudService,
     private route: ActivatedRoute,
     private cdr: ChangeDetectorRef,
     public themeService: ThemeService,
@@ -511,15 +306,66 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   ) {
     this.activeColors = this.themeService.getColors();
     this.rememberValidThemeBackground(this.activeColors);
+    this.micTestRecordingWorker = new MicTestRecordingWorker({
+      maxDurationMs: CALL_MIC_TEST_MAX_DURATION_MS,
+      getActiveMicTrack: () => this.getActiveMicTrack(),
+      getAudioElement: () => this.micTestAudio?.nativeElement ?? null,
+      applyAudioOutput: () => this.applyAudioOutputToAllMedia(),
+      requestChangeDetection: () => this.cdr.detectChanges()
+    });
+    this.callRecordingWorker = new CallSessionRecordingWorker(
+      this.sessionRecording,
+      this.astralRecording,
+      this.astralOptimizer,
+      {
+        getParticipants: () => this.getCallRecordingParticipantsForStreams(),
+        getCallRoomId: () => this.getVttRoomId(),
+        isPlaybackMode: () => this.isCallPlaybackMode,
+        setError: message => {
+          this.sessionRecordingError = message;
+        },
+        onDurationChange: durationSeconds => {
+          this.sessionRecordingDurationSeconds = durationSeconds;
+        },
+        onRecordingReady: (recording, packagedAsAstral) => {
+          this.recordedSession = recording;
+          this.snackBar.open(
+            packagedAsAstral
+              ? 'Call and VTT recording ready for playback. Optimizing .astral download.'
+              : 'Call and VTT recording ready for playback.',
+            'Close',
+            { duration: 3000 }
+          );
+        },
+        requestChangeDetection: () => this.cdr.detectChanges()
+      }
+    );
   }
 
   async ngOnInit() {
-    this.route.queryParams.subscribe(params => {
-      if (params['access_token']) {
+    this.bindRouteParams();
+    this.bindServerState();
+    await this.initializeMediaState();
+    await this.restoreLiveCallOrStartPreview();
+    this.bindRemoteStreamState();
+    this.bindSoundCloudState();
+    this.bindAtmosphereState();
+    this.bindDeviceRoutingState();
+    this.bindSessionRecordingState();
+
+    this.checkServerOwner();
+    this.cdr.detectChanges();
+  }
+
+  private bindRouteParams() {
+    this.subscriptions.add(this.route.queryParams.subscribe(params => {
+      if (params['soundcloud_access_token']) {
+        this.spotify.setTokens(params['soundcloud_access_token'], params['soundcloud_refresh_token']);
+      } else if (params['access_token']) {
         this.spotify.setTokens(params['access_token'], params['refresh_token']);
       }
 
-      const forcedDeviceType = this.parseDeviceTypeParam(params['deviceType']);
+      const forcedDeviceType = parseDeviceTypeParam(params['deviceType']);
       if (forcedDeviceType) {
         this.deviceService.setDeviceTypeOverride(forcedDeviceType);
       } else if (params['clearDeviceTypeOverride'] === 'true') {
@@ -527,17 +373,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
-    });
-    this.serverDetailsSub = this.serverService.getServerDetailsObservable().subscribe(() => {
+    }));
+  }
+
+  private bindServerState() {
+    this.subscriptions.add(this.serverService.getServerDetailsObservable().subscribe(() => {
       this.checkServerOwner();
       this.cdr.detectChanges();
-    });
+    }));
+  }
 
+  private async initializeMediaState() {
     this.isMobileBrowser = this.deviceService.getDeviceType() === 'mobile';
     this.isTauriDesktop = await this.astralRecording.isAvailable().catch(() => false);
     this.microphoneProcessingMode = this.isMobileBrowser ? 'processed' : 'studio';
     await this.restoreStoredMediaPreferences();
-    this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(
+    this.remoteVideoQualityLevel = preferenceToRemoteVideoQualityLevel(
       this.videoService.getRemoteVideoQualityPreference()
     );
     this.maxSceneMainCharacters = this.videoService.getMaxSceneMainCharacters();
@@ -547,7 +398,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.mobileMediaReady = true;
       navigator.mediaDevices?.addEventListener?.('devicechange', this.handleDeviceChangeBound);
     }
+  }
 
+  private async restoreLiveCallOrStartPreview() {
     const existingStream = this.videoService.getLocalStream();
     if (existingStream && this.videoService.currentChannelId === this.channelId) {
       this.localStream = existingStream;
@@ -566,8 +419,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         await this.startPreview();
       }
     }
+  }
 
-    this.streamSub = this.videoService.remoteStreams$.subscribe(streams => {
+  private bindRemoteStreamState() {
+    this.subscriptions.add(this.videoService.remoteStreams$.subscribe(streams => {
       const localParticipantData = streams.find(p => p.isLocal);
       if (localParticipantData) {
         this.localParticipantPing = localParticipantData.ping;
@@ -576,7 +431,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       this.refreshVisibleRemoteStreams(streams);
       this.recordCallParticipantsSnapshotIfChanged();
-      this.syncCallParticipantRecorders();
+      this.callRecordingWorker.syncParticipants();
       if (
         this.remoteContextMenu &&
         !this.isContextMenuParticipantAvailable(this.remoteContextMenu.remoteId)
@@ -590,165 +445,168 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.bindVisibleRemoteVideos();
         void this.applyAudioOutputToAllMedia();
       });
-    });
+    }));
+  }
 
-    // ---------------------------------------------------------
-// 1. LISTENER SYNC LOGIC (Strict DJ Mode & Anti-Bounce)
-// ---------------------------------------------------------
-    this.spotifySyncSub = this.videoService.spotifySync$.subscribe(async (state) => {
-      if (!state.uri || !this.localStream) return;
+  private bindSoundCloudState() {
+    this.subscriptions.add(this.videoService.spotifySync$.subscribe(state => {
+      void this.applyIncomingSoundCloudSync(state);
+    }));
+    this.subscriptions.add(this.spotify.syncAction$.subscribe(action => {
+      this.handleLocalSoundCloudAction(action);
+    }));
+    this.subscriptions.add(this.videoService.spotifyStateRequest$.subscribe(() => {
+      void this.broadcastCurrentSoundCloudState();
+    }));
+    this.subscriptions.add(this.videoService.spotifyRequest$.subscribe(req => {
+      this.addSoundCloudRequest(req);
+    }));
+  }
 
-      if (this.isServerOwner) {
-        // HOST: Ignore your own auto-polls if you recently clicked something (prevents looping)
-        if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
+  private async applyIncomingSoundCloudSync(state: any) {
+    if (!state.uri || !this.localStream) return;
 
-        // HOST: Completely ignore manual playback commands from standard users
-        if (state.source === 'manual' && state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
-      } else {
-        // CLIENT: Only obey the Host
-        // Drop the command if it was not stamped by the server owner or active temporary DM.
-        if (state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
+    if (this.isServerOwner) {
+      if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
+      if (state.source === 'manual' && state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
+    } else {
+      if (state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
+      if (this.isSyncing) return;
+      this.isSyncing = true;
+    }
 
-        // Anti-bounce lock: Prevent rapid shuffling while Spotify API is loading the last track
-        if (this.isSyncing) return;
-        this.isSyncing = true;
+    const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
+    if (recordedSpotifyState) {
+      this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+    }
+
+    try {
+      const currentState = await this.spotify.getPlaybackState();
+      const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
+      const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
+      const adjustedPosition = state.position + (state.paused ? 0 : drift);
+      const isDifferentPosition = !currentState ||
+        Math.abs(currentState.position - adjustedPosition) > 2000;
+      const isDifferentStatus = currentState?.paused !== state.paused;
+      const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
+
+      if (isDifferentShuffle) {
+        await this.spotify.toggleShuffle(state.shuffle, true);
       }
 
-      const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
+      if (state.command === 'seek') {
+        if (currentState?.track_window?.current_track?.uri === state.uri) {
+          await this.spotify.seek(adjustedPosition, true);
+        }
+      } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
+        await this.applySoundCloudPlaybackSync(state, adjustedPosition, isDifferentTrack, isDifferentPosition);
+      }
+    } finally {
+      if (!this.isServerOwner) {
+        setTimeout(() => this.isSyncing = false, 1500);
+      }
+    }
+  }
+
+  private async applySoundCloudPlaybackSync(
+    state: any,
+    adjustedPosition: number,
+    isDifferentTrack: boolean,
+    isDifferentPosition: boolean
+  ) {
+    if (!state.paused) {
+      if (isDifferentTrack || isDifferentPosition) {
+        await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
+      } else {
+        await this.spotify.togglePlay(true);
+      }
+    } else if (isDifferentTrack) {
+      await this.spotify.play(state.uri, state.position, true, state.contextUri);
+      setTimeout(() => this.spotify.pause(true), 1000);
+    } else {
+      await this.spotify.pause(true);
+    }
+
+    if (!isDifferentTrack && isDifferentPosition && !state.paused) {
+      await this.spotify.seek(adjustedPosition, true);
+    }
+  }
+
+  private handleLocalSoundCloudAction(action: any) {
+    if (!this.localStream) return;
+
+    if (this.isServerOwner) {
+      if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
+
+      this.syncDebounceTimer = setTimeout(() => {
+        const payload = { ...action.data, hostId: this.character.ownerId };
+        const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
+        if (recordedSpotifyState) {
+          this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+        }
+        this.videoService.sendSpotifyCommand(action.command, payload, action.source);
+      }, 400);
+      return;
+    }
+
+    if (action.command === 'play' && action.data?.uri) {
+      this.videoService.sendSpotifyRequest({
+        uri: action.data.uri,
+        name: action.data.name || 'Requested Song',
+        artist: action.data.artist || 'Unknown Artist',
+        image: action.data.image || ''
+      }, this.character.name);
+    }
+  }
+
+  private async broadcastCurrentSoundCloudState() {
+    if (!this.localStream || !this.isServerOwner) {
+      return;
+    }
+
+    const state = await this.spotify.getPlaybackState();
+    if (state && state.track_window?.current_track) {
+      const payload = {
+        uri: state.track_window.current_track.uri,
+        position: state.position,
+        paused: state.paused,
+        playing: !state.paused,
+        contextUri: state.context?.uri,
+        shuffle: state.shuffle_state,
+        hostId: this.character.ownerId
+      };
+
+      this.videoService.sendSpotifyCommand('sync', payload, 'manual');
+      const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
       if (recordedSpotifyState) {
         this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
       }
+    }
 
-      try {
-        const currentState = await this.spotify.getPlaybackState();
-        const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
-        const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
-        const adjustedPosition = state.position + (state.paused ? 0 : drift);
+    if (this.activeColors) {
+      this.safeSendThemeUpdate(this.activeColors);
+    }
+  }
 
-        // Tightened sync threshold from 5s to 2s
-        const isDifferentPosition = !currentState || Math.abs(currentState.position - adjustedPosition) > 2000;
+  private addSoundCloudRequest(req: any) {
+    if (!this.isServerOwner) {
+      return;
+    }
 
-        const isDifferentStatus = currentState?.paused !== state.paused;
-        const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
+    const isDuplicate = this.spotifyRequests.some(r =>
+      r.uri === req.uri && r.fromName === req.fromName
+    );
+    if (isDuplicate) {
+      return;
+    }
 
-        if (isDifferentShuffle) {
-          await this.spotify.toggleShuffle(state.shuffle, true);
-        }
+    this.spotifyRequests.push(req);
+    this.recordSpotifyRequestsSnapshot();
+    this.cdr.detectChanges();
+  }
 
-        if (state.command === 'seek') {
-          if (currentState?.track_window?.current_track?.uri === state.uri) {
-            await this.spotify.seek(adjustedPosition, true);
-          }
-        } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
-          if (!state.paused) {
-            if (isDifferentTrack || isDifferentPosition) {
-              await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
-            } else {
-              await this.spotify.togglePlay(true);
-            }
-          } else {
-            if (isDifferentTrack) {
-              await this.spotify.play(state.uri, state.position, true, state.contextUri);
-              setTimeout(() => this.spotify.pause(true), 1000);
-            } else {
-              await this.spotify.pause(true);
-            }
-          }
-
-          if (!isDifferentTrack && isDifferentPosition && !state.paused) {
-            await this.spotify.seek(adjustedPosition, true);
-          }
-        }
-      } finally {
-        // Release the lock after allowing the Spotify API time to settle
-        if (!this.isServerOwner) {
-          setTimeout(() => this.isSyncing = false, 1500);
-        }
-      }
-    });
-
-
-// ---------------------------------------------------------
-// 2. ACTION INTERCEPTOR (Debounce Host / Send Requests)
-// ---------------------------------------------------------
-    this.spotifyActionSub = this.spotify.syncAction$.subscribe((action: any) => {
-      if (!this.localStream) return;
-
-      if (this.isServerOwner) {
-        // HOST: Debounce outbound network commands to prevent rapid-click API fighting
-        if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
-
-        this.syncDebounceTimer = setTimeout(() => {
-          // Stamp the payload with the Host ID so clients know it is authoritative
-          const payload = { ...action.data, hostId: this.character.ownerId };
-          const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
-          if (recordedSpotifyState) {
-            this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
-          }
-          this.videoService.sendSpotifyCommand(action.command, payload, action.source);
-        }, 400); // 400ms debounce
-
-      } else {
-        // CLIENT: Intercept play commands and submit them as Requests instead
-        if (action.command === 'play' && action.data?.uri) {
-            this.videoService.sendSpotifyRequest({
-              uri: action.data.uri,
-              name: action.data.name || 'Requested Song',
-              artist: action.data.artist || 'Unknown Artist',
-              image: action.data.image || '',
-            }, this.character.name);
-        }
-      }
-    });
-
-
-// ---------------------------------------------------------
-// 3. STATE REQUEST (Stamp Manual Broadcasts)
-// ---------------------------------------------------------
-    this.spotifyStateRequestSub = this.videoService.spotifyStateRequest$.subscribe(async (req) => {
-      if (this.localStream && this.isServerOwner) {
-        const state = await this.spotify.getPlaybackState();
-        if (state && state.track_window?.current_track) {
-          this.videoService.sendSpotifyCommand('sync', {
-            uri: state.track_window.current_track.uri,
-            position: state.position,
-            paused: state.paused,
-            playing: !state.paused,
-            contextUri: state.context?.uri,
-            shuffle: state.shuffle_state,
-            hostId: this.character.ownerId // Embed host ID for validation
-          }, 'manual');
-          const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload({
-            uri: state.track_window.current_track.uri,
-            position: state.position,
-            paused: state.paused,
-            playing: !state.paused,
-            contextUri: state.context?.uri,
-            shuffle: state.shuffle_state
-          });
-          if (recordedSpotifyState) {
-            this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
-          }
-        }
-
-        if (this.activeColors) {
-          this.safeSendThemeUpdate(this.activeColors);
-        }
-      }
-    });
-
-    this.spotifyRequestSub = this.videoService.spotifyRequest$.subscribe(req => {
-      if (this.isServerOwner) {
-        // Prevent duplicates
-        if (!this.spotifyRequests.some(r => r.uri === req.uri && r.fromName === req.fromName)) {
-           this.spotifyRequests.push(req);
-           this.recordSpotifyRequestsSnapshot();
-           this.cdr.detectChanges();
-        }
-      }
-    });
-
-    this.themeSyncSub = this.videoService.themeSync$.subscribe(colors => {
+  private bindAtmosphereState() {
+    this.subscriptions.add(this.videoService.themeSync$.subscribe(colors => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
@@ -756,14 +614,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.rememberValidThemeBackground(colors);
       this.themeService.applyTheme(colors, false); // DO NOT save call atmosphere to local player preference
       this.recordCallEnvironmentEvent('theme-sync', colors);
-    });
+    }));
 
-    this.pinnedThemesSub = this.themeService.pinnedThemes$.subscribe(themes => {
+    this.subscriptions.add(this.themeService.pinnedThemes$.subscribe(themes => {
       this.pinnedThemes = themes;
       this.cdr.detectChanges();
-    });
+    }));
 
-    this.vttSub = this.videoService.vttSession$.subscribe(session => {
+    this.subscriptions.add(this.videoService.vttSession$.subscribe(session => {
       const wasActive = this.vttSession.active;
       const recordedSession = this.createRecordedVttSessionState(session, this.vttSession);
       this.vttSession = session;
@@ -774,69 +632,77 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         if (this.vttNotificationTimeout) clearTimeout(this.vttNotificationTimeout);
       }
       this.recordCallEnvironmentEvent('vtt-session', recordedSession);
-    });
+    }));
 
-    this.overlaySub = this.videoService.overlayImage$.subscribe(url => {
+    this.subscriptions.add(this.videoService.overlayImage$.subscribe(url => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
       this.activeOverlayImage = url;
       this.recordCallEnvironmentEvent('overlay-image', { url });
       this.cdr.detectChanges();
-    });
+    }));
 
-    this.overlayTextSub = this.videoService.overlayText$.subscribe(text => {
+    this.subscriptions.add(this.videoService.overlayText$.subscribe(text => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
       this.activeOverlayText = text;
       this.recordCallEnvironmentEvent('overlay-text', { text });
       this.cdr.detectChanges();
-    });
+    }));
 
-    this.temporaryAtmosphereBackgroundSub = this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
+    this.subscriptions.add(this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
       this.activeTemporaryAtmosphereBackground = url;
       this.recordCallEnvironmentEvent('temporary-atmosphere-background', { url });
       this.applyTemporaryAtmosphereBackground(url);
-    });
+    }));
+  }
 
-    this.callKickedSub = this.videoService.callKicked$.subscribe(async reason => {
+  private bindDeviceRoutingState() {
+    this.subscriptions.add(this.videoService.callKicked$.subscribe(async reason => {
       await this.handleCallKickout(reason);
-    });
-    this.companionDevicesSub = this.videoService.companionDevices$.subscribe(devices => {
+    }));
+
+    this.subscriptions.add(this.videoService.companionDevices$.subscribe(devices => {
       const previousCompanionIds = new Set(this.companionDevices.map(device => device.identity));
       this.companionDevices = devices;
       void this.autoSelectCompanionCamera(devices, previousCompanionIds);
       this.cdr.detectChanges();
-    });
-    this.selectedVideoSourceSub = this.videoService.selectedVideoSource$.subscribe(sourceId => {
+    }));
+
+    this.subscriptions.add(this.videoService.selectedVideoSource$.subscribe(sourceId => {
       this.selectedPcVideoSource = sourceId;
       if (sourceId === 'desktop-local') {
         this.lastAutoSelectedCompanionVideoId = null;
       }
       this.updateLocalVideoDisplay();
       this.cdr.detectChanges();
-    });
-    this.selectedAudioSourceSub = this.videoService.selectedAudioSource$.subscribe(sourceId => {
+    }));
+
+    this.subscriptions.add(this.videoService.selectedAudioSource$.subscribe(sourceId => {
       this.selectedPcAudioSource = sourceId;
       this.cdr.detectChanges();
-    });
-    this.remoteVideoQualitySub = this.videoService.remoteVideoQualityPreference$.subscribe(preference => {
-      this.remoteVideoQualityLevel = this.preferenceToRemoteVideoQualityLevel(preference);
+    }));
+
+    this.subscriptions.add(this.videoService.remoteVideoQualityPreference$.subscribe(preference => {
+      this.remoteVideoQualityLevel = preferenceToRemoteVideoQualityLevel(preference);
       this.cdr.detectChanges();
-    });
-    this.participantVolumesSub = this.videoService.participantVolumes$.subscribe(() => {
+    }));
+
+    this.subscriptions.add(this.videoService.participantVolumes$.subscribe(() => {
       this.remoteStreams = this.remoteStreams.map(remote => ({
         ...remote,
         volumePercent: this.videoService.getParticipantVolume(remote.id)
       }));
       this.applyRemoteVolumes();
       this.cdr.detectChanges();
-    });
-    this.sceneMainCharactersSub = this.videoService.sceneMainCharacters$.subscribe(state => {
+    }));
+
+    this.subscriptions.add(this.videoService.sceneMainCharacters$.subscribe(state => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
@@ -844,35 +710,35 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.refreshSceneMainCharacterFlags();
       this.recordCallEnvironmentEvent('scene-main-characters', state);
       this.cdr.detectChanges();
-    });
-    this.sessionRecordingStateSub = this.sessionRecording.recordingState$.subscribe(state => {
+    }));
+  }
+
+  private bindSessionRecordingState() {
+    this.subscriptions.add(this.sessionRecording.recordingState$.subscribe(state => {
       this.isSessionRecording = state.active;
       this.sessionRecordingDurationSeconds = Math.floor(state.elapsedMs / 1000);
       this.cdr.detectChanges();
-    });
-    this.sessionRecordingLastSub = this.sessionRecording.lastRecording$.subscribe(recording => {
+    }));
+
+    this.subscriptions.add(this.sessionRecording.lastRecording$.subscribe(recording => {
       this.recordedSession = recording;
       this.cdr.detectChanges();
-    });
-    this.sessionPlaybackSub = this.sessionRecording.playbackState$.subscribe(state => {
+    }));
+
+    this.subscriptions.add(this.sessionRecording.playbackState$.subscribe(state => {
       this.applyCallPlaybackState(state);
-    });
-    this.astralPlaybackDropSub = this.astralPlaybackDrop.requests$.subscribe(request => {
+    }));
+
+    this.subscriptions.add(this.astralPlaybackDrop.requests$.subscribe(request => {
       if (request.channelId !== this.channelId) {
         return;
       }
 
       this.promptAstralPlaybackRequest(request);
-    });
-
-    this.checkServerOwner();
-    this.cdr.detectChanges();
-
-
-
+    }));
   }
 
-  checkServerOwner(){
+  checkServerOwner() {
     const server = this.serverService.getCurrentServer();
     const serverOwnerId = server ? this.extractOwnerId(server) : '';
     const currentUserId = this.character?.ownerId || '';
@@ -913,49 +779,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return this.serverService.canUserDm(this.serverService.getCurrentServer(), userId);
   }
 
-  private buildVideoConstraints(): MediaTrackConstraints {
-    const baseConstraints = this.getPreferredVideoConstraints();
-
-    if (this.selectedVideoId) {
-      return {
-        ...baseConstraints,
-        deviceId: { exact: this.selectedVideoId }
-      };
-    }
-
-    return baseConstraints;
-  }
-
-  private getPreferredVideoConstraints(): MediaTrackConstraints {
-    if (this.isMobileBrowser) {
-      return this.experimentalMobile1080pEnabled
-        ? Call.experimentalMobileVideoConstraints
-        : Call.standardMobileVideoConstraints;
-    }
-
-    return Call.desktopVideoConstraints;
-  }
-
-  private buildAudioConstraints(): MediaTrackConstraints {
-    const baseConstraints = this.microphoneProcessingMode === 'studio'
-      ? Call.studioAudioConstraints
-      : Call.processedAudioConstraints;
-
-    if (this.selectedAudioId) {
-      return {
-        ...baseConstraints,
-        deviceId: { exact: this.selectedAudioId }
-      };
-    }
-
-    return baseConstraints;
-  }
-
   private buildMediaConstraints(): MediaStreamConstraints {
-    return {
-      video: this.buildVideoConstraints(),
-      audio: this.buildAudioConstraints()
-    };
+    return buildCallMediaConstraints({
+      isMobileBrowser: this.isMobileBrowser,
+      experimentalMobile1080pEnabled: this.experimentalMobile1080pEnabled,
+      selectedVideoId: this.selectedVideoId,
+      selectedAudioId: this.selectedAudioId,
+      microphoneProcessingMode: this.microphoneProcessingMode
+    });
   }
 
   async loadDevices() {
@@ -968,9 +799,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.audioDevices = devices.filter(d => d.kind === 'audioinput');
       this.audioOutputDevices = devices.filter(d => d.kind === 'audiooutput');
 
-      this.selectedVideoId = this.resolveAvailableDeviceId(this.videoDevices, this.selectedVideoId);
-      this.selectedAudioId = this.resolveAvailableDeviceId(this.audioDevices, this.selectedAudioId);
-      this.selectedOutputId = this.resolveAvailableDeviceId(this.audioOutputDevices, this.selectedOutputId);
+      this.selectedVideoId = resolveAvailableDeviceId(this.videoDevices, this.selectedVideoId);
+      this.selectedAudioId = resolveAvailableDeviceId(this.audioDevices, this.selectedAudioId);
+      this.selectedOutputId = resolveAvailableDeviceId(this.audioOutputDevices, this.selectedOutputId);
       this.mobileMediaReady = true;
       this.mobileMediaMessage = '';
       await this.applyAudioOutputToAllMedia();
@@ -1030,6 +861,76 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.onDeviceChange();
   }
 
+  get selectedVideoInputRoute(): string {
+    return this.selectedPcVideoSource === CALL_DEFAULT_PC_SOURCE
+      ? this.getLocalInputRouteValue(this.selectedVideoId)
+      : this.getCompanionInputRouteValue(this.selectedPcVideoSource);
+  }
+
+  get selectedAudioInputRoute(): string {
+    return this.selectedPcAudioSource === CALL_DEFAULT_PC_SOURCE
+      ? this.getLocalInputRouteValue(this.selectedAudioId)
+      : this.getCompanionInputRouteValue(this.selectedPcAudioSource);
+  }
+
+  getLocalInputRouteValue(deviceId: string): string {
+    return `local:${deviceId}`;
+  }
+
+  getCompanionInputRouteValue(sourceId: CompanionSourceId): string {
+    return `companion:${sourceId}`;
+  }
+
+  async changeVideoInputRoute(routeValue: string) {
+    if (routeValue.startsWith('companion:')) {
+      await this.changePcVideoSource(routeValue.slice('companion:'.length));
+      return;
+    }
+
+    this.selectedVideoId = routeValue.startsWith('local:')
+      ? routeValue.slice('local:'.length)
+      : routeValue;
+    await this.onDeviceChange();
+    if (this.selectedPcVideoSource !== CALL_DEFAULT_PC_SOURCE) {
+      await this.changePcVideoSource(CALL_DEFAULT_PC_SOURCE);
+    }
+  }
+
+  async changeAudioInputRoute(routeValue: string) {
+    if (routeValue.startsWith('companion:')) {
+      await this.changePcAudioSource(routeValue.slice('companion:'.length));
+      return;
+    }
+
+    this.selectedAudioId = routeValue.startsWith('local:')
+      ? routeValue.slice('local:'.length)
+      : routeValue;
+    await this.onDeviceChange();
+    if (this.selectedPcAudioSource !== CALL_DEFAULT_PC_SOURCE) {
+      await this.changePcAudioSource(CALL_DEFAULT_PC_SOURCE);
+    }
+  }
+
+  get isMicTestRecording(): boolean {
+    return this.micTestRecordingWorker.isRecording;
+  }
+
+  get micTestDurationSeconds(): number {
+    return this.micTestRecordingWorker.durationSeconds;
+  }
+
+  get micTestPlaybackUrl(): string | null {
+    return this.micTestRecordingWorker.playbackUrl;
+  }
+
+  get micTestError(): string {
+    return this.micTestRecordingWorker.error;
+  }
+
+  get astralRecordingPath(): string | null {
+    return this.callRecordingWorker.astralRecordingPath;
+  }
+
   get hasMicTestSource(): boolean {
     const track = this.getActiveMicTrack();
     return !!track && track.readyState === 'live';
@@ -1069,134 +970,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   startMicTestRecording() {
-    if (this.isMicTestRecording) {
-      return;
-    }
-
-    this.micTestError = '';
-    if (!this.supportsMicTestRecording) {
-      this.micTestError = 'Mic test unsupported here';
-      return;
-    }
-
-    const track = this.getActiveMicTrack();
-    if (!track || track.readyState !== 'live') {
-      this.micTestError = 'Microphone unavailable';
-      return;
-    }
-
-    if (!track.enabled) {
-      this.micTestError = 'Unmute microphone to test';
-      return;
-    }
-
-    this.clearMicTestSample();
-    this.stopMicTestRecording(true);
-    this.micTestDiscardOnStop = false;
-    this.micTestChunks = [];
-    this.micTestRecorderStream = new MediaStream([track]);
-
-    try {
-      const mimeType = this.getSupportedMicTestMimeType();
-      this.micTestRecorder = mimeType
-        ? new MediaRecorder(this.micTestRecorderStream, { mimeType })
-        : new MediaRecorder(this.micTestRecorderStream);
-    } catch (error) {
-      console.error('Failed to start mic test recorder', error);
-      this.micTestError = 'Mic test unavailable';
-      this.cleanupMicTestRecorder();
-      return;
-    }
-
-    this.micTestRecorder.ondataavailable = event => {
-      if (event.data.size > 0) {
-        this.micTestChunks.push(event.data);
-      }
-    };
-
-    this.micTestRecorder.onerror = event => {
-      console.error('Mic test recorder error', event);
-      this.micTestError = 'Mic test failed';
-      this.cleanupMicTestRecorder();
-      this.cdr.detectChanges();
-    };
-
-    this.micTestRecorder.onstop = () => {
-      const discardSample = this.micTestDiscardOnStop;
-      const chunks = [...this.micTestChunks];
-      const mimeType = this.micTestRecorder?.mimeType || this.getSupportedMicTestMimeType() || 'audio/webm';
-
-      this.cleanupMicTestRecorder();
-
-      if (!discardSample) {
-        if (chunks.length > 0) {
-          this.micTestPlaybackUrl = URL.createObjectURL(new Blob(chunks, { type: mimeType }));
-          setTimeout(() => {
-            void this.applyAudioOutputToAllMedia();
-            const audioElement = this.micTestAudio?.nativeElement;
-            if (audioElement) {
-              audioElement.load();
-              void audioElement.play().catch(() => undefined);
-            }
-          });
-        } else {
-          this.micTestError = 'No audio captured';
-        }
-      }
-
-      this.cdr.detectChanges();
-    };
-
-    try {
-      this.micTestRecorder.start(250);
-    } catch (error) {
-      console.error('Failed to run mic test recorder', error);
-      this.micTestError = 'Mic test failed';
-      this.cleanupMicTestRecorder();
-      return;
-    }
-
-    this.isMicTestRecording = true;
-    this.micTestDurationSeconds = 0;
-    const startedAt = Date.now();
-    this.micTestDurationInterval = setInterval(() => {
-      this.micTestDurationSeconds = Math.min(
-        Math.ceil((Date.now() - startedAt) / 1000),
-        Math.ceil(Call.micTestMaxDurationMs / 1000)
-      );
-      this.cdr.detectChanges();
-    }, 200);
-    this.micTestAutoStopTimeout = setTimeout(() => {
-      this.stopMicTestRecording();
-    }, Call.micTestMaxDurationMs);
+    this.micTestRecordingWorker.start();
   }
 
   stopMicTestRecording(discardSample: boolean = false) {
-    if (!this.micTestRecorder) {
-      return;
-    }
-
-    this.micTestDiscardOnStop = this.micTestDiscardOnStop || discardSample;
-    this.clearMicTestTimers();
-    if (this.micTestRecorder.state !== 'inactive') {
-      this.micTestRecorder.stop();
-    } else {
-      this.cleanupMicTestRecorder();
-    }
+    this.micTestRecordingWorker.stop(discardSample);
   }
 
   clearMicTestSample() {
-    const audioElement = this.micTestAudio?.nativeElement;
-    if (audioElement) {
-      audioElement.pause();
-      audioElement.removeAttribute('src');
-      audioElement.load();
-    }
-
-    if (this.micTestPlaybackUrl) {
-      URL.revokeObjectURL(this.micTestPlaybackUrl);
-      this.micTestPlaybackUrl = null;
-    }
+    this.micTestRecordingWorker.clearSample();
   }
 
   private getActiveMicTrack(): MediaStreamTrack | null {
@@ -1205,48 +987,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       || null;
   }
 
-  private getSupportedMicTestMimeType(): string | null {
-    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
-      return null;
-    }
-
-    const supportedMimeType = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/mp4',
-      'audio/ogg;codecs=opus'
-    ].find(type => MediaRecorder.isTypeSupported(type));
-
-    return supportedMimeType || null;
-  }
-
   private resetMicTestForCaptureChange() {
-    this.micTestError = '';
-    this.stopMicTestRecording(true);
-    this.clearMicTestSample();
+    this.micTestRecordingWorker.resetForCaptureChange();
     this.stopMicInputMonitor();
-  }
-
-  private clearMicTestTimers() {
-    if (this.micTestDurationInterval) {
-      clearInterval(this.micTestDurationInterval);
-      this.micTestDurationInterval = null;
-    }
-
-    if (this.micTestAutoStopTimeout) {
-      clearTimeout(this.micTestAutoStopTimeout);
-      this.micTestAutoStopTimeout = null;
-    }
-  }
-
-  private cleanupMicTestRecorder() {
-    this.clearMicTestTimers();
-    this.isMicTestRecording = false;
-    this.micTestDurationSeconds = 0;
-    this.micTestChunks = [];
-    this.micTestRecorder = null;
-    this.micTestRecorderStream = null;
-    this.micTestDiscardOnStop = false;
   }
 
   get sessionRecordingStatusText(): string {
@@ -1259,12 +1002,18 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (this.isSessionRecording) {
-      const storageLabel = this.astralRecordingSessionId ? ' locally' : '';
+      const storageLabel = this.callRecordingWorker.isUsingAstralStorage ? ' locally' : '';
       return `Recording${storageLabel} ${this.formatSessionRecordingDuration(this.sessionRecordingDurationSeconds * 1000)}`;
     }
 
     if (this.hasRecordedSessionPlayback) {
-      const packageLabel = this.recordedSession?.package ? ' saved as .astral' : '';
+      const packageLabel = this.hasOptimizedAstralRecording
+        ? ' saved as optimized .astral'
+        : this.isAstralRecordingAwaitingOptimization
+          ? ' optimizing .astral'
+          : this.recordedSession?.package
+            ? ' saved as .astral'
+            : '';
       return `Last recording ${this.formatSessionRecordingDuration(this.recordedSessionDurationMs)}${packageLabel}`;
     }
 
@@ -1272,7 +1021,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get hasRecordedSessionPlayback(): boolean {
-    return !!this.recordedSession && this.hasPlayableCallRecording(this.recordedSession);
+    return !!this.recordedSession && hasPlayableCallRecording(this.recordedSession);
   }
 
   get canUseSessionRecording(): boolean {
@@ -1284,7 +1033,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get canSaveAstralRecording(): boolean {
-    return !!this.recordedSession?.package?.path && !this.isSavingAstralRecording;
+    return this.hasDownloadableAstralRecording && !this.isSavingAstralRecording;
+  }
+
+  get hasDownloadableAstralRecording(): boolean {
+    return !!getDownloadableAstralPackagePath(this.recordedSession);
+  }
+
+  get hasOptimizedAstralRecording(): boolean {
+    return hasOptimizedAstralPackage(this.recordedSession);
+  }
+
+  get isAstralRecordingAwaitingOptimization(): boolean {
+    return isAstralPackageAwaitingOptimization(this.recordedSession);
   }
 
   get isAstralPlaybackImporting(): boolean {
@@ -1296,11 +1057,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get recordedSessionDurationMs(): number {
-    return this.getRecordingPlaybackDurationMs(this.recordedSession);
+    return getRecordingPlaybackDurationMs(this.recordedSession);
   }
 
   async startSessionRecording() {
-    if (this.isSessionRecording || this.callParticipantRecorders.size) {
+    if (this.isSessionRecording || this.callRecordingWorker.hasActiveWork) {
       return;
     }
 
@@ -1324,56 +1085,18 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.astralRecordingPath = null;
-    this.astralRecordingSessionId = null;
-    this.astralParticipantSegmentCounters.clear();
     this.lastRecordedCallParticipantsSnapshot = '';
-    this.callRecordingStartedAt = Date.now();
     this.recordCurrentCallEnvironmentInitialState();
     void this.recordCurrentSpotifyPlaybackState();
-    this.callParticipantRecorders.clear();
-    this.callParticipantIdleStates.clear();
-    this.stoppingCallParticipantRecorders = 0;
-    this.finalizingSessionRecording = false;
-    this.callRecordingDiscardOnStop = false;
 
-    await this.startAstralRecordingSession();
-    if (!this.sessionRecording.isRecording() || this.finalizingSessionRecording) {
-      await this.abortAstralRecordingSession();
-      return;
-    }
-
-    this.syncCallParticipantRecorders();
-    if (!this.callParticipantRecorders.size) {
-      this.sessionRecordingError = 'No participant streams to record';
-      await this.abortAstralRecordingSession();
+    const started = await this.callRecordingWorker.start();
+    if (!started) {
       this.sessionRecording.abortRecording();
-      this.cleanupCallParticipantRecorders();
-      return;
     }
-
-    this.callRecordingDurationInterval = setInterval(() => {
-      this.sessionRecordingDurationSeconds = Math.floor((Date.now() - this.callRecordingStartedAt) / 1000);
-      this.cdr.detectChanges();
-    }, 500);
   }
 
   stopSessionRecording(discardRecording: boolean = false) {
-    if (!this.sessionRecording.isRecording() && !this.callParticipantRecorders.size && !this.callParticipantIdleStates.size) {
-      return;
-    }
-
-    this.callRecordingDiscardOnStop = this.callRecordingDiscardOnStop || discardRecording;
-    this.finalizingSessionRecording = true;
-    this.clearCallRecordingTimer();
-    this.endAllCallParticipantIdleStates(!this.callRecordingDiscardOnStop);
-    if (!this.callParticipantRecorders.size) {
-      void this.finishSessionRecordingIfReady();
-      return;
-    }
-
-    this.stopAllCallParticipantRecorders();
-    void this.finishSessionRecordingIfReady();
+    this.callRecordingWorker.stop(discardRecording);
   }
 
   async saveAstralRecording(recording: SessionRecording | null = this.recordedSession) {
@@ -1381,9 +1104,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const packagePath = recording?.package?.path;
+    const packagePath = getDownloadableAstralPackagePath(recording);
     if (!packagePath) {
-      this.snackBar.open('This recording does not have a saved .astral package. Record in the Tauri desktop app to create one.', 'Close', { duration: 5000 });
+      const message = recording?.package?.path
+        ? 'This .astral recording is still being optimized. The download will be available when optimization completes.'
+        : 'This recording does not have a saved .astral package. Record in the Tauri desktop app to create one.';
+      this.snackBar.open(message, 'Close', { duration: 5000 });
       return;
     }
 
@@ -1488,7 +1214,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       const recording = await this.createSessionRecordingFromAstralImport(imported);
-      if (!this.hasPlayableCallRecording(recording)) {
+    if (!hasPlayableCallRecording(recording)) {
         this.sessionRecordingError = 'Imported .astral file has no playable media';
         this.snackBar.open(this.sessionRecordingError, 'Close', { duration: 5000 });
         return;
@@ -1514,7 +1240,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const manifest = imported.manifest ?? {};
     const sourceRecording = manifest.recording ?? manifest;
     const participantMedia = await this.createImportedAstralParticipantMedia(imported, sourceRecording.participantMedia);
-    const durationMs = this.getImportedRecordingDurationMs(sourceRecording, participantMedia);
+      const durationMs = getImportedRecordingDurationMs(sourceRecording, participantMedia);
 
     return {
       id: `${sourceRecording.id || 'astral-recording'}:${imported.sessionId}`,
@@ -1557,14 +1283,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         return null;
       }
 
-      const startedAtMs = this.toFiniteRecordingNumber(participant.startedAtMs, 0);
-      const endedAtMs = this.toFiniteRecordingNumber(participant.endedAtMs, startedAtMs + media.durationMs);
+      const startedAtMs = toFiniteRecordingNumber(participant.startedAtMs, 0);
+      const endedAtMs = toFiniteRecordingNumber(participant.endedAtMs, startedAtMs + media.durationMs);
       return {
         participantId: String(participant.participantId),
         isLocal: !!participant.isLocal,
         userData: participant.userData ?? null,
         participantMeta: participant.participantMeta ?? null,
-        volumePercent: this.normalizeParticipantPlaybackVolume(participant.volumePercent),
+        volumePercent: normalizeParticipantPlaybackVolume(participant.volumePercent),
         startedAtMs,
         endedAtMs: Math.max(startedAtMs, endedAtMs),
         media
@@ -1593,91 +1319,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       storage: 'astral',
       mimeType,
       url: await this.astralRecording.getImportedFileUrl(imported, mediaPath, mimeType),
-      durationMs: this.toFiniteRecordingNumber(mediaManifest.durationMs, 0),
-      size: this.toFiniteRecordingNumber(mediaManifest.size, 0),
+      durationMs: toFiniteRecordingNumber(mediaManifest.durationMs, 0),
+      size: toFiniteRecordingNumber(mediaManifest.size, 0),
       path: mediaPath
     };
-  }
-
-  private getImportedRecordingDurationMs(sourceRecording: any, participantMedia: SessionRecordingParticipantMedia[]): number {
-    const participantDurationMs = participantMedia.reduce(
-      (durationMs, participant) => Math.max(durationMs, participant.endedAtMs),
-      0
-    );
-
-    return Math.max(this.toFiniteRecordingNumber(sourceRecording?.durationMs, 0), participantDurationMs);
-  }
-
-  private toFiniteRecordingNumber(value: unknown, fallback: number): number {
-    const numericValue = Number(value);
-    return Number.isFinite(numericValue) ? Math.max(0, numericValue) : fallback;
-  }
-
-  private normalizeParticipantPlaybackVolume(volumePercent: unknown): number {
-    const numericValue = Number(volumePercent);
-    if (!Number.isFinite(numericValue)) {
-      return 100;
-    }
-
-    return Math.min(200, Math.max(0, Math.round(numericValue)));
-  }
-
-  private async startAstralRecordingSession() {
-    try {
-      if (!(await this.astralRecording.isAvailable())) {
-        return;
-      }
-
-      const session = await this.astralRecording.begin(this.getVttRoomId());
-      this.astralRecordingSessionId = session.sessionId;
-    } catch (error) {
-      console.warn('Astral local recording storage unavailable; falling back to in-memory recording.', error);
-      this.astralRecordingSessionId = null;
-      this.astralParticipantSegmentCounters.clear();
-    }
-  }
-
-  private async abortAstralRecordingSession() {
-    const sessionId = this.astralRecordingSessionId;
-    this.cleanupAstralRecordingState();
-    if (!sessionId) {
-      return;
-    }
-
-    await this.astralRecording.abort(sessionId).catch(error => {
-      console.warn('Failed to abort Astral recording session', error);
-    });
-  }
-
-  private async finalizeAstralRecordingSession(recording: SessionRecording): Promise<boolean> {
-    const sessionId = this.astralRecordingSessionId;
-    this.cleanupAstralRecordingState();
-    if (!sessionId) {
-      return false;
-    }
-
-    try {
-      const packageResult = await this.astralRecording.finalize(sessionId, this.createAstralRecordingManifest(recording));
-      this.astralRecordingPath = packageResult.astralPath;
-      this.sessionRecording.attachRecordingPackage(recording.id, {
-        storage: 'astral',
-        path: packageResult.astralPath,
-        size: packageResult.astralSize,
-        formatVersion: 1,
-        createdAt: new Date().toISOString()
-      });
-      void this.astralOptimizer.optimizeRecordingPackage(recording.id, packageResult.astralPath);
-      return true;
-    } catch (error) {
-      console.error('Failed to finalize Astral recording package', error);
-      this.sessionRecordingError = 'Recording playable, but .astral packaging failed';
-      return false;
-    }
-  }
-
-  private cleanupAstralRecordingState() {
-    this.astralRecordingSessionId = null;
-    this.astralParticipantSegmentCounters.clear();
   }
 
   startSessionPlayback(recording: SessionRecording | null = this.recordedSession) {
@@ -1687,7 +1332,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (!recording || !this.hasPlayableCallRecording(recording)) {
+    if (!recording || !hasPlayableCallRecording(recording)) {
       this.sessionRecordingError = 'No recording ready';
       return;
     }
@@ -1735,7 +1380,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private applyCallPlaybackState(state: SessionPlaybackState) {
-    const nextPlaybackMode = state.active && this.hasPlayableCallRecording(state.recording);
+    const nextPlaybackMode = state.active && hasPlayableCallRecording(state.recording);
 
     if (nextPlaybackMode && !this.isCallPlaybackMode) {
       this.callEnvironmentBeforePlayback = this.createCallEnvironmentState();
@@ -1864,7 +1509,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.applyRecordedSpotifyState(data);
           break;
         case 'spotify-requests':
-          this.spotifyRequests = this.cloneSpotifyRequests(data);
+          this.spotifyRequests = cloneSpotifyRequests(data);
           break;
       }
     } finally {
@@ -1885,7 +1530,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.isDmMode = !!state.isDmMode;
       this.applyRecordedVttSession(state.vttSession);
       this.applyRecordedSpotifyState(state.spotify);
-      this.spotifyRequests = this.cloneSpotifyRequests(state.spotifyRequests);
+      this.spotifyRequests = cloneSpotifyRequests(state.spotifyRequests);
       this.setCallPlaybackParticipantSnapshots(state.participants);
       this.refreshSceneMainCharacterFlags();
       this.applyTemporaryAtmosphereBackground(this.activeTemporaryAtmosphereBackground);
@@ -1959,72 +1604,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private createRecordedSpotifyStateFromCurrent(): RecordedSpotifyState | null {
-    const track = this.spotify.currentTrack$.value;
-    if (!track?.uri) {
-      return null;
-    }
-
-    return this.createRecordedSpotifyState({
-      uri: track.uri,
-      name: track.name,
-      artist: this.getSpotifyTrackArtist(track),
-      image: this.getSpotifyTrackImage(track),
-      position: 0,
-      playing: !this.spotify.isPaused$.value,
-      paused: this.spotify.isPaused$.value,
-      contextUri: null,
-      shuffle: this.spotify.shuffleState$.value,
-      volumePercent: this.getCurrentSpotifyVolumePercent()
-    });
+    return createRecordedSpotifyStateFromCurrent(
+      this.spotify.currentTrack$.value,
+      this.spotify.isPaused$.value,
+      this.spotify.shuffleState$.value,
+      this.getCurrentSpotifyVolumePercent()
+    );
   }
 
   private createRecordedSpotifyStateFromSyncPayload(payload: any): RecordedSpotifyState | null {
-    const currentTrack = this.spotify.currentTrack$.value;
-    const uri = payload?.uri ?? currentTrack?.uri ?? null;
-    if (!uri) {
-      return null;
-    }
-
-    const payloadTrack = {
-      uri,
-      name: payload?.name,
-      artist: payload?.artist,
-      image: payload?.image,
-      album: payload?.album,
-      artists: payload?.artists
-    };
-
-    return this.createRecordedSpotifyState({
-      uri,
-      name: payloadTrack.name ?? currentTrack?.name,
-      artist: this.getSpotifyTrackArtist(payloadTrack) || this.getSpotifyTrackArtist(currentTrack),
-      image: this.getSpotifyTrackImage(payloadTrack) || this.getSpotifyTrackImage(currentTrack),
-      position: payload?.position,
-      playing: this.getSpotifyPlayingFromPayload(payload),
-      paused: this.getSpotifyPausedFromPayload(payload),
-      contextUri: payload?.contextUri ?? null,
-      shuffle: payload?.shuffle,
-      volumePercent: payload?.volumePercent ?? this.getCurrentSpotifyVolumePercent()
-    });
-  }
-
-  private createRecordedSpotifyState(state: Partial<RecordedSpotifyState>): RecordedSpotifyState {
-    const paused = state.paused === undefined
-      ? state.playing === undefined ? true : !state.playing
-      : !!state.paused;
-
-    return {
-      uri: state.uri ?? null,
-      name: state.name ?? 'Spotify',
-      artist: state.artist ?? '',
-      image: state.image ?? '',
-      position: Math.max(0, Number(state.position) || 0),
-      playing: !paused,
-      paused,
-      contextUri: state.contextUri ?? null,
-      shuffle: !!state.shuffle,
-      volumePercent: this.normalizeSpotifyVolume(state.volumePercent ?? this.getCurrentSpotifyVolumePercent())
-    };
+    return createRecordedSpotifyStateFromSyncPayload(
+      payload,
+      this.spotify.currentTrack$.value,
+      this.spotify.isPaused$.value,
+      this.getCurrentSpotifyVolumePercent()
+    );
   }
 
   private applyRecordedSpotifyState(state: Partial<RecordedSpotifyState> | null | undefined) {
@@ -2034,67 +1628,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.playbackSpotifyState = this.createRecordedSpotifyState(state);
+    this.playbackSpotifyState = createRecordedSpotifyState(
+      state,
+      this.getCurrentSpotifyVolumePercent()
+    );
     this.playbackSpotifyVolumePercent = this.playbackSpotifyState.volumePercent;
     this.syncSpotifyPlayerToPlaybackState(this.playbackSpotifyState);
-  }
-
-  private getSpotifyTrackArtist(track: any): string {
-    if (!track) {
-      return '';
-    }
-
-    if (track.artist) {
-      return track.artist;
-    }
-
-    if (Array.isArray(track.artists)) {
-      return track.artists.map((artist: any) => artist?.name).filter(Boolean).join(', ');
-    }
-
-    return '';
-  }
-
-  private getSpotifyTrackImage(track: any): string {
-    return track?.image
-      ?? track?.album?.images?.[0]?.url
-      ?? track?.images?.[0]?.url
-      ?? '';
-  }
-
-  private getSpotifyPausedFromPayload(payload: any): boolean {
-    if (payload?.paused !== undefined) {
-      return !!payload.paused;
-    }
-
-    if (payload?.playing !== undefined) {
-      return !payload.playing;
-    }
-
-    if (payload?.isPlaying !== undefined) {
-      return !payload.isPlaying;
-    }
-
-    return this.spotify.isPaused$.value;
-  }
-
-  private getSpotifyPlayingFromPayload(payload: any): boolean {
-    return !this.getSpotifyPausedFromPayload(payload);
   }
 
   private getCurrentSpotifyVolumePercent(): number {
     const devices = this.spotify.devices$.value ?? [];
     const activeDeviceId = this.spotify.activeDeviceId$.value;
     const activeDevice = devices.find(device => device.id === activeDeviceId) ?? devices.find(device => device.is_active);
-    return this.normalizeSpotifyVolume(activeDevice?.volume_percent ?? this.playbackSpotifyVolumePercent ?? 100);
-  }
-
-  private normalizeSpotifyVolume(value: number | string | null | undefined): number {
-    return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    return normalizeSpotifyVolume(activeDevice?.volume_percent ?? this.playbackSpotifyVolumePercent ?? 100);
   }
 
   setPlaybackSpotifyVolume(value: number | string) {
-    const volumePercent = this.normalizeSpotifyVolume(value);
+    const volumePercent = normalizeSpotifyVolume(value);
     this.playbackSpotifyVolumePercent = volumePercent;
     if (this.playbackSpotifyState) {
       this.playbackSpotifyState = {
@@ -2133,14 +1683,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       .catch(() => undefined);
   }
 
-  private cloneSpotifyRequests(requests: any[] | null | undefined): any[] {
-    return Array.isArray(requests)
-      ? requests.map(request => ({ ...request }))
-      : [];
-  }
-
   private recordSpotifyRequestsSnapshot() {
-    this.recordCallEnvironmentEvent('spotify-requests', this.cloneSpotifyRequests(this.spotifyRequests));
+    this.recordCallEnvironmentEvent('spotify-requests', cloneSpotifyRequests(this.spotifyRequests));
   }
 
   private async recordCurrentSpotifyPlaybackState() {
@@ -2153,24 +1697,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const track = state?.track_window?.current_track;
-    if (!track?.uri) {
-      return;
+    const recordedSpotifyState = createRecordedSpotifyStateFromPlaybackState(
+      state,
+      this.getCurrentSpotifyVolumePercent()
+    );
+    if (recordedSpotifyState) {
+      this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
     }
-
-    const recordedSpotifyState = this.createRecordedSpotifyState({
-      uri: track.uri,
-      name: track.name,
-      artist: this.getSpotifyTrackArtist(track),
-      image: this.getSpotifyTrackImage(track),
-      position: state.position,
-      playing: !state.paused,
-      paused: state.paused,
-      contextUri: state.context?.uri ?? null,
-      shuffle: state.shuffle_state,
-      volumePercent: this.getCurrentSpotifyVolumePercent()
-    });
-    this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
   }
 
   private recordCurrentCallEnvironmentInitialState() {
@@ -2213,7 +1746,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       isDmMode: this.isDmMode,
       vttSession: this.createRecordedVttSessionState(this.vttSession, this.vttSession),
       spotify: this.createRecordedSpotifyStateFromCurrent(),
-      spotifyRequests: this.cloneSpotifyRequests(this.spotifyRequests),
+      spotifyRequests: cloneSpotifyRequests(this.spotifyRequests),
       participants: this.createCallParticipantSnapshots()
     };
   }
@@ -2233,30 +1766,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return {
       id: participant.id,
       isLocal: !!participant.isLocal,
-      userData: this.createCharacterSnapshot(participant.userData),
+      userData: createCharacterSnapshot(participant.userData),
       participantMeta: participant.participantMeta ?? null,
       ping: participant.ping,
       volumePercent: participant.volumePercent,
       isSceneMainCharacter: participant.isSceneMainCharacter,
       hasAudio: !!participant.stream?.getAudioTracks().length,
       hasVideo: !!participant.stream?.getVideoTracks().length
-    };
-  }
-
-  private createCharacterSnapshot(character: ICharacter | undefined | null): Partial<ICharacter> | null {
-    if (!character) {
-      return null;
-    }
-
-    return {
-      _id: character._id,
-      ownerId: character.ownerId,
-      name: character.name,
-      race: character.race,
-      icon: character.icon,
-      baseStats: character.baseStats ? { ...character.baseStats } : undefined,
-      classes: Array.isArray(character.classes) ? character.classes.map(characterClass => ({ ...characterClass })) : [],
-      ac: character.ac
     };
   }
 
@@ -2272,120 +1788,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     snapshots.forEach(snapshot => {
       if (snapshot?.id) {
         this.callPlaybackParticipantSnapshots.set(snapshot.id, snapshot);
-      }
-    });
-  }
-
-  private hasPlayableCallRecording(recording: SessionRecording | null | undefined): boolean {
-    return !!recording && (!!recording.media || !!recording.participantMedia?.length);
-  }
-
-  private getRecordingPlaybackDurationMs(recording: SessionRecording | null | undefined): number {
-    if (!recording) {
-      return 0;
-    }
-
-    const participantDurationMs = (recording.participantMedia ?? []).reduce(
-      (durationMs, participant) => Math.max(durationMs, participant.endedAtMs),
-      0
-    );
-
-    return Math.max(recording.media?.durationMs ?? 0, recording.durationMs, participantDurationMs);
-  }
-
-  private createAstralRecordingManifest(recording: SessionRecording) {
-    return {
-      format: 'astral-session-recording',
-      formatVersion: 1,
-      packagedAt: new Date().toISOString(),
-      recording: {
-        id: recording.id,
-        callRoomId: recording.callRoomId,
-        startedAt: recording.startedAt,
-        endedAt: recording.endedAt,
-        durationMs: recording.durationMs,
-        media: this.createAstralMediaManifest(recording.media),
-        participantMedia: (recording.participantMedia ?? []).map(participant => ({
-          participantId: participant.participantId,
-          isLocal: participant.isLocal,
-          userData: participant.userData,
-          participantMeta: participant.participantMeta,
-          volumePercent: participant.volumePercent,
-          startedAtMs: participant.startedAtMs,
-          endedAtMs: participant.endedAtMs,
-          media: this.createAstralMediaManifest(participant.media)
-        })),
-        vtt: recording.vtt,
-        callEnvironment: recording.callEnvironment
-      }
-    };
-  }
-
-  private createAstralMediaManifest(media: SessionRecordingMedia | null | undefined) {
-    if (!media) {
-      return null;
-    }
-
-    return {
-      storage: media.storage,
-      mimeType: media.mimeType,
-      durationMs: media.durationMs,
-      size: media.size,
-      path: media.path ?? null
-    };
-  }
-
-  private syncCallParticipantRecorders() {
-    if (!this.sessionRecording.isRecording() || this.finalizingSessionRecording || this.isCallPlaybackMode) {
-      return;
-    }
-
-    const activeParticipantIds = new Set<string>();
-    this.getCallRecordingParticipantsForStreams().forEach(participant => {
-      const tracks = this.getRecordableParticipantTracks(participant);
-      if (!tracks.length) {
-        return;
-      }
-
-      activeParticipantIds.add(participant.id);
-      const idleState = this.callParticipantIdleStates.get(participant.id);
-      if (idleState) {
-        idleState.userData = this.createCharacterSnapshot(participant.userData);
-        idleState.participantMeta = participant.participantMeta ?? null;
-        idleState.volumePercent = participant.volumePercent;
-
-        const tracksSignature = this.getTrackSignature(tracks);
-        if (idleState.tracksSignature === tracksSignature) {
-          return;
-        }
-
-        this.endCallParticipantIdleState(idleState, true);
-      }
-
-      const existingRecorder = this.callParticipantRecorders.get(participant.id);
-      if (existingRecorder && this.hasSameTrackSet(existingRecorder.stream.getTracks(), tracks)) {
-        existingRecorder.userData = this.createCharacterSnapshot(participant.userData);
-        existingRecorder.participantMeta = participant.participantMeta ?? null;
-        existingRecorder.volumePercent = participant.volumePercent;
-        return;
-      }
-
-      if (existingRecorder) {
-        this.stopCallParticipantRecorder(existingRecorder, 'tracks-changed');
-      }
-
-      this.startCallParticipantRecorder(participant, tracks);
-    });
-
-    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
-      if (!activeParticipantIds.has(recorder.participantId)) {
-        this.stopCallParticipantRecorder(recorder, 'removed');
-      }
-    });
-
-    Array.from(this.callParticipantIdleStates.values()).forEach(idleState => {
-      if (!activeParticipantIds.has(idleState.participantId)) {
-        this.endCallParticipantIdleState(idleState, true);
       }
     });
   }
@@ -2432,717 +1834,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       .forEach(track => tracks.push(track));
 
     return tracks.length ? new MediaStream(tracks) : null;
-  }
-
-  private getRecordableParticipantTracks(participant: CallRecordingParticipant): MediaStreamTrack[] {
-    return participant.stream?.getTracks().filter(track => track.readyState === 'live') ?? [];
-  }
-
-  private hasSameTrackSet(firstTracks: MediaStreamTrack[], secondTracks: MediaStreamTrack[]): boolean {
-    const firstTrackIds = firstTracks.map(track => track.id).sort();
-    const secondTrackIds = secondTracks.map(track => track.id).sort();
-    return firstTrackIds.length === secondTrackIds.length &&
-      firstTrackIds.every((trackId, index) => trackId === secondTrackIds[index]);
-  }
-
-  private getTrackSignature(tracks: MediaStreamTrack[]): string {
-    return tracks.map(track => track.id).sort().join('|');
-  }
-
-  private startCallParticipantRecorder(participant: CallRecordingParticipant, tracks: MediaStreamTrack[]) {
-    const stream = new MediaStream(tracks);
-    const startedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt);
-    let recorder: MediaRecorder;
-    let mimeType = this.getSupportedSessionRecordingMimeType(stream) || '';
-
-    try {
-      recorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-      mimeType = recorder.mimeType || mimeType || 'video/webm';
-    } catch (error) {
-      console.error('Failed to create participant recorder', error);
-      this.sessionRecordingError = 'Recording unavailable';
-      this.stopSessionRecording(true);
-      return;
-    }
-
-    const participantRecorder: CallParticipantRecorder = {
-      participantId: participant.id,
-      isLocal: !!participant.isLocal,
-      userData: this.createCharacterSnapshot(participant.userData),
-      participantMeta: participant.participantMeta ?? null,
-      volumePercent: participant.volumePercent,
-      stream,
-      recorder,
-      chunks: [],
-      mimeType,
-      startedAtMs,
-      stopping: false,
-      astralSegmentIndex: this.astralRecordingSessionId
-        ? this.getNextAstralParticipantSegmentIndex(participant.id)
-        : null,
-      astralFilePath: null,
-      astralFileUrl: null,
-      astralSize: 0,
-      astralWriteChain: Promise.resolve(),
-      astralWriteFailed: false,
-      stopReason: 'final',
-      idleMonitor: null,
-      idleMonitorInterval: null,
-      idleLastActivityAt: Date.now(),
-      idleTransitionInProgress: false,
-      pendingIdleStillFrame: null,
-      pendingIdleStillMimeType: null
-    };
-
-    recorder.ondataavailable = event => {
-      if (event.data.size > 0) {
-        if (this.astralRecordingSessionId && participantRecorder.astralSegmentIndex !== null) {
-          this.queueAstralParticipantChunk(participantRecorder, event.data);
-        } else {
-          participantRecorder.chunks.push(event.data);
-        }
-      }
-    };
-    recorder.onerror = event => {
-      console.error('Participant session recorder error', event);
-      this.sessionRecordingError = 'Recording failed';
-      this.stopSessionRecording(true);
-      this.cdr.detectChanges();
-    };
-    recorder.onstop = () => void this.handleCallParticipantRecorderStopped(participantRecorder);
-
-    try {
-      recorder.start(1000);
-      this.callParticipantRecorders.set(participant.id, participantRecorder);
-      this.startCallParticipantRecorderIdleMonitor(participantRecorder);
-    } catch (error) {
-      console.error('Failed to start participant recorder', error);
-      this.sessionRecordingError = 'Recording failed';
-      this.stopSessionRecording(true);
-    }
-  }
-
-  private getNextAstralParticipantSegmentIndex(participantId: string): number {
-    const nextIndex = this.astralParticipantSegmentCounters.get(participantId) ?? 0;
-    this.astralParticipantSegmentCounters.set(participantId, nextIndex + 1);
-    return nextIndex;
-  }
-
-  private queueAstralParticipantChunk(participantRecorder: CallParticipantRecorder, chunk: Blob) {
-    const sessionId = this.astralRecordingSessionId;
-    const segmentIndex = participantRecorder.astralSegmentIndex;
-    if (!sessionId || segmentIndex === null || participantRecorder.astralWriteFailed) {
-      return;
-    }
-
-    const chunkStartedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
-    participantRecorder.astralWriteChain = participantRecorder.astralWriteChain
-      .catch(() => undefined)
-      .then(async () => {
-        if (participantRecorder.astralWriteFailed) {
-          return;
-        }
-
-        try {
-          const result = await this.astralRecording.writeChunk({
-            sessionId,
-            participantId: participantRecorder.participantId,
-            segmentIndex,
-            mimeType: participantRecorder.mimeType,
-            startedAtMs: participantRecorder.startedAtMs,
-            chunkStartedAtMs,
-            blob: chunk
-          });
-          participantRecorder.astralFilePath = result.filePath;
-          participantRecorder.astralFileUrl = result.fileUrl;
-          participantRecorder.astralSize = result.size;
-        } catch (error) {
-          console.error('Failed to persist Astral recording chunk', error);
-          participantRecorder.astralWriteFailed = true;
-          this.sessionRecordingError = 'Recording failed';
-          this.stopSessionRecording(true);
-        }
-      });
-  }
-
-  private startCallParticipantRecorderIdleMonitor(participantRecorder: CallParticipantRecorder) {
-    if (!participantRecorder.stream.getVideoTracks().some(track => track.readyState === 'live')) {
-      return;
-    }
-
-    const monitor = this.createParticipantActivityMonitor(participantRecorder.stream);
-    if (!monitor) {
-      return;
-    }
-
-    participantRecorder.idleMonitor = monitor;
-    participantRecorder.idleLastActivityAt = Date.now();
-    participantRecorder.idleMonitorInterval = setInterval(() => {
-      if (
-        participantRecorder.stopping ||
-        participantRecorder.idleTransitionInProgress ||
-        this.finalizingSessionRecording ||
-        !this.sessionRecording.isRecording()
-      ) {
-        return;
-      }
-
-      const sample = monitor.getSample();
-      if (sample.active) {
-        participantRecorder.idleLastActivityAt = Date.now();
-        return;
-      }
-
-      if (Date.now() - participantRecorder.idleLastActivityAt >= this.participantIdleThresholdMs) {
-        void this.transitionCallParticipantRecorderToIdle(participantRecorder);
-      }
-    }, this.participantIdleCheckIntervalMs);
-  }
-
-  private stopCallParticipantRecorderIdleMonitor(participantRecorder: CallParticipantRecorder) {
-    if (participantRecorder.idleMonitorInterval) {
-      clearInterval(participantRecorder.idleMonitorInterval);
-      participantRecorder.idleMonitorInterval = null;
-    }
-
-    participantRecorder.idleMonitor?.cleanup();
-    participantRecorder.idleMonitor = null;
-  }
-
-  private async transitionCallParticipantRecorderToIdle(participantRecorder: CallParticipantRecorder) {
-    if (
-      participantRecorder.stopping ||
-      participantRecorder.idleTransitionInProgress ||
-      this.finalizingSessionRecording ||
-      this.callRecordingDiscardOnStop ||
-      !this.sessionRecording.isRecording()
-    ) {
-      return;
-    }
-
-    participantRecorder.idleTransitionInProgress = true;
-    const stillFrame = await this.captureStillFrameFromStream(participantRecorder.stream);
-    if (
-      !stillFrame ||
-      this.callParticipantRecorders.get(participantRecorder.participantId) !== participantRecorder ||
-      participantRecorder.stopping ||
-      this.finalizingSessionRecording ||
-      this.callRecordingDiscardOnStop ||
-      !this.sessionRecording.isRecording()
-    ) {
-      participantRecorder.idleTransitionInProgress = false;
-      participantRecorder.idleLastActivityAt = Date.now();
-      return;
-    }
-
-    participantRecorder.pendingIdleStillFrame = stillFrame;
-    participantRecorder.pendingIdleStillMimeType = stillFrame.type || this.participantStillFrameMimeType;
-    this.stopCallParticipantRecorder(participantRecorder, 'idle');
-  }
-
-  private async startCallParticipantIdleState(participantRecorder: CallParticipantRecorder) {
-    const stillFrame = participantRecorder.pendingIdleStillFrame;
-    if (
-      !stillFrame ||
-      this.finalizingSessionRecording ||
-      this.callRecordingDiscardOnStop ||
-      !this.sessionRecording.isRecording()
-    ) {
-      return;
-    }
-
-    const startedAtMs = Math.max(0, Date.now() - this.callRecordingStartedAt);
-    const mimeType = participantRecorder.pendingIdleStillMimeType || stillFrame.type || this.participantStillFrameMimeType;
-    let mediaUrl: string | null = null;
-    let mediaPath: string | null = null;
-    let mediaSize = stillFrame.size;
-    let memoryBlob: Blob | null = stillFrame;
-
-    if (this.astralRecordingSessionId) {
-      try {
-        const result = await this.astralRecording.writeChunk({
-          sessionId: this.astralRecordingSessionId,
-          participantId: participantRecorder.participantId,
-          segmentIndex: this.getNextAstralParticipantSegmentIndex(participantRecorder.participantId),
-          mimeType,
-          startedAtMs,
-          chunkStartedAtMs: 0,
-          blob: stillFrame
-        });
-        mediaUrl = result.fileUrl;
-        mediaPath = result.filePath;
-        mediaSize = result.size;
-        memoryBlob = null;
-      } catch (error) {
-        console.error('Failed to persist Astral idle still frame', error);
-        this.sessionRecordingError = 'Recording failed';
-        this.stopSessionRecording(true);
-        return;
-      }
-    }
-
-    if (
-      this.finalizingSessionRecording ||
-      this.callRecordingDiscardOnStop ||
-      !this.sessionRecording.isRecording()
-    ) {
-      return;
-    }
-
-    const idleState: CallParticipantIdleState = {
-      participantId: participantRecorder.participantId,
-      isLocal: participantRecorder.isLocal,
-      userData: participantRecorder.userData,
-      participantMeta: participantRecorder.participantMeta,
-      volumePercent: participantRecorder.volumePercent,
-      stream: participantRecorder.stream,
-      tracksSignature: this.getTrackSignature(participantRecorder.stream.getTracks()),
-      startedAtMs,
-      blob: memoryBlob,
-      mimeType,
-      mediaUrl,
-      mediaPath,
-      size: mediaSize,
-      activityMonitor: null,
-      activityMonitorInterval: null,
-      resuming: false
-    };
-
-    this.callParticipantIdleStates.set(participantRecorder.participantId, idleState);
-    this.startCallParticipantIdleStateMonitor(idleState);
-  }
-
-  private startCallParticipantIdleStateMonitor(idleState: CallParticipantIdleState) {
-    const monitor = this.createParticipantActivityMonitor(idleState.stream);
-    if (!monitor) {
-      return;
-    }
-
-    idleState.activityMonitor = monitor;
-    idleState.activityMonitorInterval = setInterval(() => {
-      if (
-        idleState.resuming ||
-        this.finalizingSessionRecording ||
-        !this.sessionRecording.isRecording() ||
-        this.callParticipantIdleStates.get(idleState.participantId) !== idleState
-      ) {
-        return;
-      }
-
-      if (monitor.getSample().active) {
-        this.resumeCallParticipantRecordingFromIdle(idleState);
-      }
-    }, this.participantIdleCheckIntervalMs);
-  }
-
-  private resumeCallParticipantRecordingFromIdle(idleState: CallParticipantIdleState) {
-    if (idleState.resuming) {
-      return;
-    }
-
-    idleState.resuming = true;
-    const participant = this.getCallRecordingParticipantsForStreams()
-      .find(candidate => candidate.id === idleState.participantId);
-    this.endCallParticipantIdleState(idleState, true);
-
-    if (
-      !participant ||
-      this.finalizingSessionRecording ||
-      this.callRecordingDiscardOnStop ||
-      !this.sessionRecording.isRecording()
-    ) {
-      return;
-    }
-
-    const tracks = this.getRecordableParticipantTracks(participant);
-    if (tracks.length) {
-      this.startCallParticipantRecorder(participant, tracks);
-    }
-  }
-
-  private endAllCallParticipantIdleStates(attachMedia: boolean) {
-    Array.from(this.callParticipantIdleStates.values()).forEach(idleState => {
-      this.endCallParticipantIdleState(idleState, attachMedia);
-    });
-  }
-
-  private endCallParticipantIdleState(idleState: CallParticipantIdleState, attachMedia: boolean) {
-    if (idleState.activityMonitorInterval) {
-      clearInterval(idleState.activityMonitorInterval);
-      idleState.activityMonitorInterval = null;
-    }
-
-    idleState.activityMonitor?.cleanup();
-    idleState.activityMonitor = null;
-
-    if (this.callParticipantIdleStates.get(idleState.participantId) === idleState) {
-      this.callParticipantIdleStates.delete(idleState.participantId);
-    }
-
-    if (!attachMedia || this.callRecordingDiscardOnStop) {
-      return;
-    }
-
-    const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - idleState.startedAtMs);
-    const participant = {
-      participantId: idleState.participantId,
-      isLocal: idleState.isLocal,
-      userData: idleState.userData,
-      participantMeta: idleState.participantMeta,
-      volumePercent: idleState.volumePercent,
-      startedAtMs: idleState.startedAtMs
-    };
-
-    if (idleState.mediaUrl) {
-      this.sessionRecording.attachCallParticipantExternalMedia(
-        participant,
-        idleState.mediaUrl,
-        idleState.mimeType,
-        durationMs,
-        idleState.size,
-        idleState.mediaPath
-      );
-      return;
-    }
-
-    if (idleState.blob) {
-      this.sessionRecording.attachCallParticipantMedia(
-        participant,
-        idleState.blob,
-        idleState.mimeType,
-        durationMs
-      );
-    }
-  }
-
-  private createParticipantActivityMonitor(stream: MediaStream): CallParticipantActivityMonitor | null {
-    const audioTrack = stream.getAudioTracks().find(track => track.readyState === 'live') ?? null;
-    const videoTrack = stream.getVideoTracks().find(track => track.readyState === 'live') ?? null;
-    let audioContext: AudioContext | null = null;
-    let audioSource: MediaStreamAudioSourceNode | null = null;
-    let analyser: AnalyserNode | null = null;
-    let audioData: Uint8Array | null = null;
-    let videoElement: HTMLVideoElement | null = null;
-    let canvas: HTMLCanvasElement | null = null;
-    let canvasContext: CanvasRenderingContext2D | null = null;
-    let previousFrame: Uint8ClampedArray | null = null;
-
-    if (audioTrack) {
-      const AudioContextConstructor = this.getAudioContextConstructor();
-      if (AudioContextConstructor) {
-        try {
-          audioContext = new AudioContextConstructor();
-          audioSource = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
-          analyser = audioContext.createAnalyser();
-          analyser.fftSize = 1024;
-          analyser.smoothingTimeConstant = 0.75;
-          audioData = new Uint8Array(analyser.fftSize);
-          audioSource.connect(analyser);
-          void audioContext.resume().catch(() => undefined);
-        } catch {
-          audioContext = null;
-          audioSource = null;
-          analyser = null;
-          audioData = null;
-        }
-      }
-    }
-
-    if (videoTrack && typeof document !== 'undefined') {
-      videoElement = document.createElement('video');
-      videoElement.muted = true;
-      videoElement.playsInline = true;
-      videoElement.srcObject = new MediaStream([videoTrack]);
-      canvas = document.createElement('canvas');
-      canvas.width = 48;
-      canvas.height = 27;
-      canvasContext = canvas.getContext('2d', { willReadFrequently: true });
-      void videoElement.play().catch(() => undefined);
-    }
-
-    if (!analyser && !canvasContext) {
-      return null;
-    }
-
-    const getAudioLevel = () => {
-      if (!audioTrack || !analyser || !audioData || audioTrack.readyState !== 'live' || !audioTrack.enabled) {
-        return 0;
-      }
-
-      analyser.getByteTimeDomainData(audioData as Uint8Array<ArrayBuffer>);
-      let totalSquare = 0;
-      for (const value of audioData) {
-        const normalized = (value - 128) / 128;
-        totalSquare += normalized * normalized;
-      }
-
-      return Math.sqrt(totalSquare / audioData.length);
-    };
-
-    const getVideoMotion = () => {
-      if (
-        !videoTrack ||
-        !videoElement ||
-        !canvas ||
-        !canvasContext ||
-        videoTrack.readyState !== 'live' ||
-        videoElement.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
-        !videoElement.videoWidth ||
-        !videoElement.videoHeight
-      ) {
-        return 0;
-      }
-
-      try {
-        canvasContext.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-        const frame = canvasContext.getImageData(0, 0, canvas.width, canvas.height).data;
-        if (!previousFrame) {
-          previousFrame = new Uint8ClampedArray(frame);
-          return 0;
-        }
-
-        let totalDifference = 0;
-        for (let index = 0; index < frame.length; index += 4) {
-          totalDifference += Math.abs(frame[index] - previousFrame[index]);
-          totalDifference += Math.abs(frame[index + 1] - previousFrame[index + 1]);
-          totalDifference += Math.abs(frame[index + 2] - previousFrame[index + 2]);
-        }
-
-        previousFrame.set(frame);
-        return totalDifference / (canvas.width * canvas.height * 3);
-      } catch {
-        return 0;
-      }
-    };
-
-    return {
-      getSample: () => {
-        const audioLevel = getAudioLevel();
-        const videoMotion = getVideoMotion();
-        return {
-          audioLevel,
-          videoMotion,
-          active: audioLevel >= this.participantIdleAudioRmsThreshold ||
-            videoMotion >= this.participantIdleVideoMotionThreshold
-        };
-      },
-      cleanup: () => {
-        audioSource?.disconnect();
-        if (audioContext) {
-          void audioContext.close().catch(() => undefined);
-        }
-
-        if (videoElement) {
-          videoElement.pause();
-          videoElement.srcObject = null;
-          videoElement.remove();
-        }
-      }
-    };
-  }
-
-  private async captureStillFrameFromStream(stream: MediaStream): Promise<Blob | null> {
-    const videoTrack = stream.getVideoTracks().find(track => track.readyState === 'live');
-    if (!videoTrack || typeof document === 'undefined') {
-      return null;
-    }
-
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.srcObject = new MediaStream([videoTrack]);
-
-    try {
-      void video.play().catch(() => undefined);
-      await this.waitForVideoFrame(video, 2500);
-      if (
-        video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
-        !video.videoWidth ||
-        !video.videoHeight
-      ) {
-        return null;
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const context = canvas.getContext('2d');
-      if (!context) {
-        return null;
-      }
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return await this.canvasToBlob(canvas, this.participantStillFrameMimeType, 0.95) ??
-        await this.canvasToBlob(canvas, 'image/png');
-    } catch {
-      return null;
-    } finally {
-      video.pause();
-      video.srcObject = null;
-      video.remove();
-    }
-  }
-
-  private waitForVideoFrame(video: HTMLVideoElement, timeoutMs: number): Promise<void> {
-    if (
-      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
-      video.videoWidth > 0 &&
-      video.videoHeight > 0
-    ) {
-      return Promise.resolve();
-    }
-
-    return new Promise(resolve => {
-      let resolved = false;
-      const cleanup = () => {
-        video.removeEventListener('loadeddata', onReady);
-        video.removeEventListener('canplay', onReady);
-        video.removeEventListener('playing', onReady);
-        window.clearTimeout(timeout);
-      };
-      const onReady = () => {
-        if (resolved) {
-          return;
-        }
-
-        resolved = true;
-        cleanup();
-        resolve();
-      };
-      const timeout = window.setTimeout(onReady, timeoutMs);
-      video.addEventListener('loadeddata', onReady);
-      video.addEventListener('canplay', onReady);
-      video.addEventListener('playing', onReady);
-    });
-  }
-
-  private canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob | null> {
-    return new Promise(resolve => {
-      canvas.toBlob(blob => resolve(blob), mimeType, quality);
-    });
-  }
-
-  private stopAllCallParticipantRecorders() {
-    Array.from(this.callParticipantRecorders.values()).forEach(recorder => {
-      this.stopCallParticipantRecorder(recorder, 'final');
-    });
-  }
-
-  private stopCallParticipantRecorder(
-    participantRecorder: CallParticipantRecorder,
-    reason: CallParticipantRecorderStopReason = 'final'
-  ) {
-    if (participantRecorder.stopping) {
-      return;
-    }
-
-    participantRecorder.stopReason = reason;
-    participantRecorder.stopping = true;
-    this.stopCallParticipantRecorderIdleMonitor(participantRecorder);
-    if (participantRecorder.recorder.state !== 'inactive') {
-      this.stoppingCallParticipantRecorders += 1;
-      participantRecorder.recorder.stop();
-      return;
-    }
-
-    void this.handleCallParticipantRecorderStopped(participantRecorder);
-  }
-
-  private async handleCallParticipantRecorderStopped(participantRecorder: CallParticipantRecorder) {
-    await participantRecorder.astralWriteChain.catch(() => undefined);
-    if (participantRecorder.astralWriteFailed) {
-      this.callRecordingDiscardOnStop = true;
-      this.sessionRecordingError = 'Recording failed';
-    }
-
-    const activeRecorder = this.callParticipantRecorders.get(participantRecorder.participantId);
-    if (activeRecorder === participantRecorder) {
-      this.callParticipantRecorders.delete(participantRecorder.participantId);
-    }
-
-    if (participantRecorder.stopping && this.stoppingCallParticipantRecorders > 0) {
-      this.stoppingCallParticipantRecorders -= 1;
-    }
-
-    if (!this.callRecordingDiscardOnStop && participantRecorder.astralFileUrl) {
-      const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
-      this.sessionRecording.attachCallParticipantExternalMedia({
-        participantId: participantRecorder.participantId,
-        isLocal: participantRecorder.isLocal,
-        userData: participantRecorder.userData,
-        participantMeta: participantRecorder.participantMeta,
-        volumePercent: participantRecorder.volumePercent,
-        startedAtMs: participantRecorder.startedAtMs
-      }, participantRecorder.astralFileUrl, participantRecorder.mimeType, durationMs, participantRecorder.astralSize, participantRecorder.astralFilePath);
-    } else if (!this.callRecordingDiscardOnStop && participantRecorder.chunks.length > 0) {
-      const durationMs = Math.max(0, Date.now() - this.callRecordingStartedAt - participantRecorder.startedAtMs);
-      this.sessionRecording.attachCallParticipantMedia({
-        participantId: participantRecorder.participantId,
-        isLocal: participantRecorder.isLocal,
-        userData: participantRecorder.userData,
-        participantMeta: participantRecorder.participantMeta,
-        volumePercent: participantRecorder.volumePercent,
-        startedAtMs: participantRecorder.startedAtMs
-      }, new Blob(participantRecorder.chunks, { type: participantRecorder.mimeType }), participantRecorder.mimeType, durationMs);
-    }
-
-    if (participantRecorder.stopReason === 'idle') {
-      await this.startCallParticipantIdleState(participantRecorder);
-    }
-
-    void this.finishSessionRecordingIfReady();
-  }
-
-  private async finishSessionRecordingIfReady() {
-    if (this.finalizingSessionRecording && this.callParticipantIdleStates.size > 0) {
-      this.endAllCallParticipantIdleStates(!this.callRecordingDiscardOnStop);
-    }
-
-    if (!this.finalizingSessionRecording || this.stoppingCallParticipantRecorders > 0 || this.callParticipantRecorders.size > 0 || this.callParticipantIdleStates.size > 0) {
-      return;
-    }
-
-    const discardRecording = this.callRecordingDiscardOnStop;
-    this.cleanupCallParticipantRecorders();
-
-    if (discardRecording) {
-      await this.abortAstralRecordingSession();
-      this.sessionRecording.abortRecording();
-      this.cdr.detectChanges();
-      return;
-    }
-
-    const recording = this.sessionRecording.stopRecording();
-    if (this.hasPlayableCallRecording(recording)) {
-      const packagedAsAstral = recording ? await this.finalizeAstralRecordingSession(recording) : false;
-      this.recordedSession = this.sessionRecording.getLastRecording() ?? recording;
-      this.snackBar.open(
-        packagedAsAstral
-          ? 'Call and VTT recording ready for playback and saved as .astral.'
-          : 'Call and VTT recording ready for playback.',
-        'Close',
-        { duration: 3000 }
-      );
-    } else {
-      await this.abortAstralRecordingSession();
-      this.sessionRecordingError = 'No participant media captured';
-    }
-
-    this.cdr.detectChanges();
-  }
-
-  private cleanupCallParticipantRecorders() {
-    this.clearCallRecordingTimer();
-    this.callParticipantRecorders.forEach(recorder => this.stopCallParticipantRecorderIdleMonitor(recorder));
-    this.callParticipantRecorders.clear();
-    this.endAllCallParticipantIdleStates(false);
-    this.stoppingCallParticipantRecorders = 0;
-    this.finalizingSessionRecording = false;
-    this.callRecordingStartedAt = 0;
-    this.callRecordingDiscardOnStop = false;
-    this.sessionRecordingDurationSeconds = 0;
   }
 
   private prepareCallPlaybackSources(recording: SessionRecording) {
@@ -3255,7 +1946,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private shouldReplacePlaybackSourceStream(currentStream: MediaStream, nextStream: MediaStream): boolean {
     const currentTracks = currentStream.getTracks();
     const nextTracks = nextStream.getTracks();
-    if (this.hasSameTrackSet(currentTracks, nextTracks)) {
+    if (hasSameTrackSet(currentTracks, nextTracks)) {
       return false;
     }
 
@@ -3785,37 +2476,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     applyTime();
   }
 
-  private getSupportedSessionRecordingMimeType(stream?: MediaStream): string | null {
-    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
-      return null;
-    }
-
-    const hasVideo = stream ? stream.getVideoTracks().length > 0 : true;
-    const supportedMimeType = (hasVideo
-      ? [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm;codecs=h264,opus',
-        'video/webm'
-      ]
-      : [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'video/webm;codecs=opus',
-        'video/webm'
-      ]
-    ).find(type => MediaRecorder.isTypeSupported(type));
-
-    return supportedMimeType || null;
-  }
-
-  private clearCallRecordingTimer() {
-    if (this.callRecordingDurationInterval) {
-      clearInterval(this.callRecordingDurationInterval);
-      this.callRecordingDurationInterval = null;
-    }
-  }
-
   private syncMicInputMonitor() {
     const track = this.getActiveMicTrack();
     if (!track || track.readyState !== 'live') {
@@ -4048,77 +2708,55 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get sceneSideRowCount(): number {
-    if (!this.isSceneMainLayoutActive) {
-      return 1;
-    }
-
-    const sideParticipantCount = Math.max(0, this.visibleParticipantCount - this.visibleSceneMainCharacterCount);
-    return Math.max(1, Math.ceil(sideParticipantCount / Call.sceneSideColumnsPerRow));
+    return getSceneSideRowCount(
+      this.isSceneMainLayoutActive,
+      this.visibleParticipantCount,
+      this.visibleSceneMainCharacterCount
+    );
   }
 
   get sceneMainRowCount(): number {
-    return this.getSceneMainGridRowCount(this.visibleSceneMainCharacterCount);
+    return getSceneMainGridRowCount(this.visibleSceneMainCharacterCount);
   }
 
   get sceneMainRowHeightCss(): string {
-    if (!this.sceneGridContentHeightPx) {
-      if (this.sceneMainRowCount <= 1) {
-        return `${this.sceneMainAreaHeightPercent}%`;
-      }
-
-      const rowPercent = this.sceneMainAreaHeightPercent / this.sceneMainRowCount;
-      const rowGapOffsetPx = Call.sceneGridGapPx * (this.sceneMainRowCount - 1) / this.sceneMainRowCount;
-      return `calc(${rowPercent}% - ${rowGapOffsetPx}px)`;
-    }
-
-    return `${this.sceneMainRowHeightPx}px`;
+    return getSceneMainRowHeightCss(
+      this.sceneGridContentHeightPx,
+      this.sceneMainRowCount,
+      this.sceneMainAreaHeightPercent,
+      this.sceneMainRowHeightPx
+    );
   }
 
   get sceneSideRowHeightCss(): string {
-    if (!this.sceneGridContentHeightPx) {
-      return '120px';
-    }
-
-    return `${this.sceneSideRowHeightPx}px`;
+    return getSceneSideRowHeightCss(this.sceneGridContentHeightPx, this.sceneSideRowHeightPx);
   }
 
   get sceneSideTileMaxWidthCss(): string {
-    if (!this.sceneGridContentHeightPx) {
-      return '100%';
-    }
-
-    return `${Math.floor(this.sceneSideRowHeightPx * 16 / 9)}px`;
+    return getSceneSideTileMaxWidthCss(this.sceneGridContentHeightPx, this.sceneSideRowHeightPx);
   }
 
   private get sceneMainRowHeightPx(): number {
-    const rowCount = this.sceneMainRowCount;
-    const rowHeightPoolPx = Math.max(0, this.sceneMainAreaHeightPx - Call.sceneGridGapPx * (rowCount - 1));
-
-    return Math.max(1, Math.floor(rowHeightPoolPx / rowCount));
+    return getSceneMainRowHeightPx(this.sceneMainAreaHeightPx, this.sceneMainRowCount);
   }
 
   private get sceneSideRowHeightPx(): number {
-    const sideRowCount = this.sceneSideRowCount;
-    const remainingHeightPx = Math.max(
-      0,
-      this.sceneGridContentHeightPx - this.sceneMainAreaHeightPx - (Call.sceneGridGapPx * sideRowCount)
+    return getSceneSideRowHeightPx(
+      this.sceneGridContentHeightPx,
+      this.sceneMainAreaHeightPx,
+      this.sceneSideRowCount
     );
-
-    return Math.max(1, Math.floor(remainingHeightPx / sideRowCount));
   }
 
   private get sceneMainAreaHeightPx(): number {
-    return Math.max(0, Math.floor(this.sceneGridContentHeightPx * this.sceneMainAreaHeightRatio));
+    return getSceneMainAreaHeightPx(this.sceneGridContentHeightPx, this.sceneMainAreaHeightRatio);
   }
 
   private get sceneMainAreaHeightRatio(): number {
-    if (this.visibleParticipantCount <= 1) {
-      return 1;
-    }
-
-    return this.visibleSceneMainCharacterCount >= 3
-      ? Call.sceneExpandedMainAreaRatio
-      : Call.sceneDefaultMainAreaRatio;
+    return getSceneMainAreaHeightRatio(
+      this.visibleParticipantCount,
+      this.visibleSceneMainCharacterCount
+    );
   }
 
   private get sceneMainAreaHeightPercent(): number {
@@ -4161,99 +2799,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return null;
     }
 
-    const cellWidthPx = this.getPriorityGridCellWidthPx(placement.columnSpan);
-    return cellWidthPx ? `${Math.floor(cellWidthPx / Call.sceneMainMinAspectRatio)}px` : null;
+    const maxHeightPx = getPriorityGridMaxHeightPx(
+      this.sceneGridContentWidthPx,
+      placement.columnSpan
+    );
+    return maxHeightPx ? `${maxHeightPx}px` : null;
   }
 
   private getPriorityGridPlacement(participantId: string | null | undefined): PriorityGridPlacement | null {
-    if (!this.isSceneMainLayoutActive || !participantId) {
-      return null;
-    }
-
     const visibleIds = this.getVisibleParticipantIds();
-    if (!visibleIds.includes(participantId)) {
-      return null;
-    }
-
-    const sceneMainIds = this.getVisibleSceneMainParticipantIds(visibleIds);
-    const sceneMainIndex = sceneMainIds.indexOf(participantId);
-    if (sceneMainIndex !== -1) {
-      return this.getSceneMainPriorityGridPlacement(sceneMainIndex, sceneMainIds.length);
-    }
-
-    const sideIds = visibleIds.filter(id => !sceneMainIds.includes(id));
-    const sideIndex = sideIds.indexOf(participantId);
-    if (sideIndex === -1) {
-      return null;
-    }
-
-    const rowIndex = Math.floor(sideIndex / Call.sceneSideColumnsPerRow);
-    const indexInRow = sideIndex % Call.sceneSideColumnsPerRow;
-    const rowItemCount = Math.min(
-      Call.sceneSideColumnsPerRow,
-      sideIds.length - rowIndex * Call.sceneSideColumnsPerRow
-    );
-
-    return this.getCenteredRowPlacement(
-      this.getSceneMainGridRowCount(sceneMainIds.length) + 1 + rowIndex,
-      indexInRow,
-      rowItemCount,
-      3
-    );
-  }
-
-  private getSceneMainPriorityGridPlacement(sceneMainIndex: number, sceneMainCount: number): PriorityGridPlacement {
-    const rowIndex = Math.floor(sceneMainIndex / Call.sceneMainColumnsPerRow);
-    const indexInRow = sceneMainIndex % Call.sceneMainColumnsPerRow;
-    const rowItemCount = Math.min(
-      Call.sceneMainColumnsPerRow,
-      sceneMainCount - rowIndex * Call.sceneMainColumnsPerRow
-    );
-
-    const columnSpan = sceneMainCount === 1 && this.visibleParticipantCount === 1
-      ? Call.scenePriorityGridColumns
-      : this.getSceneMainColumnSpan(rowItemCount);
-
-    return this.getCenteredRowPlacement(
-      1 + rowIndex,
-      indexInRow,
-      rowItemCount,
-      columnSpan
-    );
-  }
-
-  private getCenteredRowPlacement(row: number, indexInRow: number, rowItemCount: number, columnSpan: number): PriorityGridPlacement {
-    const usedColumns = rowItemCount * columnSpan;
-    const offsetColumns = Math.floor((Call.scenePriorityGridColumns - usedColumns) / 2);
-
-    return {
-      row,
-      column: 1 + offsetColumns + indexInRow * columnSpan,
-      columnSpan
-    };
-  }
-
-  private getSceneMainGridRowCount(sceneMainCount: number): number {
-    return Math.max(1, Math.ceil(sceneMainCount / Call.sceneMainColumnsPerRow));
-  }
-
-  private getSceneMainColumnSpan(rowItemCount: number): number {
-    return rowItemCount <= 1 ? 8 : 6;
-  }
-
-  private getPriorityGridCellWidthPx(columnSpan: number): number | null {
-    if (!this.sceneGridContentWidthPx) {
-      return null;
-    }
-
-    const trackWidthPx = (
-      this.sceneGridContentWidthPx - Call.sceneGridGapPx * (Call.scenePriorityGridColumns - 1)
-    ) / Call.scenePriorityGridColumns;
-
-    return Math.max(
-      1,
-      Math.floor(trackWidthPx * columnSpan + Call.sceneGridGapPx * (columnSpan - 1))
-    );
+    return getScenePriorityGridPlacement({
+      participantId,
+      isSceneMainLayoutActive: this.isSceneMainLayoutActive,
+      visibleIds,
+      sceneMainIds: this.getVisibleSceneMainParticipantIds(visibleIds),
+      visibleParticipantCount: this.visibleParticipantCount
+    });
   }
 
   private getVisibleParticipantIds(): string[] {
@@ -4474,8 +3035,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   onRemoteVideoQualityChange() {
-    this.remoteVideoQualityLevel = this.normalizeRemoteVideoQualityLevel(this.remoteVideoQualityLevel);
-    this.videoService.setRemoteVideoQualityPreference(this.getSelectedRemoteVideoQualityPreference());
+    this.remoteVideoQualityLevel = normalizeRemoteVideoQualityLevel(this.remoteVideoQualityLevel);
+    this.videoService.setRemoteVideoQualityPreference(
+      getRemoteVideoQualityPreference(this.remoteVideoQualityLevel)
+    );
     this.persistMediaPreferences();
   }
 
@@ -4489,78 +3052,98 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.joinError = '';
 
     try {
-      const currentUserId = this.authService.getCurrentUserId();
-      if (!currentUserId) {
-        throw new Error('Missing authenticated userId');
-      }
-
-      if (this.previewStream && this.previewStream.active) {
-        this.localStream = this.previewStream;
-        this.previewStream = null;
-      } else {
-        if (this.isMobileBrowser) {
-          await this.prepareMobileMedia();
-        }
-
-        this.localStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
-      }
-
-      if (!this.localStream || !this.localStream.active) {
-        throw new Error('Acquired stream is not active');
-      }
-
+      const currentUserId = this.requireCurrentUserId();
+      this.localStream = await this.getStreamForJoin();
+      this.assertActiveLocalStream();
       this.syncMicInputMonitor();
-
-      // SYNC: Transfer preview settings to live state
-      this.isAudioMuted = this.isPreviewMuted;
-      this.isVideoOff = this.isPreviewVideoOff;
-      this.persistMediaPreferences();
-
-      // Apply initial track states
-      this.localStream.getAudioTracks().forEach(t => t.enabled = !this.isAudioMuted);
-      this.localStream.getVideoTracks().forEach(t => t.enabled = !this.isVideoOff);
+      this.syncLiveStateFromPreview();
+      this.applyLocalTrackStates();
 
       const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
       this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
-
       await this.videoService.startProducing(this.localStream);
-
-      // Explicitly tell LiveKit the desired initial state
-      await this.videoService.setCameraEnabled(!this.isVideoOff);
-      await this.videoService.setMicrophoneEnabled(!this.isAudioMuted);
+      await this.publishInitialCallTrackState();
 
       setTimeout(() => {
         this.updateLocalVideoDisplay();
       }, 100);
 
       this.videoService.requestSpotifyState();
-
-      } catch (err) {
-        console.error('[CRITICAL] Join call failed:', err);
-        this.joinError = this.getJoinErrorMessage(err);
-        if (this.localStream) {
-          this.localStream.getTracks().forEach(t => t.stop());
-          this.localStream = null;
-      }
-      this.isJoining = false;
-      await this.startPreview();
+    } catch (err) {
+      await this.handleJoinFailure(err);
     } finally {
       this.isJoining = false;
       this.cdr.detectChanges();
-      }
+    }
+  }
+
+  private requireCurrentUserId(): string {
+    const currentUserId = this.authService.getCurrentUserId();
+    if (!currentUserId) {
+      throw new Error('Missing authenticated userId');
     }
 
-    private getJoinErrorMessage(error: unknown): string {
-      const message = error instanceof Error ? error.message : String(error || '');
-      if (message.toLowerCase().includes('permission')) {
-        return message;
-      }
+    return currentUserId;
+  }
 
-      return 'Could not join this call. Check your device access and channel permissions.';
+  private async getStreamForJoin(): Promise<MediaStream> {
+    if (this.previewStream && this.previewStream.active) {
+      const stream = this.previewStream;
+      this.previewStream = null;
+      return stream;
     }
 
-    async leaveCall() {
+    if (this.isMobileBrowser) {
+      await this.prepareMobileMedia();
+    }
+
+    return navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+  }
+
+  private assertActiveLocalStream() {
+    if (!this.localStream || !this.localStream.active) {
+      throw new Error('Acquired stream is not active');
+    }
+  }
+
+  private syncLiveStateFromPreview() {
+    this.isAudioMuted = this.isPreviewMuted;
+    this.isVideoOff = this.isPreviewVideoOff;
+    this.persistMediaPreferences();
+  }
+
+  private applyLocalTrackStates() {
+    this.localStream?.getAudioTracks().forEach(track => track.enabled = !this.isAudioMuted);
+    this.localStream?.getVideoTracks().forEach(track => track.enabled = !this.isVideoOff);
+  }
+
+  private async publishInitialCallTrackState() {
+    await this.videoService.setCameraEnabled(!this.isVideoOff);
+    await this.videoService.setMicrophoneEnabled(!this.isAudioMuted);
+  }
+
+  private async handleJoinFailure(error: unknown) {
+    console.error('[CRITICAL] Join call failed:', error);
+    this.joinError = this.getJoinErrorMessage(error);
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+      this.localStream = null;
+    }
+
+    await this.startPreview();
+  }
+
+  private getJoinErrorMessage(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error || '');
+    if (message.toLowerCase().includes('permission')) {
+      return message;
+    }
+
+    return 'Could not join this call. Check your device access and channel permissions.';
+  }
+
+  async leaveCall() {
     this.stopSessionRecording();
     this.resetMicTestForCaptureChange();
     await this.videoService.leaveCall(this.channelId);
@@ -4575,7 +3158,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.isDmMode = false;
     this.syncPreviewSetupFromLive();
     if (!this.isComponentDestroying) {
-        await this.startPreview();
+      await this.startPreview();
     }
   }
 
@@ -4651,7 +3234,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get themeBackgroundImagePreviewStyle(): string {
-    return this.toCssImageValue(this.activeColors.backgroundImage ?? null);
+    return toCssImageValue(this.activeColors.backgroundImage ?? null);
   }
 
   get isThemeBackgroundBlurred(): boolean {
@@ -4664,7 +3247,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.themePickerBaselineColors = this.isServerOwner ? this.cloneThemeColors(this.activeColors) : null;
+    this.themePickerBaselineColors = this.isServerOwner ? cloneThemeColors(this.activeColors) : null;
     this.showThemePicker = true;
   }
 
@@ -4711,7 +3294,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   getPinnedThemePreview(theme: PinnedTheme): string {
     if (theme.colors.backgroundImage) {
-      return `${theme.colors.background} ${this.toCssImageValue(theme.colors.backgroundImage)} center / cover no-repeat`;
+      return `${theme.colors.background} ${toCssImageValue(theme.colors.backgroundImage)} center / cover no-repeat`;
     }
 
     return theme.colors.primary;
@@ -4729,7 +3312,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   cancelTheme() {
     if (this.isServerOwner && this.themePickerBaselineColors) {
-      this.activeColors = this.cloneThemeColors(this.themePickerBaselineColors);
+      this.activeColors = cloneThemeColors(this.themePickerBaselineColors);
       this.themeService.applyTheme(this.activeColors, false);
       this.rememberValidThemeBackground(this.activeColors);
     } else if (this.isServerOwner) {
@@ -4749,7 +3332,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.rememberValidThemeBackground(this.activeColors);
     if (this.safeSendThemeUpdate(this.activeColors)) {
       this.recordCallEnvironmentEvent('theme-sync', this.activeColors);
-      this.themePickerBaselineColors = this.cloneThemeColors(this.activeColors);
+      this.themePickerBaselineColors = cloneThemeColors(this.activeColors);
     }
   }
 
@@ -4772,7 +3355,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.videoService.updateUserData(this.channelId, characterToBroadcast);
     this.recordCallEnvironmentEvent('dm-mode', {
       enabled: this.isDmMode,
-      character: this.createCharacterSnapshot(characterToBroadcast)
+      character: createCharacterSnapshot(characterToBroadcast)
     });
     this.recordCallParticipantsSnapshotIfChanged();
     this.cdr.detectChanges();
@@ -4812,29 +3395,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.cleanupCallPlaybackSources();
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
-    if (this.streamSub) this.streamSub.unsubscribe();
-    if (this.spotifySyncSub) this.spotifySyncSub.unsubscribe();
-    if (this.spotifyActionSub) this.spotifyActionSub.unsubscribe();
-    if (this.spotifyStateRequestSub) this.spotifyStateRequestSub.unsubscribe();
-    if (this.spotifyRequestSub) this.spotifyRequestSub.unsubscribe();
-    if (this.themeSyncSub) this.themeSyncSub.unsubscribe();
-    if (this.pinnedThemesSub) this.pinnedThemesSub.unsubscribe();
-    if (this.vttSub) this.vttSub.unsubscribe();
-    if (this.overlaySub) this.overlaySub.unsubscribe();
-    if (this.overlayTextSub) this.overlayTextSub.unsubscribe();
-    if (this.temporaryAtmosphereBackgroundSub) this.temporaryAtmosphereBackgroundSub.unsubscribe();
-    if (this.serverDetailsSub) this.serverDetailsSub.unsubscribe();
-    if (this.callKickedSub) this.callKickedSub.unsubscribe();
-    if (this.companionDevicesSub) this.companionDevicesSub.unsubscribe();
-    if (this.selectedVideoSourceSub) this.selectedVideoSourceSub.unsubscribe();
-    if (this.selectedAudioSourceSub) this.selectedAudioSourceSub.unsubscribe();
-    if (this.remoteVideoQualitySub) this.remoteVideoQualitySub.unsubscribe();
-    if (this.participantVolumesSub) this.participantVolumesSub.unsubscribe();
-    if (this.sceneMainCharactersSub) this.sceneMainCharactersSub.unsubscribe();
-    if (this.sessionRecordingStateSub) this.sessionRecordingStateSub.unsubscribe();
-    if (this.sessionRecordingLastSub) this.sessionRecordingLastSub.unsubscribe();
-    if (this.sessionPlaybackSub) this.sessionPlaybackSub.unsubscribe();
-    if (this.astralPlaybackDropSub) this.astralPlaybackDropSub.unsubscribe();
+    this.subscriptions.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
 
     // Just clean up local hardware previews.
@@ -4848,18 +3409,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   startVttHosting() {
     const roomId = this.getVttRoomId();
     this.hostVtt.emit(roomId);
-  }
-
-  private toCssImageValue(imageUrl: string | null): string {
-    if (!imageUrl) {
-      return 'none';
-    }
-
-    return `url("${imageUrl.replace(/"/g, '\\"')}")`;
-  }
-
-  private cloneThemeColors(colors: ThemeColors): ThemeColors {
-    return { ...colors };
   }
 
   private applyThemeCandidate(candidate: ThemeColors, showSizeError = false): boolean {
@@ -4887,7 +3436,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.rememberValidThemeBackground(theme);
       return true;
     } catch (error) {
-      if (this.isThemePayloadSizeError(error)) {
+      if (isThemePayloadSizeError(error)) {
         const oversizedImage = theme.backgroundImage ?? null;
         this.revertThemeBackground(theme, false);
         this.promptThemeImageCompression(oversizedImage);
@@ -4899,22 +3448,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private isThemeSyncPayloadTooLarge(theme: ThemeColors): boolean {
-    return this.getThemeSyncPayloadByteLength(theme) > Call.maxThemeSyncPayloadBytes;
-  }
-
-  private getThemeSyncPayloadByteLength(theme: ThemeColors): number {
-    return new TextEncoder().encode(JSON.stringify({ type: 'theme-sync', theme })).byteLength;
+    return isThemeSyncPayloadTooLarge(theme, CALL_MAX_THEME_SYNC_PAYLOAD_BYTES);
   }
 
   private revertThemeBackground(theme: ThemeColors, showToast: boolean) {
-    const revertedTheme: ThemeColors = {
-      ...theme,
-      backgroundImage: this.lastValidThemeBackgroundImage,
-      backgroundImageBlur: this.lastValidThemeBackgroundImage
-        ? this.lastValidThemeBackgroundImageBlur
-        : false
-    };
-
+    const revertedTheme = getRevertedThemeBackground(
+      theme,
+      this.lastValidThemeBackgroundImage,
+      this.lastValidThemeBackgroundImageBlur
+    );
     this.activeColors = revertedTheme;
     this.themeService.applyTheme(revertedTheme, false);
 
@@ -4936,15 +3478,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.themeService.applyTheme({
-      ...this.activeColors,
-      backgroundImage: url,
-      backgroundImageBlur: true
-    }, false, false);
-  }
-
-  private isThemePayloadSizeError(error: unknown): boolean {
-    return String(error instanceof Error ? error.message : error).toLowerCase().includes('message too large');
+    this.themeService.applyTheme(getTemporaryAtmosphereTheme(this.activeColors, url), false, false);
   }
 
   private promptThemeImageCompression(source: File | string | null) {
@@ -4966,7 +3500,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private async compressAndApplyThemeBackgroundImage(source: File | string) {
     try {
-      const compressedImage = await this.compressThemeBackgroundImage(source);
+      const compressedImage = await compressThemeBackgroundImage(
+        source,
+        this.activeColors,
+        CALL_MAX_THEME_SYNC_PAYLOAD_BYTES
+      );
       const accepted = this.applyThemeCandidate({
         ...this.activeColors,
         backgroundImage: compressedImage
@@ -4987,69 +3525,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         duration: 2800
       });
     }
-  }
-
-  private async compressThemeBackgroundImage(source: File | string): Promise<string> {
-    const image = await this.loadImageForCompression(source);
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-
-    if (!context) {
-      throw new Error('Canvas is unavailable');
-    }
-
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    const maxDimensions = [1280, 960, 720, 540, 420, 320, 256];
-    const qualities = [0.82, 0.72, 0.62, 0.52, 0.42, 0.34, 0.28];
-
-    for (const maxDimension of maxDimensions) {
-      const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-      const width = Math.max(1, Math.round(sourceWidth * scale));
-      const height = Math.max(1, Math.round(sourceHeight * scale));
-
-      canvas.width = width;
-      canvas.height = height;
-      context.clearRect(0, 0, width, height);
-      context.drawImage(image, 0, 0, width, height);
-
-      for (const quality of qualities) {
-        const compressed = canvas.toDataURL('image/jpeg', quality);
-        const candidate = {
-          ...this.activeColors,
-          backgroundImage: compressed
-        };
-
-        if (!this.isThemeSyncPayloadTooLarge(candidate)) {
-          return compressed;
-        }
-      }
-    }
-
-    throw new Error('Compressed image is too large');
-  }
-
-  private loadImageForCompression(source: File | string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      const objectUrl = source instanceof File ? URL.createObjectURL(source) : null;
-
-      image.onload = () => {
-        if (objectUrl) {
-          URL.revokeObjectURL(objectUrl);
-        }
-        resolve(image);
-      };
-
-      image.onerror = () => {
-        if (objectUrl) {
-          URL.revokeObjectURL(objectUrl);
-        }
-        reject(new Error('Image could not be loaded'));
-      };
-
-      image.src = objectUrl ?? source as string;
-    });
   }
 
   startVttJoining() {
@@ -5165,18 +3640,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const styles = getComputedStyle(element);
-    const contentWidthPx = Math.max(
-      0,
-      element.clientWidth - this.toCssPixelValue(styles.paddingLeft) - this.toCssPixelValue(styles.paddingRight)
-    );
-    const contentHeightPx = Math.max(
-      0,
-      element.clientHeight - this.toCssPixelValue(styles.paddingTop) - this.toCssPixelValue(styles.paddingBottom)
-    );
-
-    const nextHasSpace = contentWidthPx >= Call.minSceneMainLayoutWidthPx &&
-      contentHeightPx >= Call.minSceneMainLayoutHeightPx;
+    const { contentWidthPx, contentHeightPx, hasLayoutSpace: nextHasSpace } =
+      measureSceneGridContent(element);
     if (
       this.hasSceneMainLayoutSpace === nextHasSpace &&
       this.sceneGridContentWidthPx === contentWidthPx &&
@@ -5192,11 +3657,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.closeRemoteContextMenu();
     }
     this.cdr.detectChanges();
-  }
-
-  private toCssPixelValue(value: string): number {
-    const numericValue = Number.parseFloat(value);
-    return Number.isFinite(numericValue) ? numericValue : 0;
   }
 
   private updateLocalVideoDisplay(participants: any[] = this.videoService.remoteStreams$.value) {
@@ -5270,7 +3730,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private async restoreStoredMediaPreferences() {
-    const preferences = this.readStoredMediaPreferences();
+    const preferences = readStoredCallMediaPreferences();
     if (!preferences) {
       return;
     }
@@ -5284,10 +3744,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (typeof preferences.selectedOutputId === 'string') {
       this.selectedOutputId = preferences.selectedOutputId;
     }
-    if (this.isMicrophoneProcessingMode(preferences.microphoneProcessingMode)) {
+    if (isMicrophoneProcessingMode(preferences.microphoneProcessingMode)) {
       this.microphoneProcessingMode = preferences.microphoneProcessingMode;
     }
-    if (this.isRemoteVideoQualityPreference(preferences.remoteVideoQualityPreference)) {
+    if (isRemoteVideoQualityPreference(preferences.remoteVideoQualityPreference)) {
       this.videoService.setRemoteVideoQualityPreference(preferences.remoteVideoQualityPreference);
     }
     if (typeof preferences.isPreviewMuted === 'boolean') {
@@ -5311,32 +3771,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  private readStoredMediaPreferences(): Partial<StoredCallMediaPreferences> | null {
-    const storage = this.getPreferenceStorage();
-    if (!storage) {
-      return null;
-    }
-
-    const value = storage.getItem(Call.mediaPreferencesStorageKey);
-    if (!value) {
-      return null;
-    }
-
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
-      return null;
-    }
-  }
-
   private persistMediaPreferences() {
     const preferences: StoredCallMediaPreferences = {
       selectedVideoId: this.selectedVideoId,
       selectedAudioId: this.selectedAudioId,
       selectedOutputId: this.selectedOutputId,
       microphoneProcessingMode: this.microphoneProcessingMode,
-      remoteVideoQualityPreference: this.getSelectedRemoteVideoQualityPreference(),
+      remoteVideoQualityPreference: getRemoteVideoQualityPreference(this.remoteVideoQualityLevel),
       selectedPcVideoSource: this.selectedPcVideoSource,
       selectedPcAudioSource: this.selectedPcAudioSource,
       isPreviewMuted: this.localStream ? this.isAudioMuted : this.isPreviewMuted,
@@ -5344,50 +3785,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       experimentalMobile1080pEnabled: this.experimentalMobile1080pEnabled
     };
 
-    this.writeStoredMediaPreferences(preferences);
+    writeStoredCallMediaPreferences(preferences);
   }
 
   private persistCurrentMediaSetupState() {
-    const preferences = this.readStoredMediaPreferences() ?? {};
+    const preferences = readStoredCallMediaPreferences() ?? {};
     preferences.isPreviewMuted = this.localStream ? this.isAudioMuted : this.isPreviewMuted;
     preferences.isPreviewVideoOff = this.localStream ? this.isVideoOff : this.isPreviewVideoOff;
     preferences.experimentalMobile1080pEnabled = this.experimentalMobile1080pEnabled;
-    this.writeStoredMediaPreferences(preferences);
-  }
-
-  private writeStoredMediaPreferences(preferences: Partial<StoredCallMediaPreferences>) {
-    const storage = this.getPreferenceStorage();
-    if (!storage) {
-      return;
-    }
-
-    try {
-      storage.setItem(Call.mediaPreferencesStorageKey, JSON.stringify(preferences));
-    } catch (error) {
-      console.warn('Failed to persist call media preferences', error);
-    }
-  }
-
-  private getPreferenceStorage(): Storage | null {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-
-    try {
-      return window.localStorage;
-    } catch {
-      return null;
-    }
-  }
-
-  private resolveAvailableDeviceId(devices: MediaDeviceInfo[], selectedDeviceId: string): string {
-    if (!devices.length) {
-      return '';
-    }
-
-    return selectedDeviceId && devices.some(device => device.deviceId === selectedDeviceId)
-      ? selectedDeviceId
-      : devices[0].deviceId;
+    writeStoredCallMediaPreferences(preferences);
   }
 
   private applyPreviewSetupToStream() {
@@ -5403,47 +3809,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.isPreviewMuted = this.isAudioMuted;
     this.isPreviewVideoOff = this.isVideoOff;
     this.persistCurrentMediaSetupState();
-  }
-
-  private isMicrophoneProcessingMode(value: unknown): value is MicrophoneProcessingMode {
-    return value === 'studio' || value === 'processed';
-  }
-
-  private isRemoteVideoQualityPreference(value: unknown): value is RemoteVideoQualityPreference {
-    return value === 'low' || value === 'medium' || value === 'high';
-  }
-
-  private normalizeRemoteVideoQualityLevel(value: unknown): RemoteVideoQualityLevel {
-    const numericValue = typeof value === 'string' ? Number(value) : value;
-    if (numericValue === 0 || numericValue === 1 || numericValue === 2) {
-      return numericValue;
-    }
-
-    return 1;
-  }
-
-  private getSelectedRemoteVideoQualityPreference(): RemoteVideoQualityPreference {
-    const level = this.normalizeRemoteVideoQualityLevel(this.remoteVideoQualityLevel);
-    return this.remoteVideoQualityOptions[level]?.value ?? 'medium';
-  }
-
-  private parseDeviceTypeParam(value: string | null | undefined): DeviceType | null {
-    if (value === 'desktop' || value === 'mobile' || value === 'tablet' || value === 'unknown') {
-      return value;
-    }
-
-    return null;
-  }
-
-  private preferenceToRemoteVideoQualityLevel(preference: RemoteVideoQualityPreference): RemoteVideoQualityLevel {
-    switch (preference) {
-      case 'low':
-        return 0;
-      case 'high':
-        return 2;
-      default:
-        return 1;
-    }
   }
 
   private async replaceActiveMediaStream() {
@@ -5500,116 +3865,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private configureRemoteAudio(remote: ParticipantStream, video: HTMLVideoElement) {
-    const stream = remote.stream;
     const volumePercent = remote.volumePercent ?? this.videoService.getParticipantVolume(remote.id);
-
-    if (!this.supportsRemoteAudioGain || !stream) {
-      video.muted = false;
-      video.volume = Math.min(1, volumePercent / 100);
-      this.teardownRemoteAudioOutput(remote.id);
-      return;
-    }
-
-    video.muted = true;
-
-    const audioTrack = stream.getAudioTracks()[0] || null;
-    if (!audioTrack) {
-      this.teardownRemoteAudioOutput(remote.id);
-      return;
-    }
-
-    const existingOutput = this.remoteAudioOutputs.get(remote.id);
-    if (existingOutput && existingOutput.stream === stream && existingOutput.audioTrackId === audioTrack.id) {
-      existingOutput.gain.gain.value = volumePercent / 100;
-      void this.playRemoteAudioElement(existingOutput.audioElement).then(played => {
-        if (!played) {
-          video.muted = false;
-          video.volume = Math.min(1, volumePercent / 100);
-        }
-      });
-      return;
-    }
-
-    this.teardownRemoteAudioOutput(remote.id);
-
-    const audioContext = this.getRemoteAudioContext();
-    if (!audioContext) {
-      video.muted = false;
-      video.volume = Math.min(1, volumePercent / 100);
-      return;
-    }
-
-    try {
-      const source = audioContext.createMediaStreamSource(stream);
-      const gain = audioContext.createGain();
-      const destination = audioContext.createMediaStreamDestination();
-      const audioElement = new Audio();
-
-      gain.gain.value = volumePercent / 100;
-      source.connect(gain);
-      gain.connect(destination);
-
-      audioElement.autoplay = true;
-      audioElement.srcObject = destination.stream;
-      audioElement.volume = 1;
-
-      this.remoteAudioOutputs.set(remote.id, {
-        stream,
-        audioTrackId: audioTrack.id,
-        source,
-        gain,
-        destination,
-        audioElement
-      });
-
-      void this.applyAudioOutputToMediaElement(audioElement);
-      void this.playRemoteAudioElement(audioElement).then(played => {
-        const currentOutput = this.remoteAudioOutputs.get(remote.id);
-        if (!played && currentOutput?.audioElement === audioElement) {
-          video.muted = false;
-          video.volume = Math.min(1, volumePercent / 100);
-        }
-      });
-    } catch (error) {
-      console.warn('Failed to create amplified remote audio output', error);
-      this.teardownRemoteAudioOutput(remote.id);
-      video.muted = false;
-      video.volume = Math.min(1, volumePercent / 100);
-    }
-  }
-
-  private getRemoteAudioContext(): AudioContext | null {
-    if (this.remoteAudioContext?.state === 'closed') {
-      this.remoteAudioContext = null;
-    }
-
-    if (!this.remoteAudioContext) {
-      const AudioContextConstructor = this.getAudioContextConstructor();
-      if (!AudioContextConstructor) {
-        return null;
-      }
-
-      this.remoteAudioContext = new AudioContextConstructor();
-    }
-
-    if (this.remoteAudioContext.state === 'suspended') {
-      void this.remoteAudioContext.resume().catch(() => undefined);
-    }
-
-    return this.remoteAudioContext;
-  }
-
-  private async playRemoteAudioElement(audioElement: HTMLAudioElement): Promise<boolean> {
-    try {
-      if (this.remoteAudioContext?.state === 'suspended') {
-        await this.remoteAudioContext.resume();
-      }
-
-      await audioElement.play();
-      return true;
-    } catch {
-      return false;
-    }
+    this.remoteAudioRouter.configureRemoteAudio(remote.id, remote.stream, volumePercent, video);
   }
 
   private applyRemoteVolumes() {
@@ -5617,26 +3874,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private applyRemoteVolume(participantId: string, volumePercent: number) {
-    const output = this.remoteAudioOutputs.get(participantId);
-    if (output) {
-      output.gain.gain.value = volumePercent / 100;
-      output.audioElement.volume = 1;
-      void this.playRemoteAudioElement(output.audioElement).then(played => {
-        const remoteIndex = this.remoteStreams.findIndex(remote => remote.id === participantId);
-        const video = remoteIndex >= 0 ? this.remoteVideos?.get(remoteIndex)?.nativeElement : null;
-        if (!played && video) {
-          video.muted = false;
-          video.volume = Math.min(1, volumePercent / 100);
-        }
-      });
-    }
-
     const remoteIndex = this.remoteStreams.findIndex(remote => remote.id === participantId);
-    const video = remoteIndex >= 0 ? this.remoteVideos?.get(remoteIndex)?.nativeElement : null;
-    if (video) {
-      video.volume = Math.min(1, volumePercent / 100);
-      video.muted = this.supportsRemoteAudioGain;
-    }
+    const video = remoteIndex >= 0 ? this.remoteVideos?.get(remoteIndex)?.nativeElement ?? null : null;
+    this.remoteAudioRouter.applyRemoteVolume(participantId, volumePercent, video);
   }
 
   private normalizeRemoteVolume(value: number | string): number {
@@ -5664,41 +3904,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private teardownMissingRemoteAudioOutputs(activeParticipantIds: Set<string>) {
-    Array.from(this.remoteAudioOutputs.keys()).forEach(participantId => {
-      if (!activeParticipantIds.has(participantId)) {
-        this.teardownRemoteAudioOutput(participantId);
-      }
-    });
-  }
-
-  private teardownRemoteAudioOutput(participantId: string) {
-    const output = this.remoteAudioOutputs.get(participantId);
-    if (!output) {
-      return;
-    }
-
-    output.source.disconnect();
-    output.gain.disconnect();
-    output.audioElement.pause();
-    output.audioElement.srcObject = null;
-    output.destination.stream.getTracks().forEach(track => track.stop());
-    this.remoteAudioOutputs.delete(participantId);
+    this.remoteAudioRouter.teardownMissingRemoteAudioOutputs(activeParticipantIds);
   }
 
   private teardownAllRemoteAudioOutputs() {
-    Array.from(this.remoteAudioOutputs.keys()).forEach(participantId => this.teardownRemoteAudioOutput(participantId));
-
-    if (this.remoteAudioContext && this.remoteAudioContext.state !== 'closed') {
-      void this.remoteAudioContext.close().catch(() => undefined);
-    }
-    this.remoteAudioContext = null;
+    this.remoteAudioRouter.teardownAllRemoteAudioOutputs();
   }
 
   private async applyAudioOutputToAllMedia() {
-    if (!this.supportsAudioOutputSelection || !this.selectedOutputId) {
-      return;
-    }
-
     const mediaElements: HTMLMediaElement[] = [];
     if (this.previewVideo?.nativeElement) {
       mediaElements.push(this.previewVideo.nativeElement);
@@ -5712,25 +3925,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.remoteVideos?.forEach(videoRef => {
       mediaElements.push(videoRef.nativeElement);
     });
-    this.remoteAudioOutputs.forEach(output => {
-      mediaElements.push(output.audioElement);
-    });
-
-    for (const element of mediaElements) {
-      await this.applyAudioOutputToMediaElement(element);
-    }
+    await this.remoteAudioRouter.applyAudioOutputToAllMedia(mediaElements);
   }
 
   private async applyAudioOutputToMediaElement(element: HTMLMediaElement) {
-    if (!this.supportsAudioOutputSelection || !this.selectedOutputId) {
-      return;
-    }
-
-    try {
-      await element.setSinkId(this.selectedOutputId);
-    } catch (error) {
-      console.warn('Failed to switch audio output device', error);
-    }
+    await this.remoteAudioRouter.applyAudioOutputToMediaElement(element);
   }
 
   trackRemoteStream(_: number, remote: ParticipantStream): string {
@@ -5738,63 +3937,30 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   getConnectionQualityLabel(diagnostics?: ParticipantMediaDiagnostics): string {
-    if (!diagnostics) {
-      return 'Unknown';
-    }
-
-    switch (diagnostics.connectionQuality) {
-      case 'excellent':
-        return 'Excellent';
-      case 'good':
-        return 'Good';
-      case 'poor':
-        return 'Poor';
-      case 'lost':
-        return 'Lost';
-      default:
-        return 'Unknown';
-    }
+    return callDiagnostics.getConnectionQualityLabel(diagnostics);
   }
 
   getConnectionQualityClass(diagnostics?: ParticipantMediaDiagnostics): string {
-    switch (diagnostics?.connectionQuality) {
-      case 'excellent':
-        return 'quality-excellent';
-      case 'good':
-        return 'quality-good';
-      case 'poor':
-        return 'quality-poor';
-      case 'lost':
-        return 'quality-lost';
-      default:
-        return 'quality-unknown';
-    }
+    return callDiagnostics.getConnectionQualityClass(diagnostics);
   }
 
   formatBitrateKbps(value: number | null | undefined): string {
-    return value == null ? '--' : `${value} kbps`;
+    return callDiagnostics.formatBitrateKbps(value);
   }
 
   formatPacketLoss(value: number | null | undefined): string {
-    return value == null ? '--' : `${value}%`;
+    return callDiagnostics.formatPacketLoss(value);
   }
 
   formatJitter(value: number | null | undefined): string {
-    return value == null ? '--' : `${value} ms`;
+    return callDiagnostics.formatJitter(value);
   }
 
   formatResolution(diagnostics?: ParticipantMediaDiagnostics): string {
-    const width = diagnostics?.video?.width;
-    const height = diagnostics?.video?.height;
-    if (!width || !height) {
-      return '--';
-    }
-
-    return `${width}x${height}`;
+    return callDiagnostics.formatResolution(diagnostics);
   }
 
   formatFrameRate(diagnostics?: ParticipantMediaDiagnostics): string {
-    const frameRate = diagnostics?.video?.frameRate;
-    return frameRate == null ? '--' : `${frameRate} fps`;
+    return callDiagnostics.formatFrameRate(diagnostics);
   }
 }

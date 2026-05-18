@@ -6,6 +6,35 @@ const isDev = !app.isPackaged;
 
 app.commandLine.appendSwitch('enable-widevine');
 
+const soundCloudMediaPermissionsPolicy = [
+  'encrypted-media=(self "https://w.soundcloud.com" "https://soundcloud.com" "https://api-widget.soundcloud.com" "https://api.soundcloud.com")',
+  'autoplay=(self "https://w.soundcloud.com" "https://soundcloud.com")'
+].join(', ');
+
+function setResponseHeader(headers, name, value) {
+  const existingKey = Object.keys(headers).find(key => key.toLowerCase() === name.toLowerCase());
+  headers[existingKey || name] = [value];
+}
+
+function configureMediaPermissions() {
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    const allowedPermissions = [
+      'media',
+      'mediaKeySystem',
+      'protectedMediaIdentifier',
+      'geolocation',
+      'notifications'
+    ];
+    callback(allowedPermissions.includes(permission));
+  });
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = details.responseHeaders || {};
+    setResponseHeader(responseHeaders, 'Permissions-Policy', soundCloudMediaPermissionsPolicy);
+    callback({ responseHeaders });
+  });
+}
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -22,17 +51,6 @@ function createWindow() {
     }
   });
 
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    const allowedPermissions = [
-      'media',
-      'mediaKeySystem',
-      'protectedMediaIdentifier',
-      'geolocation',
-      'notifications'
-    ];
-    callback(allowedPermissions.includes(permission));
-  });
-
   mainWindow.loadURL('http://localhost:4200');
 }
 
@@ -45,6 +63,7 @@ app.whenReady().then(async () => {
     console.error('[DRM] Failed to initialize components:', e);
   }
 
+  configureMediaPermissions();
   createWindow();
 });
 
