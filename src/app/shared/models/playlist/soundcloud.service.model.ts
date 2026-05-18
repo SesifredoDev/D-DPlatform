@@ -37,6 +37,20 @@ export interface SoundCloudPlaylistImportResult {
   discoveredCount: number;
 }
 
+export interface SoundCloudMusicListExport {
+  version: 1;
+  exportedAt: string;
+  savedItems: SoundCloudSearchResult[];
+  pinnedItems: any[];
+}
+
+export interface SoundCloudMusicListImportResult {
+  addedCount: number;
+  duplicateCount: number;
+  pinnedAddedCount: number;
+  totalSavedItems: number;
+}
+
 export interface SoundCloudOEmbedResponse {
   title?: string;
   author_name?: string;

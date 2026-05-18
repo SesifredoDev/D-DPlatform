@@ -3,8 +3,23 @@ import { BehaviorSubject, Subject } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
-import type { SoundCloudSearchResult, SoundCloudDevice, SoundCloudSyncEvent, SoundCloudPlaylistImportResult, SoundCloudOEmbedResponse } from '../../models/playlist/soundcloud.service.model';
-export type { SoundCloudSearchResult, SoundCloudDevice, SoundCloudSyncEvent, SoundCloudPlaylistImportResult } from '../../models/playlist/soundcloud.service.model';
+import type {
+  SoundCloudSearchResult,
+  SoundCloudDevice,
+  SoundCloudSyncEvent,
+  SoundCloudPlaylistImportResult,
+  SoundCloudOEmbedResponse,
+  SoundCloudMusicListExport,
+  SoundCloudMusicListImportResult
+} from '../../models/playlist/soundcloud.service.model';
+export type {
+  SoundCloudSearchResult,
+  SoundCloudDevice,
+  SoundCloudSyncEvent,
+  SoundCloudPlaylistImportResult,
+  SoundCloudMusicListExport,
+  SoundCloudMusicListImportResult
+} from '../../models/playlist/soundcloud.service.model';
 
 @Injectable({ providedIn: 'root' })
 export class SoundCloudService {
@@ -131,6 +146,27 @@ export class SoundCloudService {
     };
   }
 
+  exportMusicList(): SoundCloudMusicListExport {
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      savedItems: this.savedItems$.value.map(item => ({ ...item })),
+      pinnedItems: this.pinnedItems$.value.map(item => ({ ...item }))
+    };
+  }
+
+  importMusicListFromJson(json: string): SoundCloudMusicListImportResult {
+    let data: unknown;
+
+    try {
+      data = JSON.parse(json) as unknown;
+    } catch {
+      throw new Error('Invalid SoundCloud music list JSON.');
+    }
+
+    return this.importMusicList(data);
+  }
+
   removeSavedItem(uri: string) {
     this.setSavedItems(this.savedItems$.value.filter(item => item.uri !== uri));
     if (this.isPinned(uri)) {
@@ -195,9 +231,7 @@ export class SoundCloudService {
       ? current.filter(p => p.uri !== uri)
       : [...current, this.toPinnedItem(item)];
 
-    this.pinnedItems$.next(updated);
-    localStorage.setItem('soundcloud_pinned_items', JSON.stringify(updated));
-    this.sharedWindowState.publish(SoundCloudService.pinnedItemsStateKey, updated);
+    this.setPinnedItems(updated);
   }
 
   isPinned(uri: string): boolean {
@@ -448,10 +482,213 @@ export class SoundCloudService {
     this.sharedWindowState.publish(SoundCloudService.savedItemsStateKey, items);
   }
 
+  private setPinnedItems(items: any[]) {
+    this.pinnedItems$.next(items);
+    localStorage.setItem('soundcloud_pinned_items', JSON.stringify(items));
+    this.sharedWindowState.publish(SoundCloudService.pinnedItemsStateKey, items);
+  }
+
   private applySavedItems(items: SoundCloudSearchResult[]) {
     this.savedItems$.next(items);
     this.savedPlaylists$.next(items.filter(item => item.type === 'playlist'));
     this.recentPlays$.next(items.filter(item => item.type === 'track').map(track => ({ track })));
+  }
+
+  private importMusicList(data: unknown): SoundCloudMusicListImportResult {
+    const importedItems = this.uniqueSavedItemsByUri(
+      this.getImportArray(data, 'savedItems', 'items', 'musicList')
+        .map(item => this.normalizeImportedSavedItem(item))
+        .filter((item): item is SoundCloudSearchResult => !!item)
+    );
+
+    if (!importedItems.length) {
+      throw new Error('The SoundCloud music list does not contain any saved items.');
+    }
+
+    const existingUris = new Set(
+      this.savedItems$.value.map(item => this.normalizeSoundCloudUrl(item.uri))
+    );
+    const addedItems: SoundCloudSearchResult[] = [];
+
+    for (const item of importedItems) {
+      const normalizedUri = this.normalizeSoundCloudUrl(item.uri);
+      if (existingUris.has(normalizedUri)) {
+        continue;
+      }
+
+      existingUris.add(normalizedUri);
+      addedItems.push({ ...item, id: item.id || normalizedUri, uri: normalizedUri });
+    }
+
+    const mergedItems = addedItems.length
+      ? [...addedItems, ...this.savedItems$.value]
+      : this.savedItems$.value;
+    if (addedItems.length) {
+      this.setSavedItems(mergedItems);
+    }
+
+    const pinnedAddedCount = this.importPinnedItems(data, mergedItems);
+
+    return {
+      addedCount: addedItems.length,
+      duplicateCount: importedItems.length - addedItems.length,
+      pinnedAddedCount,
+      totalSavedItems: mergedItems.length
+    };
+  }
+
+  private importPinnedItems(data: unknown, savedItems: SoundCloudSearchResult[]): number {
+    const importedPinnedItems = this.getImportArray(data, 'pinnedItems')
+      .map(item => this.normalizeImportedPinnedItem(item, savedItems))
+      .filter((item): item is any => !!item);
+
+    if (!importedPinnedItems.length) {
+      return 0;
+    }
+
+    const pinnedUris = new Set(
+      this.pinnedItems$.value
+        .map(item => this.getItemUri(item))
+        .filter((uri): uri is string => !!uri)
+        .map(uri => this.normalizeSoundCloudUrl(uri))
+    );
+    const addedPinnedItems: any[] = [];
+
+    for (const pinnedItem of importedPinnedItems) {
+      const normalizedUri = this.normalizeSoundCloudUrl(pinnedItem.uri);
+      if (pinnedUris.has(normalizedUri)) {
+        continue;
+      }
+
+      pinnedUris.add(normalizedUri);
+      addedPinnedItems.push({ ...pinnedItem, uri: normalizedUri });
+    }
+
+    if (addedPinnedItems.length) {
+      this.setPinnedItems([...this.pinnedItems$.value, ...addedPinnedItems]);
+    }
+
+    return addedPinnedItems.length;
+  }
+
+  private normalizeImportedSavedItem(item: unknown): SoundCloudSearchResult | null {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return null;
+    }
+
+    const record = item as Record<string, unknown>;
+    const rawUri = this.getStringValue(record, 'uri')
+      ?? this.getStringValue(record, 'permalink_url')
+      ?? this.getStringValue(record, 'url');
+    if (!rawUri) {
+      return null;
+    }
+
+    const uri = this.normalizeSoundCloudUrl(rawUri);
+    const rawType = this.getStringValue(record, 'type');
+    const type = rawType === 'track' || rawType === 'playlist'
+      ? rawType
+      : this.inferItemType(uri);
+    const fallbackItem = this.createSavedItem(uri, type);
+    const image = this.getStringValue(record, 'image')
+      ?? this.getFirstImageUrl(record, 'images')
+      ?? this.getFirstImageUrl(record, 'album', 'images')
+      ?? fallbackItem.image;
+    const owner = this.getStringValue(record, 'owner')
+      ?? this.getStringValue(record, 'artist')
+      ?? this.getStringValue(record, 'publisher')
+      ?? fallbackItem.owner;
+
+    return this.mergeSavedItemMetadata(fallbackItem, {
+      id: this.getStringValue(record, 'id') ?? uri,
+      name: this.getStringValue(record, 'name') ?? fallbackItem.name,
+      artist: type === 'track' ? owner : this.getStringValue(record, 'artist'),
+      artistId: this.getStringValue(record, 'artistId'),
+      owner,
+      ownerId: this.getStringValue(record, 'ownerId'),
+      publisher: type === 'track' ? owner : this.getStringValue(record, 'publisher'),
+      image,
+      duration: this.getNumberValue(record, 'duration')
+    });
+  }
+
+  private normalizeImportedPinnedItem(item: unknown, savedItems: SoundCloudSearchResult[]): any | null {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return null;
+    }
+
+    const record = item as Record<string, unknown>;
+    const rawUri = this.getStringValue(record, 'uri') ?? this.getStringValue(record, 'permalink_url');
+    if (!rawUri) {
+      return null;
+    }
+
+    const uri = this.normalizeSoundCloudUrl(rawUri);
+    const savedItem = savedItems.find(saved => this.normalizeSoundCloudUrl(saved.uri) === uri);
+    if (!savedItem) {
+      return null;
+    }
+
+    return {
+      uri,
+      name: this.getStringValue(record, 'name') ?? savedItem.name,
+      type: this.getStringValue(record, 'type') ?? savedItem.type,
+      id: this.getStringValue(record, 'id') ?? savedItem.id ?? uri,
+      image: this.getStringValue(record, 'image') ?? savedItem.image ?? this.getFallbackImage(savedItem.type),
+      owner: this.getStringValue(record, 'owner') ?? savedItem.owner ?? savedItem.artist ?? 'Unknown'
+    };
+  }
+
+  private getImportArray(data: unknown, ...keys: string[]): unknown[] {
+    if (Array.isArray(data)) {
+      return data;
+    }
+
+    if (!data || typeof data !== 'object') {
+      return [];
+    }
+
+    const record = data as Record<string, unknown>;
+    for (const key of keys) {
+      const value = record[key];
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+
+    return [];
+  }
+
+  private getStringValue(record: Record<string, unknown>, key: string): string | undefined {
+    const value = record[key];
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+  }
+
+  private getNumberValue(record: Record<string, unknown>, key: string): number | undefined {
+    const value = record[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  }
+
+  private getFirstImageUrl(record: Record<string, unknown>, key: string, nestedKey?: string): string | undefined {
+    const source = record[key];
+    const imageList = nestedKey && source && typeof source === 'object' && !Array.isArray(source)
+      ? (source as Record<string, unknown>)[nestedKey]
+      : source;
+
+    if (!Array.isArray(imageList)) {
+      return undefined;
+    }
+
+    const image = imageList.find(item => !!item && typeof item === 'object' && !Array.isArray(item)) as
+      | Record<string, unknown>
+      | undefined;
+
+    return image ? this.getStringValue(image, 'url') : undefined;
+  }
+
+  private getItemUri(item: any): string | null {
+    const uri = item?.uri || item?.permalink_url || item?.track?.uri || item?.track?.permalink_url;
+    return typeof uri === 'string' && uri ? uri : null;
   }
 
   private async fetchUserPlaylistsFromUrl(url: string): Promise<SoundCloudSearchResult[]> {

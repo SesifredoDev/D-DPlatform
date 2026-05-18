@@ -486,59 +486,160 @@
     <!-- Bottom Toolbar -->
     <div class="bottom-toolbar" *ngIf="!isCallPlaybackMode">
       <div class="controls-wrapper">
-        <div class="media-actions">
-          <button (click)="showSpotify = !showSpotify" class="btn-action btn-spotify" [class.active]="showSpotify" matTooltip="Spotify">
-            <mat-icon>music_note</mat-icon>
-          </button>
+        <div class="call-tool-dock" [class.dm-dock]="isServerOwner">
+          <div class="tool-group tool-group-primary" aria-label="Call controls">
+            <button
+              type="button"
+              (click)="toggleAudio()"
+              [class.active]="isAudioMuted"
+              class="btn-action btn-action-labeled btn-media-toggle"
+              [matTooltip]="isAudioMuted ? 'Unmute' : 'Mute'"
+              [attr.aria-label]="isAudioMuted ? 'Unmute microphone' : 'Mute microphone'"
+            >
+              <mat-icon>{{ isAudioMuted ? 'mic_off' : 'mic' }}</mat-icon>
+              <span>{{ isAudioMuted ? 'Unmute' : 'Mute' }}</span>
+            </button>
 
-          <button *ngIf="isServerOwner && spotifyRequests.length > 0" (click)="showSpotifyRequests = !showSpotifyRequests" class="btn-action btn-requests" [class.active]="showSpotifyRequests" matTooltip="Song Requests">
-            <mat-icon [class.pulse]="spotifyRequests.length > 0">playlist_add_check</mat-icon>
-            <span class="badge">{{ spotifyRequests.length }}</span>
-          </button>
+            <button
+              type="button"
+              (click)="toggleVideo()"
+              [class.active]="isVideoOff"
+              class="btn-action btn-action-labeled btn-media-toggle"
+              [matTooltip]="isVideoOff ? 'Start Video' : 'Stop Video'"
+              [attr.aria-label]="isVideoOff ? 'Start video' : 'Stop video'"
+            >
+              <mat-icon>{{ isVideoOff ? 'videocam_off' : 'videocam' }}</mat-icon>
+              <span>{{ isVideoOff ? 'Start' : 'Video' }}</span>
+            </button>
 
-          <button (click)="toggleAudio()" [class.active]="isAudioMuted" class="btn-action" [matTooltip]="isAudioMuted ? 'Unmute' : 'Mute'">
-            <mat-icon>{{ isAudioMuted ? 'mic_off' : 'mic' }}</mat-icon>
-          </button>
-          <button (click)="toggleVideo()" [class.active]="isVideoOff" class="btn-action" [matTooltip]="isVideoOff ? 'Start Video' : 'Stop Video'">
-            <mat-icon>{{ isVideoOff ? 'videocam_off' : 'videocam' }}</mat-icon>
-          </button>
-          <button (click)="toggleSelfView()" [class.active]="hideSelfView" class="btn-action" [matTooltip]="hideSelfView ? 'Show Self View and MC Layout' : 'Hide Self View and Ignore MC'">
-            <mat-icon>{{ hideSelfView ? 'visibility' : 'visibility_off' }}</mat-icon>
-          </button>
+            <button
+              type="button"
+              (click)="toggleSelfView()"
+              [class.active]="hideSelfView"
+              class="btn-action btn-action-labeled btn-self-toggle"
+              [matTooltip]="hideSelfView ? 'Show Self View and MC Layout' : 'Hide Self View and Ignore MC'"
+              [attr.aria-label]="hideSelfView ? 'Show self view' : 'Hide self view'"
+            >
+              <mat-icon>{{ hideSelfView ? 'visibility' : 'visibility_off' }}</mat-icon>
+              <span>Self</span>
+            </button>
 
-          <!-- DM Mode Toggle -->
-          <button *ngIf="isServerOwner" (click)="toggleDmMode()" class="btn-action btn-dm" [class.active]="isDmMode" matTooltip="DM Mode">
-            <mat-icon>dvr</mat-icon>
-          </button>
+            <button
+              type="button"
+              (click)="leaveCall()"
+              class="btn-action btn-action-labeled btn-danger btn-leave"
+              matTooltip="Leave Call"
+              aria-label="Leave call"
+            >
+              <mat-icon>call_end</mat-icon>
+              <span>Leave</span>
+            </button>
+          </div>
 
-          <button *ngIf="canHostVttSession()" (click)="startVttHosting()" class="btn-action" matTooltip="Host VTT">
-            <mat-icon>podcasts</mat-icon>
-          </button>
+          <div
+            class="tool-group tool-group-table"
+            *ngIf="isServerOwner || canJoinVttSession()"
+            aria-label="Table tools"
+          >
+            <button
+              *ngIf="isServerOwner"
+              type="button"
+              (click)="toggleDmMode()"
+              class="btn-action btn-dm"
+              [class.active]="isDmMode"
+              [matTooltip]="isDmMode ? 'Return to Player Mode' : 'Switch to DM Mode'"
+              [attr.aria-label]="isDmMode ? 'Return to player mode' : 'Switch to DM mode'"
+            >
+              <mat-icon>dvr</mat-icon>
+            </button>
 
-          <button *ngIf="canStopVttSession()" (click)="stopVttSession()" class="btn-action btn-danger" matTooltip="Stop VTT">
-            <mat-icon>stop_circle</mat-icon>
-          </button>
+            <button
+              *ngIf="canHostVttSession()"
+              type="button"
+              (click)="startVttHosting()"
+              class="btn-action"
+              matTooltip="Host VTT"
+              aria-label="Host VTT"
+            >
+              <mat-icon>podcasts</mat-icon>
+            </button>
 
-          <button *ngIf="canJoinVttSession()" (click)="startVttJoining()" class="btn-action" matTooltip="Join VTT">
-            <mat-icon>group_add</mat-icon>
-          </button>
+            <button
+              *ngIf="canStopVttSession()"
+              type="button"
+              (click)="stopVttSession()"
+              class="btn-action btn-danger"
+              matTooltip="Stop VTT"
+              aria-label="Stop VTT"
+            >
+              <mat-icon>stop_circle</mat-icon>
+            </button>
 
-          <!-- Custom Theme Picker Toggle -->
-          <button (click)="toggleThemePicker()" class="btn-action" [class.active]="showThemePicker" matTooltip="Atmosphere Settings">
-            <mat-icon>palette</mat-icon>
-          </button>
+            <button
+              *ngIf="canJoinVttSession()"
+              type="button"
+              (click)="startVttJoining()"
+              class="btn-action"
+              matTooltip="Join VTT"
+              aria-label="Join VTT"
+            >
+              <mat-icon>group_add</mat-icon>
+            </button>
 
-          <button *ngIf="!isMobileBrowser" (click)="showDeviceRouting = !showDeviceRouting" class="btn-action" [class.active]="showDeviceRouting" matTooltip="Call Devices">
-            <mat-icon>settings_input_component</mat-icon>
-          </button>
+            <button
+              *ngIf="isServerOwner && spotifyRequests.length > 0"
+              type="button"
+              (click)="showSpotifyRequests = !showSpotifyRequests"
+              class="btn-action btn-requests"
+              [class.active]="showSpotifyRequests"
+              matTooltip="Song Requests"
+              aria-label="Song requests"
+            >
+              <mat-icon [class.pulse]="spotifyRequests.length > 0">playlist_add_check</mat-icon>
+              <span class="badge">{{ spotifyRequests.length }}</span>
+            </button>
 
-<!--          <button (click)="showDiagnosticsPanel = !showDiagnosticsPanel" class="btn-action" [class.active]="showDiagnosticsPanel" matTooltip="Call Diagnostics">-->
-<!--            <mat-icon>analytics</mat-icon>-->
-<!--          </button>-->
+            <button
+              *ngIf="isServerOwner"
+              type="button"
+              (click)="toggleThemePicker()"
+              class="btn-action"
+              [class.active]="showThemePicker"
+              matTooltip="Atmosphere Settings"
+              aria-label="Atmosphere settings"
+            >
+              <mat-icon>palette</mat-icon>
+            </button>
+          </div>
 
-          <button (click)="leaveCall()" class="btn-action btn-danger" matTooltip="Leave Call">
-            <mat-icon>call_end</mat-icon>
-          </button>
+          <div class="tool-group tool-group-utilities" aria-label="Player tools">
+            <button
+              type="button"
+              (click)="showSpotify = !showSpotify"
+              class="btn-action btn-spotify"
+              [class.active]="showSpotify"
+              matTooltip="Spotify"
+              aria-label="Spotify"
+            >
+              <mat-icon>music_note</mat-icon>
+            </button>
+
+            <button
+              *ngIf="!isMobileBrowser"
+              type="button"
+              (click)="showDeviceRouting = !showDeviceRouting"
+              class="btn-action"
+              [class.active]="showDeviceRouting"
+              matTooltip="Call Devices"
+              aria-label="Call devices"
+            >
+              <mat-icon>settings_input_component</mat-icon>
+            </button>
+
+            <!--          <button (click)="showDiagnosticsPanel = !showDiagnosticsPanel" class="btn-action" [class.active]="showDiagnosticsPanel" matTooltip="Call Diagnostics">-->
+            <!--            <mat-icon>analytics</mat-icon>-->
+            <!--          </button>-->
+          </div>
         </div>
       </div>
     </div>

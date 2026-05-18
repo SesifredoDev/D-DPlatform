@@ -94,6 +94,10 @@
        &.close-btn { font-size: 20px; line-height: 1; }
      }
   }
+
+  .file-input {
+    display: none;
+  }
 }
 
 .refresh-icon.spinning {

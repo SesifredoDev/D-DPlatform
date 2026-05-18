@@ -1,5 +1,9 @@
 import { Component, DoCheck, Input, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
-import { SoundCloudService, SoundCloudSearchResult } from '../../../../shared/services/playlist/soundcloud.service';
+import {
+  SoundCloudService,
+  SoundCloudSearchResult,
+  SoundCloudMusicListImportResult
+} from '../../../../shared/services/playlist/soundcloud.service';
 import { TabService } from '../../../../shared/services/tab/tab-service';
 import { Video } from '../../../../shared/services/video/video';
 import { FormsModule } from '@angular/forms';
@@ -231,6 +235,60 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     } finally {
       this.isRefreshingThumbnails = false;
     }
+  }
+
+  downloadMusicList() {
+    const musicList = this.spotify.exportMusicList();
+    const fileContents = JSON.stringify(musicList, null, 2);
+    const blob = new Blob([fileContents], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = `soundcloud-music-list-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    this.libraryMessage = `Downloaded ${musicList.savedItems.length} saved SoundCloud item${musicList.savedItems.length === 1 ? '' : 's'}.`;
+  }
+
+  async uploadMusicList(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    const file = input?.files?.[0];
+    if (!input || !file) return;
+
+    this.isLoading = true;
+    this.showProfile = false;
+    this.showQueue = false;
+
+    try {
+      const fileContents = await file.text();
+      const result = this.spotify.importMusicListFromJson(fileContents);
+      await this.refreshSavedSearch();
+      this.activeCategory = 'all';
+      this.libraryMessage = this.formatMusicListImportMessage(result);
+    } catch {
+      this.libraryMessage = 'Could not upload that SoundCloud music list. Choose a valid JSON export.';
+    } finally {
+      this.isLoading = false;
+      input.value = '';
+    }
+  }
+
+  private formatMusicListImportMessage(result: SoundCloudMusicListImportResult): string {
+    const parts = [
+      result.addedCount
+        ? `Imported ${result.addedCount} saved item${result.addedCount === 1 ? '' : 's'}`
+        : 'No new saved items imported',
+      result.duplicateCount
+        ? `skipped ${result.duplicateCount} duplicate${result.duplicateCount === 1 ? '' : 's'}`
+        : '',
+      result.pinnedAddedCount
+        ? `restored ${result.pinnedAddedCount} pinned item${result.pinnedAddedCount === 1 ? '' : 's'}`
+        : ''
+    ].filter(Boolean);
+
+    return `${parts.join(', ')}.`;
   }
 
   get searchActionLabel(): string {
