@@ -16,6 +16,7 @@ import {
   VideoPreset,
   VideoPresets
 } from 'livekit-client';
+import type { RemoteAudioTrack, RemoteVideoTrack } from 'livekit-client';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { ThemeColors } from '../theme/theme.service';
@@ -910,6 +911,7 @@ export class Video {
       this.updateParticipantStream(p);
 
       const participantMeta = this.parseMetadata(p.metadata);
+      const stream = this.buildEffectiveParticipantStream(p.identity, participantMeta);
       const rtt = (p as any).getRTT ? (p as any).getRTT() : (p as any).lastPingRTT;
       if (rtt !== undefined) {
         console.log(`[${timestamp}] Ping for ${p.identity}: ${rtt}ms`);
@@ -919,7 +921,9 @@ export class Video {
         id: p.identity,
         userData: participantMeta?.character || {},
         participantMeta,
-        stream: this.buildEffectiveParticipantStream(p.identity, participantMeta),
+        stream,
+        remoteAudioTrack: this.getRemoteAudioTrackForStream(stream),
+        remoteVideoTrack: this.getRemoteVideoTrackForStream(stream),
         ping: rtt,
         diagnostics: await this.collectParticipantDiagnostics(p, rtt)
       };
@@ -1317,6 +1321,32 @@ export class Video {
     }
 
     return fallbackStream[getter]()[0] || null;
+  }
+
+  private getRemoteAudioTrackForStream(stream: MediaStream | undefined): RemoteAudioTrack | undefined {
+    const track = this.findRemoteTrackForMediaStreamTrack(stream?.getAudioTracks()[0] || null);
+    return track?.kind === 'audio' ? track as RemoteAudioTrack : undefined;
+  }
+
+  private getRemoteVideoTrackForStream(stream: MediaStream | undefined): RemoteVideoTrack | undefined {
+    const track = this.findRemoteTrackForMediaStreamTrack(stream?.getVideoTracks()[0] || null);
+    return track?.kind === 'video' ? track as RemoteVideoTrack : undefined;
+  }
+
+  private findRemoteTrackForMediaStreamTrack(mediaStreamTrack: MediaStreamTrack | null): RemoteTrack | undefined {
+    if (!mediaStreamTrack) {
+      return undefined;
+    }
+
+    for (const participant of this.room.remoteParticipants.values()) {
+      for (const publication of participant.getTrackPublications()) {
+        if (publication.track?.mediaStreamTrack === mediaStreamTrack) {
+          return publication.track as RemoteTrack;
+        }
+      }
+    }
+
+    return undefined;
   }
 
   private async updateSelectedSourcesMetadata() {

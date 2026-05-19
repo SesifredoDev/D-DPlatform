@@ -276,6 +276,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private callPlaybackSourcesRecordingId: string | null = null;
   private callPlaybackMediaHost: HTMLDivElement | null = null;
   private visiblePlaybackSourceTargets = new Map<string, HTMLVideoElement>();
+  private readonly visibleRemoteVideoTrackAttachments =
+    new WeakMap<HTMLVideoElement, NonNullable<ParticipantStream['remoteVideoTrack']>>();
   private callPlaybackSyncInterval: any;
   private isSeekingCallPlaybackSources = false;
   private callPlaybackClockStartedAtMs = 0;
@@ -2216,18 +2218,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (video && remote && this.isCallPlaybackMode) {
         const source = this.getActivePlaybackSourceForParticipant(remote.id);
         if (source && this.hasVideoMedia(source)) {
+          this.clearLiveRemoteVideoTrackAttachment(video);
           this.bindVisiblePlaybackSourceVideo(video, source);
           return;
         }
 
         if (source && this.hasStillFrameMedia(source)) {
+          this.clearLiveRemoteVideoTrackAttachment(video);
           this.clearVisiblePlaybackMediaElement(video);
           video.srcObject = null;
           video.muted = true;
           return;
         }
       }
-      if (video && stream) {
+      if (video && remote?.remoteVideoTrack && this.shouldAttachLiveRemoteVideoTrack(remote, stream)) {
+        this.bindLiveRemoteVideoTrack(video, remote.remoteVideoTrack);
+      } else if (video && stream) {
+        this.clearLiveRemoteVideoTrackAttachment(video);
         if (video.srcObject !== stream) {
           this.clearVisiblePlaybackMediaElement(video);
           video.srcObject = stream;
@@ -2236,8 +2243,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.playMediaElement(video);
         }
       }
-      if (video && !stream && video.srcObject) {
-        video.srcObject = null;
+      if (video && !stream) {
+        this.clearLiveRemoteVideoTrackAttachment(video);
+        if (video.srcObject) {
+          video.srcObject = null;
+        }
       }
       if (video && this.isCallPlaybackMode) {
         video.muted = true;
@@ -2252,6 +2262,41 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     } else {
       this.teardownMissingRemoteAudioOutputs(new Set(remotes.map(remote => remote.id)));
     }
+  }
+
+  private shouldAttachLiveRemoteVideoTrack(
+    remote: ParticipantStream,
+    stream: MediaStream | undefined
+  ): boolean {
+    const remoteVideoTrack = remote.remoteVideoTrack;
+    return !!remoteVideoTrack &&
+      stream?.getVideoTracks()[0] === remoteVideoTrack.mediaStreamTrack;
+  }
+
+  private bindLiveRemoteVideoTrack(
+    video: HTMLVideoElement,
+    remoteVideoTrack: NonNullable<ParticipantStream['remoteVideoTrack']>
+  ) {
+    const currentTrack = this.visibleRemoteVideoTrackAttachments.get(video);
+    if (currentTrack !== remoteVideoTrack) {
+      this.clearLiveRemoteVideoTrackAttachment(video);
+      this.clearVisiblePlaybackMediaElement(video);
+      remoteVideoTrack.attach(video);
+      this.visibleRemoteVideoTrackAttachments.set(video, remoteVideoTrack);
+    }
+
+    video.muted = true;
+    this.playMediaElement(video);
+  }
+
+  private clearLiveRemoteVideoTrackAttachment(video: HTMLVideoElement) {
+    const currentTrack = this.visibleRemoteVideoTrackAttachments.get(video);
+    if (!currentTrack) {
+      return;
+    }
+
+    currentTrack.detach(video);
+    this.visibleRemoteVideoTrackAttachments.delete(video);
   }
 
   private bindVisibleLocalVideo() {
@@ -3038,6 +3083,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       stream: r.stream,
       userData: r.userData || { name: 'Unknown', _id: r.id } as ICharacter,
       participantMeta: r.participantMeta,
+      remoteAudioTrack: r.remoteAudioTrack,
+      remoteVideoTrack: r.remoteVideoTrack,
       ping: r.ping,
       diagnostics: r.diagnostics,
       volumePercent: this.videoService.getParticipantVolume(r.id),
@@ -3945,7 +3992,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private configureRemoteAudio(remote: ParticipantStream, video: HTMLVideoElement) {
     const volumePercent = remote.volumePercent ?? this.videoService.getParticipantVolume(remote.id);
-    this.remoteAudioRouter.configureRemoteAudio(remote.id, remote.stream, volumePercent, video);
+    this.remoteAudioRouter.configureRemoteAudio(remote.id, remote.stream, volumePercent, video, remote.remoteAudioTrack);
   }
 
   private applyRemoteVolumes() {

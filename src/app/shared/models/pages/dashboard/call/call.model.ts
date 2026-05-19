@@ -2,6 +2,7 @@ import type { CallParticipantMetadata, CompanionSourceId, ParticipantMediaDiagno
 import type { ICharacter } from '../../../user/character.model';
 import type { ThemeColors } from '../../../theme/theme.service.model';
 import type { SessionRecordingParticipantMedia } from '../../../session-recording/session-recording.model';
+import type { RemoteAudioTrack, RemoteVideoTrack } from 'livekit-client';
 
 export interface ParticipantStream {
   id: string;
@@ -9,6 +10,8 @@ export interface ParticipantStream {
   stillFrameUrl?: string;
   userData?: ICharacter;
   participantMeta?: CallParticipantMetadata | null;
+  remoteAudioTrack?: RemoteAudioTrack;
+  remoteVideoTrack?: RemoteVideoTrack;
   ping?: number;
   isLocal?: boolean;
   diagnostics?: ParticipantMediaDiagnostics;
@@ -50,12 +53,13 @@ export interface StoredCallMediaPreferences {
 }
 
 export interface RemoteAudioOutput {
-  stream: MediaStream;
+  stream?: MediaStream;
   audioTrackId: string;
-  source: MediaStreamAudioSourceNode;
-  gain: GainNode;
-  destination: MediaStreamAudioDestinationNode;
+  source?: MediaStreamAudioSourceNode;
+  gain?: GainNode;
+  destination?: MediaStreamAudioDestinationNode;
   audioElement: HTMLAudioElement;
+  remoteAudioTrack?: RemoteAudioTrack;
 }
 
 export interface RemoteContextMenuState {

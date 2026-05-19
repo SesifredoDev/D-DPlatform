@@ -1,4 +1,5 @@
 import type { RemoteAudioOutput } from '../../../shared/models/pages/dashboard/call/call.model';
+import type { RemoteAudioTrack } from 'livekit-client';
 
 export class CallRemoteAudioRouter {
   readonly supportsAudioOutputSelection =
@@ -15,9 +16,21 @@ export class CallRemoteAudioRouter {
     participantId: string,
     stream: MediaStream | null | undefined,
     volumePercent: number,
-    video: HTMLVideoElement
+    video: HTMLVideoElement,
+    remoteAudioTrack?: RemoteAudioTrack
   ) {
+    const audioTrack = stream?.getAudioTracks()[0] || remoteAudioTrack?.mediaStreamTrack || null;
+    if (!audioTrack) {
+      this.teardownRemoteAudioOutput(participantId);
+      return;
+    }
+
     if (!this.supportsRemoteAudioGain || !stream) {
+      if (this.configureLiveKitRemoteAudioOutput(participantId, stream ?? undefined, audioTrack.id, volumePercent, video, remoteAudioTrack)) {
+        video.muted = true;
+        return;
+      }
+
       this.applyNativeVideoVolume(video, volumePercent, false);
       this.teardownRemoteAudioOutput(participantId);
       return;
@@ -25,18 +38,25 @@ export class CallRemoteAudioRouter {
 
     video.muted = true;
 
-    const audioTrack = stream.getAudioTracks()[0] || null;
-    if (!audioTrack) {
-      this.teardownRemoteAudioOutput(participantId);
-      return;
-    }
-
     const existingOutput = this.remoteAudioOutputs.get(participantId);
-    if (existingOutput && existingOutput.stream === stream && existingOutput.audioTrackId === audioTrack.id) {
-      existingOutput.gain.gain.value = volumePercent / 100;
+    if (
+      existingOutput &&
+      existingOutput.stream === stream &&
+      existingOutput.audioTrackId === audioTrack.id &&
+      (!existingOutput.remoteAudioTrack || existingOutput.remoteAudioTrack === remoteAudioTrack)
+    ) {
+      this.applyRemoteAudioOutputVolume(existingOutput, volumePercent);
       void this.playRemoteAudioElement(existingOutput.audioElement).then(played => {
         if (!played) {
-          this.applyNativeVideoVolume(video, volumePercent, false);
+          this.handleRemoteAudioPlaybackFailure(
+            participantId,
+            stream,
+            audioTrack.id,
+            volumePercent,
+            video,
+            remoteAudioTrack,
+            existingOutput.audioElement
+          );
         }
       });
       return;
@@ -77,12 +97,24 @@ export class CallRemoteAudioRouter {
       void this.playRemoteAudioElement(audioElement).then(played => {
         const currentOutput = this.remoteAudioOutputs.get(participantId);
         if (!played && currentOutput?.audioElement === audioElement) {
-          this.applyNativeVideoVolume(video, volumePercent, false);
+          this.handleRemoteAudioPlaybackFailure(
+            participantId,
+            stream,
+            audioTrack.id,
+            volumePercent,
+            video,
+            remoteAudioTrack,
+            audioElement
+          );
         }
       });
     } catch (error) {
       console.warn('Failed to create amplified remote audio output', error);
       this.teardownRemoteAudioOutput(participantId);
+      if (this.configureLiveKitRemoteAudioOutput(participantId, stream, audioTrack.id, volumePercent, video, remoteAudioTrack)) {
+        return;
+      }
+
       this.applyNativeVideoVolume(video, volumePercent, false);
     }
   }
@@ -90,8 +122,7 @@ export class CallRemoteAudioRouter {
   applyRemoteVolume(participantId: string, volumePercent: number, video: HTMLVideoElement | null) {
     const output = this.remoteAudioOutputs.get(participantId);
     if (output) {
-      output.gain.gain.value = volumePercent / 100;
-      output.audioElement.volume = 1;
+      this.applyRemoteAudioOutputVolume(output, volumePercent);
       void this.playRemoteAudioElement(output.audioElement).then(played => {
         if (!played && video) {
           this.applyNativeVideoVolume(video, volumePercent, false);
@@ -100,7 +131,7 @@ export class CallRemoteAudioRouter {
     }
 
     if (video) {
-      this.applyNativeVideoVolume(video, volumePercent, this.supportsRemoteAudioGain);
+      this.applyNativeVideoVolume(video, volumePercent, this.supportsRemoteAudioGain || !!output);
     }
   }
 
@@ -179,9 +210,92 @@ export class CallRemoteAudioRouter {
 
       await audioElement.play();
       return true;
-    } catch {
+    } catch (error) {
+      if (typeof error === 'object' && error && 'name' in error && error.name === 'AbortError') {
+        return true;
+      }
+
       return false;
     }
+  }
+
+  private configureLiveKitRemoteAudioOutput(
+    participantId: string,
+    stream: MediaStream | undefined,
+    audioTrackId: string,
+    volumePercent: number,
+    video: HTMLVideoElement,
+    remoteAudioTrack?: RemoteAudioTrack
+  ): boolean {
+    if (!remoteAudioTrack) {
+      return false;
+    }
+
+    this.teardownRemoteAudioOutput(participantId);
+
+    const audioElement = new Audio();
+    audioElement.autoplay = true;
+    audioElement.muted = false;
+    remoteAudioTrack.attach(audioElement);
+
+    const output: RemoteAudioOutput = {
+      stream,
+      audioTrackId,
+      audioElement,
+      remoteAudioTrack
+    };
+    this.applyRemoteAudioOutputVolume(output, volumePercent);
+    this.remoteAudioOutputs.set(participantId, output);
+
+    void this.applyAudioOutputToMediaElement(audioElement);
+    void this.playRemoteAudioElement(audioElement).then(played => {
+      const currentOutput = this.remoteAudioOutputs.get(participantId);
+      if (!played && currentOutput?.audioElement === audioElement) {
+        this.applyNativeVideoVolume(video, volumePercent, false);
+      }
+    });
+
+    return true;
+  }
+
+  private handleRemoteAudioPlaybackFailure(
+    participantId: string,
+    stream: MediaStream,
+    audioTrackId: string,
+    volumePercent: number,
+    video: HTMLVideoElement,
+    remoteAudioTrack: RemoteAudioTrack | undefined,
+    failedAudioElement: HTMLAudioElement
+  ) {
+    const currentOutput = this.remoteAudioOutputs.get(participantId);
+    if (currentOutput?.audioElement !== failedAudioElement) {
+      return;
+    }
+
+    if (!currentOutput.remoteAudioTrack && this.configureLiveKitRemoteAudioOutput(
+      participantId,
+      stream,
+      audioTrackId,
+      volumePercent,
+      video,
+      remoteAudioTrack
+    )) {
+      return;
+    }
+
+    this.applyNativeVideoVolume(video, volumePercent, false);
+  }
+
+  private applyRemoteAudioOutputVolume(output: RemoteAudioOutput, volumePercent: number) {
+    if (output.gain) {
+      output.gain.gain.value = volumePercent / 100;
+      output.audioElement.volume = 1;
+      return;
+    }
+
+    const nativeVolume = Math.min(1, volumePercent / 100);
+    output.audioElement.volume = nativeVolume;
+    output.remoteAudioTrack?.setVolume(nativeVolume);
   }
 
   private teardownRemoteAudioOutput(participantId: string) {
@@ -190,11 +304,12 @@ export class CallRemoteAudioRouter {
       return;
     }
 
-    output.source.disconnect();
-    output.gain.disconnect();
+    output.source?.disconnect();
+    output.gain?.disconnect();
+    output.remoteAudioTrack?.detach(output.audioElement);
     output.audioElement.pause();
     output.audioElement.srcObject = null;
-    output.destination.stream.getTracks().forEach(track => track.stop());
+    output.destination?.stream.getTracks().forEach(track => track.stop());
     this.remoteAudioOutputs.delete(participantId);
   }
 
