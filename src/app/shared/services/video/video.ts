@@ -134,6 +134,7 @@ export class Video {
   private currentVideoPublicationTrack: MediaStreamTrack | null = null;
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
   private applyingSharedState = false;
+  private isIntentionalDisconnect = false;
 
   constructor(
     private deviceService: DeviceService,
@@ -207,6 +208,7 @@ export class Video {
   private setupRoomListeners() {
     this.room
       .on(RoomEvent.Reconnecting, () => {
+        this.rebuildAllParticipantStreams();
         void this.emitParticipants();
       })
       .on(RoomEvent.Reconnected, () => {
@@ -276,6 +278,7 @@ export class Video {
       })
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         this.participantStreams.delete(participant.identity);
+        this.effectiveParticipantStreams.delete(participant.identity);
         void this.removeDisconnectedSceneMainCharacter(participant.identity);
         void this.syncCompanionState();
         void this.emitParticipants();
@@ -290,10 +293,16 @@ export class Video {
       })
       .on(RoomEvent.Disconnected, (reason?: unknown) => {
         this.stopPingMonitor();
+        if (this.isIntentionalDisconnect) {
+          return;
+        }
+
         const reasonText = String(reason ?? '');
+        this.resetCallState();
         if (reasonText.includes('DUPLICATE_IDENTITY')) {
-          this.resetCallState();
           this.callKicked$.next('duplicate_identity');
+        } else {
+          this.callKicked$.next('connection_lost');
         }
       })
       .on(RoomEvent.ConnectionStateChanged, (state) => {
@@ -363,12 +372,21 @@ export class Video {
       this.participantStreams.set(participant.identity, stream);
     }
 
-    stream.getTracks().forEach(t => stream!.removeTrack(t));
-    participant.getTrackPublications().forEach(pub => {
-      if (pub.track && pub.track.mediaStreamTrack) {
-        stream!.addTrack(pub.track.mediaStreamTrack);
-      }
-    });
+    const nextTracks = participant.getTrackPublications()
+      .map(pub => pub.track?.mediaStreamTrack)
+      .filter((track): track is MediaStreamTrack => !!track);
+    const currentTracks = stream.getTracks();
+    if (this.hasSameTracks(currentTracks, nextTracks)) {
+      return;
+    }
+
+    currentTracks.forEach(track => stream!.removeTrack(track));
+    nextTracks.forEach(track => stream!.addTrack(track));
+  }
+
+  private hasSameTracks(currentTracks: MediaStreamTrack[], nextTracks: MediaStreamTrack[]): boolean {
+    return currentTracks.length === nextTracks.length &&
+      currentTracks.every(track => nextTracks.includes(track));
   }
 
   private rebuildAllParticipantStreams() {
@@ -381,6 +399,10 @@ export class Video {
     if (this.room.state === 'connected' && this.currentChannelId === channelId) return;
 
     try {
+      if (this.room.state !== 'disconnected') {
+        await this.disconnectRoomForReset();
+      }
+
       const deviceInfo = this.deviceService.getDeviceInfo();
       const deviceRole = this.resolveDeviceRole(deviceInfo);
       const identity = this.buildParticipantIdentity(userId, deviceInfo.deviceId);
@@ -405,7 +427,7 @@ export class Video {
       if (deviceRole === 'phone-camera') {
         const desktopIdentity = this.findDesktopMainIdentityForUser(userId);
         if (!desktopIdentity) {
-          await this.room.disconnect();
+          await this.disconnectRoomWithoutReset();
           this.resetCallState();
           this.callKicked$.next('phone_requires_desktop');
           throw new Error('Phone companion requires an active desktop session');
@@ -418,6 +440,9 @@ export class Video {
       await this.syncCompanionState();
       await this.emitParticipants();
     } catch (error) {
+      if (this.room.state !== 'disconnected') {
+        await this.disconnectRoomForReset();
+      }
       throw error;
     }
   }
@@ -865,9 +890,7 @@ export class Video {
   private async emitParticipants() {
     const timestamp = new Date().toLocaleTimeString();
     const participants = await Promise.all(Array.from(this.room.remoteParticipants.values()).map(async p => {
-      if (!this.participantStreams.has(p.identity)) {
-        this.updateParticipantStream(p);
-      }
+      this.updateParticipantStream(p);
 
       const participantMeta = this.parseMetadata(p.metadata);
       const rtt = (p as any).getRTT ? (p as any).getRTT() : (p as any).lastPingRTT;
@@ -939,7 +962,7 @@ export class Video {
       this.sendVttCommand('stop', this.vttSession$.value.roomId!);
     }
     if (this.localStream) this.localStream.getTracks().forEach(t => t.stop());
-    await this.room.disconnect();
+    await this.disconnectRoomWithoutReset();
     this.resetCallState();
   }
 
@@ -1088,7 +1111,7 @@ export class Video {
       const desktopIdentity = this.findDesktopMainIdentityForUser(this.currentParticipantMetadata.userId);
       if (!desktopIdentity) {
         if (this.room.state === 'connected') {
-          await this.room.disconnect();
+          await this.disconnectRoomWithoutReset();
         }
         this.resetCallState();
         this.callKicked$.next('desktop_missing');
@@ -1109,6 +1132,21 @@ export class Video {
 
     await this.applyVideoSource();
     await this.applyAudioSource();
+  }
+
+  private async disconnectRoomForReset() {
+    this.stopPingMonitor();
+    await this.disconnectRoomWithoutReset();
+    this.resetCallState();
+  }
+
+  private async disconnectRoomWithoutReset() {
+    this.isIntentionalDisconnect = true;
+    try {
+      await this.room.disconnect();
+    } finally {
+      this.isIntentionalDisconnect = false;
+    }
   }
 
   private applyRemoteVideoSubscriptionPreferences(participant?: RemoteParticipant) {

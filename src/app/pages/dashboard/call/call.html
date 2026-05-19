@@ -375,7 +375,7 @@
     @if (remoteContextMenu) {
       @if (activeRemoteContextMenuParticipant; as activeRemote) {
         <div
-          class="remote-context-menu glass"
+          class="remote-context-menu glass call-overlay-content"
           [style.left.px]="remoteContextMenu.x"
           [style.top.px]="remoteContextMenu.y"
           role="menu"
@@ -589,8 +589,8 @@
             <button
               *ngIf="isServerOwner && spotifyRequests.length > 0"
               type="button"
-              (click)="showSpotifyRequests = !showSpotifyRequests"
-              class="btn-action btn-requests"
+              (click)="toggleSpotifyRequests()"
+              class="btn-action btn-requests call-overlay-trigger"
               [class.active]="showSpotifyRequests"
               matTooltip="Song Requests"
               aria-label="Song requests"
@@ -603,7 +603,7 @@
               *ngIf="isServerOwner"
               type="button"
               (click)="toggleThemePicker()"
-              class="btn-action"
+              class="btn-action call-overlay-trigger"
               [class.active]="showThemePicker"
               matTooltip="Atmosphere Settings"
               aria-label="Atmosphere settings"
@@ -615,8 +615,8 @@
           <div class="tool-group tool-group-utilities" aria-label="Player tools">
             <button
               type="button"
-              (click)="showSpotify = !showSpotify"
-              class="btn-action btn-spotify"
+              (click)="toggleSpotifyOverlay()"
+              class="btn-action btn-spotify call-overlay-trigger"
               [class.active]="showSpotify"
               matTooltip="Spotify"
               aria-label="Spotify"
@@ -627,8 +627,8 @@
             <button
               *ngIf="!isMobileBrowser"
               type="button"
-              (click)="showDeviceRouting = !showDeviceRouting"
-              class="btn-action"
+              (click)="toggleDeviceRoutingOverlay()"
+              class="btn-action call-overlay-trigger"
               [class.active]="showDeviceRouting"
               matTooltip="Call Devices"
               aria-label="Call devices"
@@ -645,7 +645,7 @@
     </div>
 
     <!-- Theme Picker Custom Overlay -->
-    <div class="theme-picker-overlay glass" *ngIf="showThemePicker">
+    <div class="theme-picker-overlay glass call-overlay-content" *ngIf="showThemePicker">
         <div class="overlay-header">
             <h3>Atmosphere</h3>
             <div class="header-actions">
@@ -754,7 +754,7 @@
         </div>
     </div>
 
-    <div class="device-routing-overlay glass" *ngIf="showDeviceRouting && !isMobileBrowser">
+    <div class="device-routing-overlay glass call-overlay-content" *ngIf="showDeviceRouting && !isMobileBrowser">
       <div class="overlay-header">
         <h3>Call Devices</h3>
         <div class="header-actions">
@@ -883,7 +883,7 @@
       </div>
     </div>
 
-    <div class="diagnostics-overlay glass" *ngIf="showDiagnosticsPanel">
+    <div class="diagnostics-overlay glass call-overlay-content" *ngIf="showDiagnosticsPanel">
       <div class="overlay-header">
         <h3>Call Diagnostics</h3>
         <div class="header-actions">
@@ -948,7 +948,7 @@
   }
 
   <div class="astral-playback-overlay" *ngIf="pendingAstralPlaybackRequest">
-    <div class="astral-playback-prompt glass" role="dialog" aria-modal="true" aria-labelledby="astralPlaybackTitle">
+    <div class="astral-playback-prompt glass call-overlay-content" role="dialog" aria-modal="true" aria-labelledby="astralPlaybackTitle">
       <button
         type="button"
         class="astral-prompt-close"
@@ -998,6 +998,7 @@
   <!-- Spotify Overlay -->
   <div class="spotify-overlay" *ngIf="showSpotify && localStream">
     <app-spotify-player
+      class="call-overlay-content"
       [isCallActive]="!!localStream"
       [isServerOwner]="isServerOwner"
       [userName]="character.name"
@@ -1011,7 +1012,7 @@
   </div>
 
   <!-- Spotify Requests Overlay -->
-  <div class="spotify-requests-overlay glass" *ngIf="showSpotifyRequests && isServerOwner">
+  <div class="spotify-requests-overlay glass call-overlay-content" *ngIf="showSpotifyRequests && isServerOwner">
     <div class="overlay-header">
       <h3>Song Requests</h3>
       <button class="btn-close" (click)="showSpotifyRequests = false">
@@ -1042,7 +1043,7 @@
 
   <!-- VTT Notification Overlay -->
   <div class="vtt-notification" *ngIf="showVttNotification">
-    <div class="vtt-ping-card glass">
+    <div class="vtt-ping-card glass call-overlay-content">
       <mat-icon>meeting_room</mat-icon>
       <div class="vtt-text">
         <strong>A VTT Session is active!</strong>
@@ -1057,7 +1058,7 @@
 
   <!-- BROADCAST OVERLAY -->
   <div class="broadcast-overlay" *ngIf="activeOverlayImage || activeOverlayText">
-    <div class="broadcast-image-container glass" *ngIf="activeOverlayImage">
+    <div class="broadcast-image-container glass call-overlay-content" *ngIf="activeOverlayImage">
       <img [src]="activeOverlayImage" alt="Broadcast Image">
       <button class="btn-dismiss" (click)="dismissOverlay()">
         <mat-icon>close</mat-icon>
@@ -1065,7 +1066,7 @@
       </button>
     </div>
 
-    <div class="broadcast-markdown-container glass" *ngIf="activeOverlayText">
+    <div class="broadcast-markdown-container glass call-overlay-content" *ngIf="activeOverlayText">
       <markdown [data]="activeOverlayText"></markdown>
       <button class="btn-dismiss" (click)="dismissOverlay()">
         <mat-icon>close</mat-icon>

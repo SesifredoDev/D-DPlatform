@@ -208,6 +208,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   showPinNaming: boolean = false;
   newThemeName: string = '';
   remoteContextMenu: RemoteContextMenuState | null = null;
+  private readonly clickOffSafeSelector = '.call-overlay-content, .call-overlay-trigger, .cdk-overlay-container';
 
   // Theme state
   activeColors: ThemeColors;
@@ -2226,10 +2227,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           return;
         }
       }
-      if (video && stream && video.srcObject !== stream) {
-        this.clearVisiblePlaybackMediaElement(video);
-        video.srcObject = stream;
-        this.playMediaElement(video);
+      if (video && stream) {
+        if (video.srcObject !== stream) {
+          this.clearVisiblePlaybackMediaElement(video);
+          video.srcObject = stream;
+        }
+        if (stream.getTracks().length) {
+          this.playMediaElement(video);
+        }
       }
       if (video && !stream && video.srcObject) {
         video.srcObject = null;
@@ -3066,8 +3071,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.applyLocalTrackStates();
 
       const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
-      this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
+      await this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.startProducing(this.localStream);
       await this.publishInitialCallTrackState();
 
@@ -3132,6 +3137,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private async handleJoinFailure(error: unknown) {
     console.error('[CRITICAL] Join call failed:', error);
     this.joinError = this.getJoinErrorMessage(error);
+    await this.videoService.leaveCall(this.channelId).catch(cleanupError => {
+      console.warn('LiveKit cleanup after join failure failed', cleanupError);
+    });
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => track.stop());
       this.localStream = null;
@@ -3233,6 +3241,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  toggleSpotifyOverlay() {
+    const shouldShow = !this.showSpotify;
+    this.closeClickOffOverlays();
+    this.showSpotify = shouldShow;
+  }
+
+  toggleDeviceRoutingOverlay() {
+    const shouldShow = !this.showDeviceRouting;
+    this.closeClickOffOverlays();
+    this.showDeviceRouting = shouldShow;
+  }
+
+  toggleSpotifyRequests() {
+    const shouldShow = !this.showSpotifyRequests;
+    this.closeClickOffOverlays();
+    this.showSpotifyRequests = shouldShow;
+  }
+
   // --- THEME PICKER LOGIC ---
 
   get hasThemeBackgroundImage(): boolean {
@@ -3253,6 +3279,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
+    this.closeClickOffOverlays();
     this.themePickerBaselineColors = this.isServerOwner ? cloneThemeColors(this.activeColors) : null;
     this.showThemePicker = true;
   }
@@ -3373,25 +3400,65 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     await this.leaveCall();
   }
 
-  @HostListener('document:click')
-  handleDocumentClick() {
-    this.closeRemoteContextMenu();
+  @HostListener('document:click', ['$event'])
+  handleDocumentClick(event: MouseEvent) {
+    if (this.isClickInsideOverlayFeature(event)) {
+      return;
+    }
+
+    this.closeClickOffOverlays();
   }
 
-  @HostListener('document:contextmenu')
-  handleDocumentContextMenu() {
-    this.closeRemoteContextMenu();
+  @HostListener('document:contextmenu', ['$event'])
+  handleDocumentContextMenu(event: MouseEvent) {
+    if (this.isClickInsideOverlayFeature(event)) {
+      return;
+    }
+
+    this.closeClickOffOverlays();
   }
 
   @HostListener('document:keydown.escape')
   handleDocumentEscape() {
-    this.closeRemoteContextMenu();
+    this.closeClickOffOverlays();
   }
 
   @HostListener('window:resize')
   handleWindowResize() {
     this.updateSceneMainLayoutSpaceFromElement();
     this.closeRemoteContextMenu();
+  }
+
+  private isClickInsideOverlayFeature(event: MouseEvent): boolean {
+    const target = event.target;
+    return target instanceof Element && !!target.closest(this.clickOffSafeSelector);
+  }
+
+  private closeClickOffOverlays() {
+    this.closeRemoteContextMenu();
+
+    if (this.showThemePicker) {
+      this.cancelTheme();
+    }
+
+    this.showDeviceRouting = false;
+    this.showDiagnosticsPanel = false;
+    this.showSpotify = false;
+    this.showSpotifyRequests = false;
+
+    if (this.showVttNotification) {
+      this.showVttNotification = false;
+      if (this.vttNotificationTimeout) {
+        clearTimeout(this.vttNotificationTimeout);
+        this.vttNotificationTimeout = null;
+      }
+    }
+
+    if (this.pendingAstralPlaybackRequest) {
+      this.cancelAstralPlaybackPrompt();
+    }
+
+    this.dismissOverlay();
   }
 
   ngOnDestroy() {
@@ -3675,6 +3742,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private async handleCallKickout(reason: string) {
     this.themeService.revertToSaved();
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+    }
     this.localStream = null;
     this.remoteStreams = [];
     this.closeRemoteContextMenu();
@@ -3694,6 +3764,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       window.alert('Phone companion mode requires an active desktop call for this account.');
     } else if (reason === 'desktop_missing') {
       window.alert('The desktop call ended, so the phone companion session was closed.');
+    } else if (reason === 'connection_lost') {
+      window.alert('The call connection was lost. Rejoin the call to reconnect audio and video.');
     } else {
       window.alert('This call was disconnected because another device joined with the same account.');
     }
