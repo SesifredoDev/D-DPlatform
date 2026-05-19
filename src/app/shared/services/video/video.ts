@@ -143,7 +143,11 @@ export class Video {
     setLogLevel(environment.production ? 'warn' : 'info');
     this.deviceInfo$ = this.deviceService.deviceInfo$;
     this.room = new Room({
-      adaptiveStream: true,
+      // Remote tracks are routed through app-owned MediaStreams so companion
+      // devices, recording, and per-participant volume all use one stream.
+      // LiveKit adaptiveStream requires Track.attach() on the rendered element;
+      // without that, remote video can stay paused even after subscription.
+      adaptiveStream: false,
       dynacast: true,
     });
     this.setupSharedWindowState();
@@ -1114,6 +1118,9 @@ export class Video {
     const profile = Video.remoteVideoPreferenceProfiles[this.remoteVideoQualityPreference$.value];
 
     targets.forEach(remoteParticipant => {
+      remoteParticipant.audioTrackPublications.forEach(publication => {
+        publication.setEnabled(true);
+      });
       remoteParticipant.videoTrackPublications.forEach(publication => {
         publication.setEnabled(true);
         publication.setVideoQuality(profile.quality);

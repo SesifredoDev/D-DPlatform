@@ -2229,6 +2229,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (video && stream && video.srcObject !== stream) {
         this.clearVisiblePlaybackMediaElement(video);
         video.srcObject = stream;
+        this.playMediaElement(video);
       }
       if (video && !stream && video.srcObject) {
         video.srcObject = null;
@@ -2274,12 +2275,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (video.srcObject !== stream) {
         this.clearVisiblePlaybackMediaElement(video);
         video.srcObject = stream;
+        this.playMediaElement(video);
       }
       video.muted = true;
       return;
     }
 
     this.updateLocalVideoDisplay();
+  }
+
+  private playMediaElement(element: HTMLMediaElement) {
+    void element.play?.().catch(() => undefined);
   }
 
   private shouldBindVisiblePlaybackMediaElement(source: CallPlaybackSource): boolean {
