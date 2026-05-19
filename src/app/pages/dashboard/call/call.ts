@@ -3072,6 +3072,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
       await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
+      await this.videoService.startPlayback();
       await this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.startProducing(this.localStream);
       await this.publishInitialCallTrackState();

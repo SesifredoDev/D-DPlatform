@@ -245,6 +245,12 @@ export class Video {
         void this.syncCompanionState();
         void this.emitParticipants();
       })
+      .on(RoomEvent.TrackUnpublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
+        this.updateParticipantStream(participant);
+        this.applyRemoteVideoSubscriptionPreferences(participant);
+        void this.syncCompanionState();
+        void this.emitParticipants();
+      })
       .on(RoomEvent.TrackSubscriptionStatusChanged, (publication: RemoteTrackPublication, status: unknown, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
         void this.syncCompanionState();
@@ -468,6 +474,17 @@ export class Video {
       this.updatePhoneTrackPermissions();
     }
     await this.syncCompanionState();
+  }
+
+  async startPlayback() {
+    if (this.room.state !== 'connected') {
+      return;
+    }
+
+    await Promise.allSettled([
+      this.room.startAudio(),
+      this.room.startVideo()
+    ]);
   }
 
   async setCameraEnabled(enabled: boolean) {
@@ -1150,6 +1167,10 @@ export class Video {
   }
 
   private applyRemoteVideoSubscriptionPreferences(participant?: RemoteParticipant) {
+    if (this.currentParticipantMetadata?.deviceRole === 'phone-camera') {
+      return;
+    }
+
     const targets = participant
       ? [participant]
       : Array.from(this.room.remoteParticipants.values());
@@ -1157,9 +1178,11 @@ export class Video {
 
     targets.forEach(remoteParticipant => {
       remoteParticipant.audioTrackPublications.forEach(publication => {
+        publication.setSubscribed(true);
         publication.setEnabled(true);
       });
       remoteParticipant.videoTrackPublications.forEach(publication => {
+        publication.setSubscribed(true);
         publication.setEnabled(true);
         publication.setVideoQuality(profile.quality);
         publication.setVideoDimensions(profile.dimensions);
