@@ -42,7 +42,12 @@
 
             "styles": [
               "node_modules/@fontsource/material-icons/index.css",
+              "@milkdown/crepe/theme/common/style.css",
+              "@milkdown/crepe/theme/frame.css",
               "src/styles.scss"
+            ],
+            "allowedCommonJsDependencies": [
+              "extend"
             ]
           },
           "configurations": {
@@ -50,8 +55,8 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "1MB",
-                  "maximumError": "5MB"
+                  "maximumWarning": "5.25MB",
+                  "maximumError": "5.75MB"
                 },
                 {
                   "type": "anyComponentStyle",
