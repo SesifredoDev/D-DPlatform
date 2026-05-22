@@ -31,6 +31,7 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
 import {Subscription} from 'rxjs';
 import {BroadcastDialog} from '../../../objects/broadcast-dialog/broadcast-dialog';
+import {UnreadMessageBadgeService} from '../../../shared/services/unread-message-badge/unread-message-badge.service';
 import type {
   ChannelAccessPermission,
   ServerManagementPermission
@@ -200,6 +201,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     private vttSync: VttSync,
     public obsidianService: ObsidianVaultService,
     private messagingSocketService: MessagingSocketService,
+    private unreadBadgeService: UnreadMessageBadgeService,
     private snackBar: MatSnackBar
   ) {
   }
@@ -210,6 +212,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
     this.userService.getMe().subscribe((user) => {
       this.currentUserId = user._id;
+      this.unreadBadgeService.setCurrentUser(user._id);
       if (this.selectedServer) {
         this.applyServerDetails(this.selectedServer);
       }
@@ -308,6 +311,10 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       }
     }));
 
+    this.subscriptions.add(this.unreadBadgeService.counts$.subscribe(() => {
+      this.cdr.markForCheck();
+    }));
+
     this.serverService.getMyServers();
 
   }
@@ -344,6 +351,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       serverId: this.selectedServer?._id ?? channel.server,
       channelId: channel._id ?? null
     });
+    this.unreadBadgeService.markChannelRead(channel._id);
     this.channelService.setChannelObservable(channel);
     this.actionPerformed.emit();
   }
@@ -583,9 +591,12 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   whisperUser(member: any) {
     if (!this.selectedServer) return;
+    const peerId = member.user?._id;
+    this.unreadBadgeService.markWhisperRead(peerId);
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
         if (channel._id) {
           this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
+          this.unreadBadgeService.markWhisperRead(peerId, channel._id);
           this.channelService.setChannelObservable(channel);
           this.tabService.openTab(channel._id, channel.name, 'whisper');
           this.actionPerformed.emit();
@@ -602,6 +613,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, ownerId).subscribe(channel => {
       if (channel._id) {
         this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
+        this.unreadBadgeService.markWhisperRead(ownerId, channel._id);
         this.channelService.setChannelObservable(channel);
         this.tabService.openTab(channel._id, channel.name, 'whisper');
         this.actionPerformed.emit();
@@ -620,6 +632,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       this.channels.push(this.obsidianService.getObsidianChannel(server._id));
     }
 
+    this.unreadBadgeService.watchChannels(this.channels);
     this.restoreOpenChannel(server);
 
     this.groupMembersByRole(server);
@@ -807,6 +820,27 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       return typeof id === 'string' ? id : '';
     }
     return '';
+  }
+
+  getUnreadCountForChannel(channel: IChannel): number {
+    return this.unreadBadgeService.getChannelUnreadCount(channel._id);
+  }
+
+  getUnreadCountForMember(member: ServerMember): number {
+    return this.unreadBadgeService.getWhisperUnreadCount(this.serverService.getMemberUserId(member));
+  }
+
+  getUnreadCountForDm(): number {
+    if (!this.selectedServer?.owner) return 0;
+    const ownerId = typeof this.selectedServer.owner === 'string'
+      ? this.selectedServer.owner
+      : this.selectedServer.owner._id;
+
+    return this.unreadBadgeService.getWhisperUnreadCount(ownerId);
+  }
+
+  formatUnreadCount(count: number): string {
+    return count > 99 ? '99+' : String(count);
   }
 
 }

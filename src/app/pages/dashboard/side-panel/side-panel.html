@@ -152,6 +152,11 @@
             [ngStyle]="collapsed ? collapsedNavItemStyles : null">
             <mat-icon class="item-icon" [ngStyle]="collapsed ? collapsedIconStyles : null">{{ channel.icon || 'tag' }}</mat-icon>
             <span class="item-label" *ngIf="!collapsed">{{ channel.name }}</span>
+            @if (getUnreadCountForChannel(channel) > 0) {
+              <span class="unread-badge" [class.collapsed-badge]="collapsed">
+                {{ formatUnreadCount(getUnreadCountForChannel(channel)) }}
+              </span>
+            }
           </a>
         }
       </nav>
@@ -180,6 +185,11 @@
                     [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'"
                     [ngStyle]="collapsed ? collapsedIconStyles : null">
                   <span class="item-label" *ngIf="!collapsed">{{ member.user.username }}</span>
+                  @if (getUnreadCountForMember(member) > 0) {
+                    <span class="unread-badge" [class.collapsed-badge]="collapsed">
+                      {{ formatUnreadCount(getUnreadCountForMember(member)) }}
+                    </span>
+                  }
                 </a>
               }
             }
@@ -196,6 +206,11 @@
             [ngStyle]="collapsed ? collapsedNavItemStyles : null">
             <mat-icon class="item-icon" [ngStyle]="collapsed ? collapsedIconStyles : null">security</mat-icon>
             <span class="item-label" *ngIf="!collapsed">Whisper the DM</span>
+            @if (getUnreadCountForDm() > 0) {
+              <span class="unread-badge" [class.collapsed-badge]="collapsed">
+                {{ formatUnreadCount(getUnreadCountForDm()) }}
+              </span>
+            }
           </a>
         </ng-container>
       </nav>
