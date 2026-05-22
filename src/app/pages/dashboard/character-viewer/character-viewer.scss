@@ -236,6 +236,73 @@
   .subclass-name { font-size: 12px; color: var(--on-surface-muted); margin-top: 4px; font-style: italic; }
 }
 
+.pdf-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-m);
+  margin-bottom: var(--space-s);
+}
+
+.pdf-status, .pdf-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  min-width: 0;
+}
+
+.status-pill {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-pill);
+  color: var(--on-surface-muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+  font-weight: 700;
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &.interactive { color: var(--active-green); border-color: rgba(87, 242, 135, 0.35); }
+  &.error { color: var(--danger); border-color: rgba(237, 66, 69, 0.35); }
+  &.saved { color: var(--brand-blue); border-color: var(--brand-blue-alpha); }
+}
+
+.status-note {
+  color: var(--on-surface-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.save-pdf-btn {
+  background: var(--brand-blue);
+  color: white;
+  border-radius: var(--radius-l);
+  font-weight: 800;
+}
+
+.pdf-workspace {
+  height: calc(100vh - 276px);
+  min-height: 360px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-m);
+}
+
 /* PDF & IFRAME */
 .pdf-container, .iframe-container {
   height: calc(100vh - 220px);
@@ -243,6 +310,10 @@
   overflow: hidden;
   border: 1px solid var(--outline);
   background: var(--background-alt);
+}
+
+.pdf-workspace .pdf-container {
+  height: 100%;
 }
 
 .ddb-frame {
@@ -277,4 +348,28 @@
 ::ng-deep .mat-mdc-tab-body-content::-webkit-scrollbar-thumb {
   background: var(--outline);
   border-radius: 10px;
+}
+
+.rotating { animation: rotate 1.2s linear infinite; }
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 900px) {
+  .pdf-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pdf-workspace {
+    height: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .pdf-workspace .pdf-container {
+    height: 62vh;
+  }
+
 }

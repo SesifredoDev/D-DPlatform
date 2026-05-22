@@ -159,6 +159,21 @@
   .description { font-size: 13px; color: var(--on-surface-muted); margin-bottom: var(--space-m); }
 }
 
+.ddb-pdf-linked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--active-green);
+  font-size: 12px;
+  font-weight: 700;
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+  }
+}
+
 .divider-text {
   display: flex; align-items: center; gap: var(--space-m); color: var(--on-surface-variant); font-size: 10px; font-weight: 800; letter-spacing: 1px;
   &::before, &::after { content: ''; flex: 1; height: 1px; background: var(--outline); opacity: 0.5; }
@@ -191,19 +206,59 @@
   .stat-mod { font-size: 11px; font-weight: 600; color: var(--active-green); background: rgba(87, 242, 135, 0.1); padding: 1px 6px; border-radius: var(--radius-pill); margin-top: 2px; }
 }
 
+.media-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-m);
+}
+
 .upload-zone {
   border: 2px dashed var(--outline); border-radius: var(--radius-xl); padding: var(--space-l);
   display: flex; flex-direction: column; align-items: center; gap: var(--space-m); text-align: center; cursor: pointer; transition: var(--transition-standard); position: relative;
+  min-width: 0;
   &:hover { border-color: var(--brand-blue); background: var(--surface-light); }
+  &.has-file {
+    border-color: rgba(87, 242, 135, 0.55);
+    background: rgba(87, 242, 135, 0.06);
+  }
   .upload-preview {
     width: 64px; height: 64px; border-radius: var(--radius-l); background: rgba(0,0,0,0.2);
     display: flex; align-items: center; justify-content: center; overflow: hidden;
     mat-icon { font-size: 28px; width: 28px; height: 28px; color: var(--on-surface-muted); }
     .preview-img { width: 100%; height: 100%; object-fit: cover; }
   }
-  .upload-info { display: flex; flex-direction: column; gap: 2px; label { font-weight: 700; color: white; cursor: pointer; } span { font-size: 11px; color: var(--on-surface-muted); } }
+  .upload-info {
+    display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; min-width: 0;
+    label { font-weight: 700; color: white; cursor: pointer; }
+    > span { font-size: 11px; color: var(--on-surface-muted); }
+  }
   input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
   .pdf-icon { font-size: 40px; width: 40px; height: 40px; color: var(--danger); }
+}
+
+.upload-status {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--active-green);
+  font-size: 11px;
+  font-weight: 700;
+
+  mat-icon {
+    width: 14px;
+    height: 14px;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* --- Overrides & Footer --- */

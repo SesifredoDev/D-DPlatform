@@ -1,4 +1,4 @@
-import { Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges, ElementRef } from '@angular/core';
+import { AfterViewInit, Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges, ElementRef, HostListener, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import { ActivatedRoute } from '@angular/router';
@@ -18,6 +18,24 @@ import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { BroadcastDialog, BroadcastData, BroadcastEmbeddedFile } from '../../../objects/broadcast-dialog/broadcast-dialog';
 import { MilkdownEditorComponent } from '../../../shared/components/milkdown-editor/milkdown-editor.component';
+import { ObsidianCanvasEditorComponent } from '../../../shared/components/obsidian-canvas-editor/obsidian-canvas-editor.component';
+
+interface FolderGalleryImage {
+  name: string;
+  relativePath: string;
+  url: string;
+}
+
+interface NoteTemplate {
+  label: string;
+  fileName: string;
+}
+
+export interface ObsidianPreviewTabRequest {
+  serverId: string;
+  path: string;
+  title: string;
+}
 
 @Component({
   selector: 'app-obsidian-view',
@@ -35,18 +53,22 @@ import { MilkdownEditorComponent } from '../../../shared/components/milkdown-edi
     MatTooltipModule,
     MatMenuModule,
     MatDialogModule,
-    MilkdownEditorComponent
+    MilkdownEditorComponent,
+    ObsidianCanvasEditorComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
 })
-export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
+export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, OnChanges {
   @Input() serverId!: string;
   @Input() openPath: string | null = null;
   @Input() openRequestId: number | null = null;
+  @Input() previewOnly = false;
+  @Output() previewTabRequested = new EventEmitter<ObsidianPreviewTabRequest>();
   vaultName: string | null = null;
   localhostRoute: string | null = null;
   vaultEntries: VaultEntry[] = [];
+  treeFilter = '';
 
   selectedFileContent: string = '';
   // processedContent is not needed for Milkdown as it handles its own rendering
@@ -54,17 +76,54 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   selectedFileName: string = ''; // Full filename with extension
   selectedFileDisplayName: string = ''; // Name without extension for editing
   selectedFileRelativePath: string = '';
+  selectedFolderName = '';
+  selectedFolderRelativePath = '';
+  selectedFolderImages: FolderGalleryImage[] = [];
   isEditing: boolean = false;
   permissionGranted: boolean = false;
   fileSystemApiSupported: boolean = false;
+  isVaultLoading = false;
+  vaultError: string | null = null;
 
   // For non-markdown files
   nonMarkdownUrl: SafeUrl | null = null;
   isImage: boolean = false;
   isPdf: boolean = false;
 
+  readonly noteTemplates: NoteTemplate[] = [
+    { label: '5e Statblock', fileName: '5e Statblock.md' },
+    { label: 'Historical Event', fileName: 'Historical Event.md' },
+    { label: 'Item', fileName: 'Item.md' },
+    { label: 'Location', fileName: 'Location.md' },
+    { label: 'Lore & Mythology', fileName: 'Lore & Mythology.md' },
+    { label: 'Magical Artefact or System', fileName: 'Magical Artefact or System.md' },
+    { label: 'NPC', fileName: 'NPC.md' },
+    { label: 'Organisation', fileName: 'Organisation.md' },
+    { label: 'Player Character', fileName: 'Player Character.md' },
+    { label: 'Race', fileName: 'Race.md' },
+    { label: 'Session', fileName: '🎲 Session {{number}} - {{date}}.md' },
+    { label: 'Story Arc', fileName: 'Story Arc.md' },
+    { label: 'Story Event', fileName: 'Story Event.md' },
+  ];
+
+  isCreatingFile = false;
+  newFileKind: 'note' | 'canvas' = 'note';
+  newFileName = '';
+  selectedTemplateFileName = '';
+  createFileError = '';
+  isCreatingFolder = false;
+  newFolderName = '';
+  createFolderError = '';
+  isCompactSidebarLayout = false;
+  isMobileSidebarOpen = false;
+  saveState: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
+  lastSavedAt: Date | null = null;
+  draggedEntryPath: string | null = null;
+  activeDropTargetPath: string | null = null;
+
   // Context Menu Support
   contextMenuPosition = { x: '0px', y: '0px' };
+  private pendingImageBroadcast: { src: string; alt: string; path: string | null } | null = null;
 
   hasActiveSelection: boolean = false;
 
@@ -72,6 +131,13 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   private contentChanged = new Subject<void>();
   private autoSaveSubscription?: Subscription;
   private pendingOpenPath: string | null = null;
+  private filteredEntriesCacheQuery = '';
+  private filteredEntriesCacheSource: VaultEntry[] | null = null;
+  private filteredEntriesCache: VaultEntry[] = [];
+  private saveStateResetTimer?: ReturnType<typeof setTimeout>;
+  private sidebarResizeObserver?: ResizeObserver;
+  private readonly compactSidebarWidth = 960;
+  private readonly vaultEntryDragType = 'application/x-dd-vault-entry';
 
   constructor(
     private obsidianVaultService: ObsidianVaultService,
@@ -82,7 +148,78 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     private hostRef: ElementRef<HTMLElement>
   ) {}
 
+  get visibleVaultEntries(): VaultEntry[] {
+    const query = this.treeFilter.trim().toLowerCase();
+    if (!query) return this.vaultEntries;
+
+    if (this.filteredEntriesCacheQuery === query && this.filteredEntriesCacheSource === this.vaultEntries) {
+      return this.filteredEntriesCache;
+    }
+
+    this.filteredEntriesCacheQuery = query;
+    this.filteredEntriesCacheSource = this.vaultEntries;
+    this.filteredEntriesCache = this.filterVaultEntries(this.vaultEntries, query);
+    return this.filteredEntriesCache;
+  }
+
+  get totalEntryCount(): number {
+    return this.countEntries(this.vaultEntries);
+  }
+
+  get totalFileCount(): number {
+    return this.countEntries(this.vaultEntries, entry => entry.kind === 'file');
+  }
+
+  get totalFolderCount(): number {
+    return this.countEntries(this.vaultEntries, entry => entry.kind === 'directory');
+  }
+
+  get visibleFileCount(): number {
+    return this.countEntries(this.visibleVaultEntries, entry => entry.kind === 'file');
+  }
+
+  get visibleFolderCount(): number {
+    return this.countEntries(this.visibleVaultEntries, entry => entry.kind === 'directory');
+  }
+
+  get hasTreeFilter(): boolean {
+    return this.treeFilter.trim().length > 0;
+  }
+
+  get isRootDropTarget(): boolean {
+    return this.draggedEntryPath !== null && this.activeDropTargetPath === '';
+  }
+
+  get saveStateLabel(): string {
+    if (this.saveState === 'saving') return 'Saving';
+    if (this.saveState === 'error') return 'Save failed';
+    if (this.lastSavedAt) return 'Saved';
+    return 'Saved';
+  }
+
+  get isMarkdownFileSelected(): boolean {
+    const lowerName = this.selectedFileName.toLowerCase();
+    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
+  }
+
+  get isCanvasFileSelected(): boolean {
+    return this.isCanvasFile(this.selectedFileName);
+  }
+
+  get isViewingFolder(): boolean {
+    return this.selectedFolderRelativePath.length > 0;
+  }
+
+  get hasActiveView(): boolean {
+    return this.isEditing || this.isViewingFolder;
+  }
+
+  get activeNavigationPath(): string {
+    return this.selectedFolderRelativePath || this.selectedFileRelativePath;
+  }
+
   ngOnInit(): void {
+    this.syncResponsiveSidebarState(false);
     this.fileSystemApiSupported = this.obsidianVaultService.isFileSystemApiSupported();
 
     if (!this.serverId) {
@@ -107,6 +244,22 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     document.addEventListener('selectionchange', this.handleSelectionChange);
   }
 
+  ngAfterViewInit(): void {
+    this.syncResponsiveSidebarState(true);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.sidebarResizeObserver = new ResizeObserver(() => {
+        this.syncResponsiveSidebarState(true);
+      });
+      this.sidebarResizeObserver.observe(this.hostRef.nativeElement);
+    }
+  }
+
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    this.syncResponsiveSidebarState(true);
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
     if ((changes['openPath'] || changes['openRequestId']) && this.openPath) {
       void this.openRequestedPath(this.openPath);
@@ -116,6 +269,10 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   ngOnDestroy(): void {
     this.revokeObjectUrls();
     this.autoSaveSubscription?.unsubscribe();
+    if (this.saveStateResetTimer) {
+      clearTimeout(this.saveStateResetTimer);
+    }
+    this.sidebarResizeObserver?.disconnect();
     document.removeEventListener('selectionchange', this.handleSelectionChange);
   }
 
@@ -143,16 +300,21 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
 
   async loadVaultInfo(): Promise<void> {
     if (this.serverId) {
-      this.localhostRoute = this.obsidianVaultService.getVaultLocalhostRoute(this.serverId);
+      try {
+        this.vaultError = null;
+        this.localhostRoute = this.obsidianVaultService.getVaultLocalhostRoute(this.serverId);
 
-      const handle = await this.obsidianVaultService.getVaultHandle(this.serverId);
-      if (handle) {
-        this.vaultName = handle.name;
-        const options = { mode: 'readwrite' };
-        if ((await (handle as any).queryPermission(options)) === 'granted') {
-          this.permissionGranted = true;
-          this.loadVaultEntries();
+        const handle = await this.obsidianVaultService.getVaultHandle(this.serverId);
+        if (handle) {
+          this.vaultName = handle.name;
+          this.permissionGranted = await this.obsidianVaultService.hasPermission(this.serverId);
+          if (this.permissionGranted) {
+            await this.loadVaultEntries();
+          }
         }
+      } catch (err) {
+        this.vaultError = 'Unable to load vault information.';
+        console.error('Failed to load vault info:', err);
       }
     }
   }
@@ -162,10 +324,14 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
 
     if (this.serverId) {
       try {
+        this.vaultError = null;
         this.vaultName = await this.obsidianVaultService.attachVaultToServer(this.serverId);
         this.permissionGranted = true;
-        await this.loadVaultEntries();
+        this.isCreatingFile = false;
+        this.isCreatingFolder = false;
+        await this.loadVaultEntries(false);
       } catch (err) {
+        this.vaultError = 'Unable to attach vault.';
         console.error('Failed to attach vault:', err);
       }
     }
@@ -174,28 +340,53 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   async requestPermission(): Promise<void> {
     const handle = await this.obsidianVaultService.getVaultHandle(this.serverId);
     if (handle) {
-      this.permissionGranted = await this.obsidianVaultService.requestPermission(handle);
-      if (this.permissionGranted) {
-        this.loadVaultEntries();
+      try {
+        this.vaultError = null;
+        this.permissionGranted = await this.obsidianVaultService.requestPermission(handle);
+        if (this.permissionGranted) {
+          await this.loadVaultEntries(false);
+        }
+      } catch (err) {
+        this.vaultError = 'Unable to request vault access.';
+        console.error('Failed to request vault permission:', err);
       }
     }
   }
 
-  async loadVaultEntries(): Promise<void> {
-    this.vaultEntries = await this.obsidianVaultService.listVaultFiles(this.serverId);
-    await this.openPendingPath();
+  async loadVaultEntries(useCache = false): Promise<void> {
+    if (!this.serverId || !this.permissionGranted) return;
+
+    this.isVaultLoading = true;
+    this.vaultError = null;
+    try {
+      this.vaultEntries = await this.obsidianVaultService.listVaultFiles(this.serverId, useCache);
+      await this.openPendingPath();
+      await this.refreshSelectedFolder();
+    } catch (err) {
+      this.vaultError = 'Unable to load vault files.';
+      console.error('Failed to load vault entries:', err);
+    } finally {
+      this.isVaultLoading = false;
+    }
   }
 
   async selectFile(entry: VaultEntry): Promise<void> {
     if (entry.kind === 'directory') return;
 
     this.revokeObjectUrls();
+    this.clearFolderViewState();
     this.selectedFileName = entry.name;
     this.selectedFileDisplayName = this.getDisplayName(entry.name);
     this.selectedFileRelativePath = entry.relativePath;
     this.isEditing = true;
+    this.saveState = 'saved';
+    this.lastSavedAt = null;
 
-    if (entry.name.toLowerCase().endsWith('.md')) {
+    if (
+      entry.name.toLowerCase().endsWith('.md') ||
+      entry.name.toLowerCase().endsWith('.markdown') ||
+      this.isCanvasFile(entry.name)
+    ) {
       this.isImage = false;
       this.isPdf = false;
       this.nonMarkdownUrl = null;
@@ -209,28 +400,232 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       this.isPdf = this.isPdfFile(entry.name);
       this.selectedFileContent = '';
     }
+
+    this.closeMobileSidebar();
+  }
+
+  async selectFolder(entry: VaultEntry): Promise<void> {
+    if (entry.kind !== 'directory') return;
+
+    const sourceEntry = this.findEntryByPath(entry.relativePath, this.vaultEntries) || entry;
+    this.revokeObjectUrls();
+    this.clearFileViewState();
+    this.selectedFolderName = sourceEntry.name;
+    this.selectedFolderRelativePath = sourceEntry.relativePath;
+    this.selectedFolderImages = [];
+
+    const imageEntries = this.collectFolderImages(sourceEntry);
+
+    const images = await Promise.all(imageEntries.map(async imageEntry => {
+      try {
+        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, imageEntry.relativePath);
+        const url = URL.createObjectURL(blob);
+        this.objectUrls.push(url);
+        return {
+          name: imageEntry.name,
+          relativePath: imageEntry.relativePath,
+          url,
+        };
+      } catch (error) {
+        console.warn('[ObsidianView] Failed to load gallery image', imageEntry.relativePath, error);
+        return null;
+      }
+    }));
+
+    this.selectedFolderImages = images.filter((image): image is FolderGalleryImage => !!image);
+    this.closeMobileSidebar();
+  }
+
+  startNewFile(kind: 'note' | 'canvas' = 'note'): void {
+    if (!this.permissionGranted) return;
+
+    this.isCreatingFile = true;
+    this.isCreatingFolder = false;
+    this.newFileKind = kind;
+    this.newFileName = '';
+    this.selectedTemplateFileName = '';
+    this.createFileError = '';
+    this.createFolderError = '';
+    this.openMobileSidebar();
+  }
+
+  startNewCanvas(): void {
+    this.startNewFile('canvas');
+  }
+
+  cancelNewFile(): void {
+    this.isCreatingFile = false;
+    this.newFileKind = 'note';
+    this.newFileName = '';
+    this.selectedTemplateFileName = '';
+    this.createFileError = '';
+  }
+
+  startNewFolder(): void {
+    if (!this.permissionGranted) return;
+
+    this.isCreatingFolder = true;
+    this.isCreatingFile = false;
+    this.newFileKind = 'note';
+    this.newFolderName = this.selectedFolderRelativePath ? `${this.selectedFolderRelativePath}/` : '';
+    this.createFolderError = '';
+    this.createFileError = '';
+    this.openMobileSidebar();
+  }
+
+  cancelNewFolder(): void {
+    this.isCreatingFolder = false;
+    this.newFolderName = '';
+    this.createFolderError = '';
+  }
+
+  toggleMobileSidebar(): void {
+    if (!this.isCompactSidebarLayout) return;
+
+    this.isMobileSidebarOpen = !this.isMobileSidebarOpen;
+  }
+
+  openMobileSidebar(): void {
+    if (!this.isCompactSidebarLayout) return;
+
+    this.isMobileSidebarOpen = true;
+  }
+
+  closeMobileSidebar(): void {
+    this.isMobileSidebarOpen = false;
+  }
+
+  private syncResponsiveSidebarState(detectChanges: boolean): void {
+    const hostWidth = this.hostRef.nativeElement.getBoundingClientRect().width;
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : hostWidth;
+    const measuredWidth = hostWidth > 0 ? hostWidth : viewportWidth;
+    const isCompact = measuredWidth <= this.compactSidebarWidth;
+
+    if (this.isCompactSidebarLayout !== isCompact) {
+      this.isCompactSidebarLayout = isCompact;
+      this.isMobileSidebarOpen = false;
+
+      if (detectChanges) {
+        this.cdr.detectChanges();
+      }
+    }
   }
 
   async createNewFile(): Promise<void> {
-    const fileName = prompt('Enter the name of the new note:');
-    if (!fileName) return;
-
-    const fullFileName = fileName.endsWith('.md') ? fileName : `${fileName}.md`;
+    const fullFileName = this.buildNewFilePath(this.newFileName);
+    const attemptedKind = this.newFileKind;
+    if (!fullFileName) {
+      this.createFileError = attemptedKind === 'canvas' ? 'Enter a canvas name.' : 'Enter a note name.';
+      return;
+    }
 
     try {
-      await this.obsidianVaultService.writeFile(this.serverId, fullFileName, '');
-      await this.loadVaultEntries();
+      const initialContent = await this.loadSelectedTemplateContent(fullFileName);
+      await this.obsidianVaultService.writeFile(this.serverId, fullFileName, initialContent);
+      this.cancelNewFile();
+      await this.loadVaultEntries(false);
 
       const newEntry = this.findEntryByPath(fullFileName, this.vaultEntries);
       if (newEntry) {
         await this.selectFile(newEntry);
       }
     } catch (err) {
+      this.createFileError = attemptedKind === 'canvas' ? 'Unable to create canvas.' : 'Unable to create note.';
       console.error('Failed to create file:', err);
     }
   }
 
+  async createNewFolder(): Promise<void> {
+    const folderPath = this.buildNewFolderPath(this.newFolderName);
+    if (!folderPath) {
+      this.createFolderError = 'Enter a folder name.';
+      return;
+    }
+
+    try {
+      await this.obsidianVaultService.createFolder(this.serverId, folderPath);
+      this.cancelNewFolder();
+      await this.loadVaultEntries(false);
+
+      const newEntry = this.findEntryByPath(folderPath, this.vaultEntries);
+      if (newEntry?.kind === 'directory') {
+        await this.selectFolder(newEntry);
+      }
+    } catch (err) {
+      this.createFolderError = 'Unable to create folder.';
+      console.error('Failed to create folder:', err);
+    }
+  }
+
+  private async loadSelectedTemplateContent(filePath: string): Promise<string> {
+    if (this.isCanvasFile(filePath)) {
+      return this.obsidianVaultService.getObsidianCanvasTemplate();
+    }
+
+    if (!this.selectedTemplateFileName) return '';
+
+    const template = this.noteTemplates.find(item => item.fileName === this.selectedTemplateFileName);
+    if (!template) return '';
+
+    const response = await fetch(this.getTemplateAssetUrl(template.fileName), { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`Unable to load template: ${template.fileName}`);
+    }
+
+    const content = await response.text();
+    return this.applyTemplateVariables(content, filePath);
+  }
+
+  private getTemplateAssetUrl(fileName: string): string {
+    return new URL(`assets/templates/${encodeURIComponent(fileName)}`, document.baseURI).toString();
+  }
+
+  private applyTemplateVariables(content: string, filePath: string): string {
+    const title = this.getDisplayName(filePath.split('/').pop() || filePath);
+    const today = this.getTemplateDate();
+    const number = title.match(/\d+/)?.[0] || '';
+    const values: Record<string, string> = {
+      title,
+      name: title,
+      date: today,
+      number,
+    };
+
+    return content.replace(/{{\s*(title|name|date|number)\s*}}/gi, (_, key: string) => {
+      return values[key.toLowerCase()] ?? '';
+    });
+  }
+
+  private getTemplateDate(): string {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private buildNewFilePath(fileName: string): string | null {
+    const normalized = fileName.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!normalized) return null;
+
+    const filePart = normalized.split('/').pop() || normalized;
+    const defaultExtension = this.newFileKind === 'canvas' ? '.canvas' : '.md';
+    return filePart.includes('.') ? normalized : `${normalized}${defaultExtension}`;
+  }
+
+  private buildNewFolderPath(folderName: string): string | null {
+    const normalized = folderName
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/\/{2,}/g, '/');
+
+    return normalized || null;
+  }
+
   async renameSelectedFile(): Promise<void> {
+    if (this.previewOnly) return;
+
     const currentDisplayName = this.getDisplayName(this.selectedFileName);
     const newDisplayName = this.selectedFileDisplayName;
 
@@ -247,7 +642,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       this.selectedFileName = fullNewName;
       this.selectedFileDisplayName = newDisplayName;
       this.selectedFileRelativePath = newPath;
-      await this.loadVaultEntries();
+      await this.loadVaultEntries(false);
     } catch (err) {
       console.error('Failed to rename file:', err);
       this.selectedFileDisplayName = currentDisplayName;
@@ -255,52 +650,244 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   getDisplayName(name: string): string {
-    return name.endsWith('.md') ? name.slice(0, -3) : name;
+    const lowerName = name.toLowerCase();
+    if (lowerName.endsWith('.markdown')) return name.slice(0, -9);
+    if (lowerName.endsWith('.canvas')) return name.slice(0, -7);
+    if (lowerName.endsWith('.md')) return name.slice(0, -3);
+    return name;
+  }
+
+  getFileIcon(name: string): string {
+    const lowerName = name.toLowerCase();
+    if (this.isCanvasFile(name)) return 'account_tree';
+    if (lowerName.endsWith('.md') || lowerName.endsWith('.markdown')) return 'description';
+    if (this.isImageFile(name)) return 'image';
+    if (this.isPdfFile(name)) return 'picture_as_pdf';
+    if (/\.(mp3|wav|ogg|flac|m4a)$/i.test(name)) return 'graphic_eq';
+    if (/\.(mp4|webm|mov|avi)$/i.test(name)) return 'movie';
+    return 'insert_drive_file';
+  }
+
+  pluralize(count: number, singular: string, plural = `${singular}s`): string {
+    return `${count} ${count === 1 ? singular : plural}`;
+  }
+
+  getFolderMeta(entry: VaultEntry): string {
+    const children = entry.children || [];
+    if (children.length === 0) return 'Empty';
+
+    const folderCount = children.filter(child => child.kind === 'directory').length;
+    const fileCount = children.length - folderCount;
+    const parts = [];
+
+    if (folderCount > 0) {
+      parts.push(this.pluralize(folderCount, 'folder'));
+    }
+
+    if (fileCount > 0) {
+      parts.push(this.pluralize(fileCount, 'file'));
+    }
+
+    return parts.join(', ');
+  }
+
+  getFileTypeLabel(name: string): string {
+    if (this.isCanvasFile(name)) return 'Canvas';
+    if (name.toLowerCase().endsWith('.md') || name.toLowerCase().endsWith('.markdown')) return 'MD';
+
+    const extension = name.split('.').pop();
+    return extension && extension !== name ? extension.toUpperCase() : 'File';
+  }
+
+  getFileLocationLabel(entry: VaultEntry): string {
+    return entry.parentPath || 'Vault root';
+  }
+
+  isFileSelected(entry: VaultEntry): boolean {
+    return this.selectedFileRelativePath === entry.relativePath;
+  }
+
+  isFolderSelected(entry: VaultEntry): boolean {
+    return this.selectedFolderRelativePath === entry.relativePath;
+  }
+
+  isFolderInActivePath(entry: VaultEntry): boolean {
+    const activePath = this.activeNavigationPath;
+    return activePath === entry.relativePath || activePath.startsWith(`${entry.relativePath}/`);
+  }
+
+  isDropTarget(entry: VaultEntry): boolean {
+    return this.draggedEntryPath !== null && this.activeDropTargetPath === entry.relativePath;
+  }
+
+  openSelectedFilePreviewTab(): void {
+    if (!this.selectedFileRelativePath) return;
+
+    this.requestPreviewTab(this.selectedFileRelativePath, this.selectedFileName || this.selectedFileRelativePath);
+  }
+
+  openEntryPreviewTab(entry: VaultEntry, event?: Event): void {
+    event?.stopPropagation();
+    if (entry.kind !== 'file') return;
+
+    this.requestPreviewTab(entry.relativePath, entry.name);
+    this.closeMobileSidebar();
+  }
+
+  async broadcastEntry(entry: VaultEntry, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    if (entry.kind !== 'file') return;
+
+    await this.selectFile(entry);
+    await this.broadcastFullDocument();
+  }
+
+  async selectContainingFolder(entry: VaultEntry, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    if (!entry.parentPath) return;
+
+    const folder = this.findEntryByPath(entry.parentPath, this.vaultEntries);
+    if (folder?.kind === 'directory') {
+      await this.selectFolder(folder);
+    }
+  }
+
+  startNewFileInFolder(entry: VaultEntry, kind: 'note' | 'canvas' = 'note', event?: Event): void {
+    event?.stopPropagation();
+    if (entry.kind !== 'directory') return;
+
+    this.startNewFile(kind);
+    this.newFileName = entry.relativePath ? `${entry.relativePath}/` : '';
+  }
+
+  startNewFolderInFolder(entry: VaultEntry, event?: Event): void {
+    event?.stopPropagation();
+    if (entry.kind !== 'directory') return;
+
+    this.startNewFolder();
+    this.newFolderName = entry.relativePath ? `${entry.relativePath}/` : '';
+  }
+
+  trackEntry(index: number, entry: VaultEntry): string {
+    return `${entry.kind}:${entry.relativePath || entry.name}:${index}`;
   }
 
   onContentChange(newContent?: string): void {
+    if (this.previewOnly) return;
+
     if (newContent !== undefined) {
       this.selectedFileContent = newContent;
     }
+    this.saveState = 'saving';
     this.contentChanged.next();
   }
 
+  insertStatsheetTemplate(): void {
+    if (this.previewOnly || !this.isMarkdownFileSelected) return;
+
+    const content = this.selectedFileContent.trimEnd();
+    const statsheet = this.obsidianVaultService.getDndStatsheetTemplate();
+    this.selectedFileContent = `${content}${content ? '\n\n' : ''}${statsheet}\n`;
+    this.onContentChange(this.selectedFileContent);
+  }
+
   onDragStart(event: DragEvent, entry: VaultEntry): void {
+    this.draggedEntryPath = entry.relativePath;
+    this.activeDropTargetPath = null;
+
     if (event.dataTransfer) {
+      event.dataTransfer.setData(this.vaultEntryDragType, JSON.stringify({
+        kind: entry.kind,
+        name: entry.name,
+        relativePath: entry.relativePath,
+        parentPath: entry.parentPath,
+      }));
       event.dataTransfer.setData('text/plain', entry.relativePath);
-      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.effectAllowed = 'copyMove';
     }
   }
 
-  onDragOver(event: DragEvent): void {
+  onDragEnd(): void {
+    this.clearDragState();
+  }
+
+  onDragOver(event: DragEvent, targetEntry?: VaultEntry): void {
     event.preventDefault();
+    event.stopPropagation();
+
+    const targetDirPath = (targetEntry && targetEntry.kind === 'directory') ? targetEntry.relativePath : '';
+    const sourcePath = this.draggedEntryPath || event.dataTransfer?.getData('text/plain') || '';
+    const canDrop = sourcePath ? this.canDropOnTarget(sourcePath, targetDirPath) : true;
+
     if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'move';
+      event.dataTransfer.dropEffect = canDrop ? 'move' : 'none';
+    }
+
+    this.activeDropTargetPath = canDrop ? targetDirPath : null;
+  }
+
+  onDragLeave(event: DragEvent, targetEntry?: VaultEntry): void {
+    const currentTarget = event.currentTarget;
+    const relatedTarget = event.relatedTarget;
+    if (
+      currentTarget instanceof HTMLElement &&
+      relatedTarget instanceof Node &&
+      currentTarget.contains(relatedTarget)
+    ) {
+      return;
+    }
+
+    const targetDirPath = (targetEntry && targetEntry.kind === 'directory') ? targetEntry.relativePath : '';
+    if (this.activeDropTargetPath === targetDirPath) {
+      this.activeDropTargetPath = null;
     }
   }
 
   async onDrop(event: DragEvent, targetEntry?: VaultEntry): Promise<void> {
     event.preventDefault();
-    const sourcePath = event.dataTransfer?.getData('text/plain');
-    if (!sourcePath) return;
+    event.stopPropagation();
+
+    const sourcePath = this.draggedEntryPath || event.dataTransfer?.getData('text/plain');
+    if (!sourcePath) {
+      this.clearDragState();
+      return;
+    }
 
     const targetDirPath = (targetEntry && targetEntry.kind === 'directory') ? targetEntry.relativePath : '';
 
-    if (sourcePath === targetDirPath || sourcePath.startsWith(targetDirPath + '/')) {
+    if (!this.canDropOnTarget(sourcePath, targetDirPath)) {
+      this.clearDragState();
       return;
     }
 
     try {
-      await this.obsidianVaultService.moveEntry(this.serverId, sourcePath, targetDirPath);
-      await this.loadVaultEntries();
+      const newPath = await this.obsidianVaultService.moveEntry(this.serverId, sourcePath, targetDirPath);
+      await this.loadVaultEntries(false);
 
       if (this.selectedFileRelativePath === sourcePath) {
-        const fileName = sourcePath.split('/').pop()!;
-        this.selectedFileRelativePath = targetDirPath ? `${targetDirPath}/${fileName}` : fileName;
+        this.selectedFileRelativePath = newPath;
       }
+
+      await this.refreshSelectedFolder();
     } catch (err) {
       console.error('Failed to move entry:', err);
+    } finally {
+      this.clearDragState();
     }
+  }
+
+  private canDropOnTarget(sourcePath: string, targetDirPath: string): boolean {
+    const sourceEntry = this.findEntryByPath(sourcePath, this.vaultEntries);
+    if (!sourceEntry) return false;
+    if (sourceEntry.parentPath === targetDirPath) return false;
+    if (sourcePath === targetDirPath) return false;
+
+    return sourceEntry.kind !== 'directory' || !targetDirPath.startsWith(`${sourcePath}/`);
+  }
+
+  private clearDragState(): void {
+    this.draggedEntryPath = null;
+    this.activeDropTargetPath = null;
   }
 
   async deleteEntry(entry: VaultEntry, event?: Event): Promise<void> {
@@ -309,10 +896,19 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     if (confirm(`Are you sure you want to delete ${entry.name}?`)) {
       try {
         await this.obsidianVaultService.deleteEntry(this.serverId, entry.relativePath);
-        if (this.selectedFileRelativePath === entry.relativePath) {
+        if (
+          this.selectedFileRelativePath === entry.relativePath ||
+          this.selectedFileRelativePath.startsWith(`${entry.relativePath}/`)
+        ) {
           this.cancelEdit();
         }
-        await this.loadVaultEntries();
+        if (
+          this.selectedFolderRelativePath === entry.relativePath ||
+          this.selectedFolderRelativePath.startsWith(`${entry.relativePath}/`)
+        ) {
+          this.cancelFolderView();
+        }
+        await this.loadVaultEntries(false);
       } catch (err) {
         console.error('Failed to delete entry:', err);
       }
@@ -327,6 +923,57 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     trigger.openMenu();
   }
 
+  onImageContextMenu(event: MouseEvent, trigger: MatMenuTrigger): void {
+    const image = this.findContextImage(event.target);
+    if (!image) return;
+
+    const src = image.getAttribute('src') || '';
+    if (!src) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    this.pendingImageBroadcast = {
+      src,
+      alt: image.getAttribute('alt') || image.getAttribute('title') || 'image',
+      path: image.getAttribute('data-path') || null,
+    };
+    this.contextMenuPosition.x = `${event.clientX}px`;
+    this.contextMenuPosition.y = `${event.clientY}px`;
+    trigger.openMenu();
+  }
+
+  async broadcastContextImage(): Promise<void> {
+    if (!this.pendingImageBroadcast) return;
+
+    const image = this.pendingImageBroadcast;
+    this.pendingImageBroadcast = null;
+    const searchPath = this.extractImageSearchPath(image.src, image.path);
+    const filename = this.getBroadcastImageFilename(image.alt, searchPath, image.src);
+    const data: BroadcastData = {
+      source: 'obsidian-view-image',
+      filename,
+    };
+
+    if (searchPath) {
+      const resolvedPath = await this.resolveEmbedPath(searchPath);
+      if (resolvedPath && this.isImageFile(resolvedPath)) {
+        try {
+          const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, resolvedPath);
+          data.filename = resolvedPath.split('/').pop() || filename;
+          data.file = new File([blob], data.filename, { type: blob.type || this.inferImageMimeType(data.filename) });
+          this.openBroadcastDialog(data);
+          return;
+        } catch (error) {
+          console.warn('[ObsidianView] Failed to read right-clicked image from vault', resolvedPath, error);
+        }
+      }
+    }
+
+    data.imageUrl = image.src;
+    this.openBroadcastDialog(data);
+  }
+
   private findEntryByPath(path: string, entries: VaultEntry[]): VaultEntry | null {
     const lowerPath = path.toLowerCase();
     for (const entry of entries) {
@@ -337,6 +984,116 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       }
     }
     return null;
+  }
+
+  private clearFileViewState(): void {
+    this.isEditing = false;
+    this.selectedFileName = '';
+    this.selectedFileDisplayName = '';
+    this.selectedFileRelativePath = '';
+    this.selectedFileContent = '';
+    this.nonMarkdownUrl = null;
+    this.isImage = false;
+    this.isPdf = false;
+    this.saveState = 'idle';
+    this.lastSavedAt = null;
+  }
+
+  private clearFolderViewState(): void {
+    this.selectedFolderName = '';
+    this.selectedFolderRelativePath = '';
+    this.selectedFolderImages = [];
+  }
+
+  private findContextImage(target: EventTarget | null): HTMLImageElement | null {
+    if (!(target instanceof HTMLElement)) return null;
+    return target.closest('img');
+  }
+
+  private extractImageSearchPath(src: string, dataPath: string | null): string | null {
+    if (dataPath) return dataPath;
+
+    let cleanSrc = src.trim();
+    const origin = window.location.origin;
+    if (cleanSrc.startsWith(origin)) {
+      cleanSrc = cleanSrc.substring(origin.length).replace(/^\/+/, '');
+    }
+
+    try {
+      cleanSrc = decodeURIComponent(cleanSrc);
+    } catch (e) {}
+
+    cleanSrc = cleanSrc.replace(/^<+|<+$/g, '').replace(/^>+|>+$/g, '');
+
+    if (cleanSrc.startsWith('wikilink-blob:')) {
+      return cleanSrc.replace('wikilink-blob:', '');
+    }
+
+    if (cleanSrc.startsWith('file:///')) {
+      return cleanSrc.replace('file:///', '');
+    }
+
+    if (/^(https?:|blob:|data:|broadcast-file:)/i.test(cleanSrc)) {
+      return null;
+    }
+
+    return cleanSrc || null;
+  }
+
+  private getBroadcastImageFilename(alt: string, path: string | null, src: string): string {
+    const candidate = path?.split('/').pop() || alt || src.split('/').pop() || 'image';
+    return candidate.includes('.') ? candidate : `${candidate}.png`;
+  }
+
+  private inferImageMimeType(filename: string): string {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    if (ext === 'jpg') return 'image/jpeg';
+    return ext ? `image/${ext}` : 'image/png';
+  }
+
+  private filterVaultEntries(entries: VaultEntry[], query: string): VaultEntry[] {
+    return entries.reduce<VaultEntry[]>((matches, entry) => {
+      const childMatches = entry.children ? this.filterVaultEntries(entry.children, query) : [];
+      const entryMatches =
+        entry.name.toLowerCase().includes(query) ||
+        entry.relativePath.toLowerCase().includes(query);
+
+      if (entryMatches) {
+        matches.push(entry);
+      } else if (childMatches.length > 0) {
+        matches.push({ ...entry, children: childMatches });
+      }
+
+      return matches;
+    }, []);
+  }
+
+  private countEntries(entries: VaultEntry[], predicate: (entry: VaultEntry) => boolean = () => true): number {
+    return entries.reduce((count, entry) => {
+      const childrenCount = entry.children ? this.countEntries(entry.children, predicate) : 0;
+      return count + (predicate(entry) ? 1 : 0) + childrenCount;
+    }, 0);
+  }
+
+  private collectFolderImages(entry: VaultEntry): VaultEntry[] {
+    return (entry.children || []).flatMap(child => {
+      if (child.kind === 'file') {
+        return this.isImageFile(child.name) ? [child] : [];
+      }
+
+      return this.collectFolderImages(child);
+    });
+  }
+
+  private async refreshSelectedFolder(): Promise<void> {
+    if (!this.selectedFolderRelativePath) return;
+
+    const entry = this.findEntryByPath(this.selectedFolderRelativePath, this.vaultEntries);
+    if (entry && entry.kind === 'directory') {
+      await this.selectFolder(entry);
+    } else {
+      this.cancelFolderView();
+    }
   }
 
   private async openRequestedPath(relativePath: string): Promise<void> {
@@ -360,23 +1117,36 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     }
 
     const entry = this.findEntryByPath(this.pendingOpenPath, this.vaultEntries);
-    if (!entry || entry.kind !== 'file') {
+    if (!entry) {
       return;
     }
 
     this.pendingOpenPath = null;
-    await this.selectFile(entry);
+    if (entry.kind === 'directory') {
+      await this.selectFolder(entry);
+    } else {
+      await this.selectFile(entry);
+    }
   }
 
   async saveFile(): Promise<void> {
-    if (this.selectedFileRelativePath && this.selectedFileName.endsWith('.md')) {
+    if (
+      !this.previewOnly &&
+      this.selectedFileRelativePath &&
+      (this.isMarkdownFileSelected || this.isCanvasFileSelected)
+    ) {
       try {
+        this.saveState = 'saving';
         await this.obsidianVaultService.writeFile(
           this.serverId,
           this.selectedFileRelativePath,
           this.selectedFileContent
         );
+        this.lastSavedAt = new Date();
+        this.saveState = 'saved';
+        this.scheduleSaveStateReset();
       } catch (err) {
+        this.saveState = 'error';
         console.error('Failed to auto-save file:', err);
       }
     }
@@ -387,8 +1157,24 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'tiff', 'avif'].includes(ext || '');
   }
 
+  private isCanvasFile(path: string): boolean {
+    return path.toLowerCase().endsWith('.canvas');
+  }
+
   private isPdfFile(path: string): boolean {
     return path.toLowerCase().endsWith('.pdf');
+  }
+
+  private scheduleSaveStateReset(): void {
+    if (this.saveStateResetTimer) {
+      clearTimeout(this.saveStateResetTimer);
+    }
+
+    this.saveStateResetTimer = setTimeout(() => {
+      if (this.saveState === 'saved') {
+        this.saveState = 'idle';
+      }
+    }, 2000);
   }
 
   private revokeObjectUrls(): void {
@@ -398,12 +1184,47 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
 
   onWikilinkClick(path: string): void {
     if (path) {
+      if (this.previewOnly) {
+        this.openInternalLinkPreviewTab(path);
+        return;
+      }
+
       this.openInternalLink(path);
     }
   }
 
+  onCanvasFileOpen(path: string): void {
+    if (!path) return;
+
+    if (this.previewOnly) {
+      this.openInternalLinkPreviewTab(path);
+      return;
+    }
+
+    void this.openInternalLink(path);
+  }
+
+  openGalleryImage(path: string): void {
+    void this.openInternalLink(path);
+  }
+
   private async openInternalLink(linkPath: string): Promise<void> {
     linkPath = linkPath.trim().replace(/[\u200B-\u200D\uFEFF]/g, '');
+    const entry = this.resolveInternalLinkEntry(linkPath);
+
+    if (entry) {
+      await this.selectFile(entry);
+    }
+  }
+
+  private openInternalLinkPreviewTab(linkPath: string): void {
+    const entry = this.resolveInternalLinkEntry(linkPath.trim().replace(/[\u200B-\u200D\uFEFF]/g, ''));
+    if (entry?.kind === 'file') {
+      this.requestPreviewTab(entry.relativePath, entry.name);
+    }
+  }
+
+  private resolveInternalLinkEntry(linkPath: string): VaultEntry | null {
     const currentFileDir = this.selectedFileRelativePath.split('/').slice(0, -1).join('/');
 
     let entry = this.findEntryByPath(linkPath, this.vaultEntries);
@@ -435,9 +1256,17 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       entry = this.findEntryByBaseName(baseName, this.vaultEntries);
     }
 
-    if (entry) {
-      await this.selectFile(entry);
-    }
+    return entry;
+  }
+
+  private requestPreviewTab(path: string, name: string): void {
+    if (!this.serverId || !path) return;
+
+    this.previewTabRequested.emit({
+      serverId: this.serverId,
+      path,
+      title: this.getDisplayName(name.split('/').pop() || name),
+    });
   }
 
   private findEntryByName(name: string, entries: VaultEntry[]): VaultEntry | null {
@@ -474,15 +1303,22 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   cancelEdit(): void {
-    this.isEditing = false;
-    this.selectedFileName = '';
-    this.selectedFileDisplayName = '';
-    this.selectedFileRelativePath = '';
-    this.selectedFileContent = '';
-    this.nonMarkdownUrl = null;
-    this.isImage = false;
-    this.isPdf = false;
+    this.clearFileViewState();
     this.revokeObjectUrls();
+  }
+
+  cancelFolderView(): void {
+    this.clearFolderViewState();
+    this.revokeObjectUrls();
+  }
+
+  closeActiveView(): void {
+    if (this.isEditing) {
+      this.cancelEdit();
+      return;
+    }
+
+    this.cancelFolderView();
   }
 
   openObsidianVault(): void {
@@ -502,6 +1338,15 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  private openBroadcastDialog(data: BroadcastData): void {
+    this.dialog.open(BroadcastDialog, {
+      data,
+      maxWidth: '600px',
+      width: '100%',
+      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
+    });
+  }
+
   async broadcastFullDocument(): Promise<void> {
     if (!this.selectedFileContent && !this.nonMarkdownUrl) return;
 
@@ -510,7 +1355,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       filename: this.selectedFileName
     };
 
-    if (this.selectedFileName.endsWith('.md')) {
+    if (this.isMarkdownFileSelected) {
       const embeddedFiles: BroadcastEmbeddedFile[] = [];
       const tokenCache = new Map<string, string>();
       const htmlContent = this.buildBroadcastHtmlFromEditor();
@@ -524,12 +1369,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
       data.file = new File([blob], this.selectedFileName, { type: blob.type });
     }
 
-    this.dialog.open(BroadcastDialog, {
-      data: data,
-      maxWidth: '600px',
-      width: '100%',
-      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
-    });
+    this.openBroadcastDialog(data);
   }
 
   async broadcastSelection(): Promise<boolean> {
@@ -580,12 +1420,7 @@ export class ObsidianViewComponent implements OnInit, OnDestroy, OnChanges {
        data.imageUrl = imgs[0].src;
     }
 
-    this.dialog.open(BroadcastDialog, {
-      data: data,
-      maxWidth: '600px',
-      width: '100%',
-      panelClass: ['glass-dialog-container', 'broadcast-dialog-panel']
-    });
+    this.openBroadcastDialog(data);
 
     return true;
   }

@@ -297,6 +297,7 @@ export class VttSync implements OnDestroy {
     this.engine = engine;
     this.activeEngineRoomId = roomId;
     this.needsSessionRestore = false;
+    this.updateActiveEngineTargetHosting(roomId, true);
 
     const socket = this.getSocket();
     let announcedHosting = false;
@@ -340,6 +341,7 @@ export class VttSync implements OnDestroy {
     this.activeEngineRoomId = roomId;
     this.localCharacter = character;
     this.needsSessionRestore = false;
+    this.updateActiveEngineTargetHosting(roomId, false);
 
     engine.setLocalCharacter(character);
 
@@ -438,6 +440,15 @@ export class VttSync implements OnDestroy {
 
   endSession() {
     this.stopSyncing(true, true);
+  }
+
+  endSessionForRoom(roomId: string): Promise<boolean> {
+    if (this.isHosting && this.currentRoomId === roomId) {
+      this.endSession();
+      return Promise.resolve(true);
+    }
+
+    return this.requestRemoteSessionEnd(roomId);
   }
 
   stopSyncing(force: boolean = false, endHostedSession: boolean = false) {
@@ -807,6 +818,7 @@ export class VttSync implements OnDestroy {
       attachmentId,
       roomId,
       windowLabel: this.currentWindowLabel,
+      isHosting: this.isHosting && this.currentRoomId === roomId,
       updatedAt: Date.now()
     };
     this.publishActiveEngineTarget();
@@ -1159,10 +1171,33 @@ export class VttSync implements OnDestroy {
     });
   }
 
+  private requestRemoteSessionEnd(roomId: string): Promise<boolean> {
+    const requestId = this.createWindowInstanceId();
+    const target = this.getWindowTarget(roomId, true);
+    const command: VttWindowCommand = {
+      type: 'end-session',
+      requestId,
+      sourceId: this.windowInstanceId,
+      targetWindowLabel: target?.windowLabel ?? null,
+      roomId
+    };
+
+    return new Promise(resolve => {
+      const timeoutId = window.setTimeout(() => {
+        this.pendingWindowCommands.delete(requestId);
+        this.releaseCommandClaim(requestId);
+        resolve(false);
+      }, 1500);
+
+      this.pendingWindowCommands.set(requestId, { resolve, timeoutId });
+      this.broadcastWindowMessage(command, target?.windowLabel ?? null);
+    });
+  }
+
   private handleWindowMessage(message: VttWindowMessage | null | undefined) {
     if (!message || message.sourceId === this.windowInstanceId) return;
 
-    if (message.type === 'add-character-token-result') {
+    if (message.type === 'add-character-token-result' || message.type === 'end-session-result') {
       this.resolvePendingWindowCommand(message.requestId, message.handled);
       return;
     }
@@ -1173,6 +1208,15 @@ export class VttSync implements OnDestroy {
       }
 
       this.handleAddCharacterTokenCommand(message);
+      return;
+    }
+
+    if (message.type === 'end-session') {
+      if (message.targetWindowLabel && message.targetWindowLabel !== this.currentWindowLabel) {
+        return;
+      }
+
+      this.handleEndSessionCommand(message);
     }
   }
 
@@ -1185,7 +1229,7 @@ export class VttSync implements OnDestroy {
   }
 
   private tryHandleAddCharacterTokenCommand(command: VttWindowCommand) {
-    if (!this.engine || !this.canHandleVttWindowCommand(command.roomId ?? null)) {
+    if (command.type !== 'add-character-token' || !this.engine || !this.canHandleVttWindowCommand(command.roomId ?? null)) {
       return;
     }
 
@@ -1223,6 +1267,41 @@ export class VttSync implements OnDestroy {
     }
   }
 
+  private handleEndSessionCommand(command: VttWindowCommand) {
+    if (command.type !== 'end-session' || !this.canHandleEndSessionCommand(command.roomId ?? null)) {
+      return;
+    }
+
+    this.tryHandleEndSessionCommand(command);
+  }
+
+  private tryHandleEndSessionCommand(command: VttWindowCommand) {
+    if (command.type !== 'end-session' || !this.canHandleEndSessionCommand(command.roomId ?? null)) {
+      return;
+    }
+
+    if (this.handledWindowCommandIds.has(command.requestId)) {
+      return;
+    }
+
+    if (!this.claimCommand(command.requestId)) {
+      return;
+    }
+
+    this.handledWindowCommandIds.add(command.requestId);
+    window.setTimeout(() => this.handledWindowCommandIds.delete(command.requestId), 10000);
+
+    const roomId = this.currentRoomId;
+    this.endSession();
+    this.broadcastWindowMessage({
+      type: 'end-session-result',
+      requestId: command.requestId,
+      sourceId: this.windowInstanceId,
+      handled: true,
+      roomId
+    });
+  }
+
   private canHandleVttWindowCommand(roomId: string | null): boolean {
     if (!this.engine || !this.isEngineMounted(this.engine)) {
       return false;
@@ -1233,6 +1312,14 @@ export class VttSync implements OnDestroy {
     }
 
     return this.activeEngineRoomId === roomId || this.currentRoomId === roomId;
+  }
+
+  private canHandleEndSessionCommand(roomId: string | null): boolean {
+    if (!this.isHosting || !this.currentRoomId) {
+      return false;
+    }
+
+    return !roomId || this.currentRoomId === roomId;
   }
 
   private isEngineMounted(engine: VttEngine): boolean {
@@ -1294,7 +1381,7 @@ export class VttSync implements OnDestroy {
   }
 
   private clearMessageTarget(message: VttWindowMessage): VttWindowMessage {
-    if (message.type !== 'add-character-token') {
+    if (message.type !== 'add-character-token' && message.type !== 'end-session') {
       return message;
     }
 
@@ -1387,6 +1474,18 @@ export class VttSync implements OnDestroy {
     this.writeWindowTargets(nextTargets);
   }
 
+  private updateActiveEngineTargetHosting(roomId: string, isHosting: boolean) {
+    if (!this.activeEngineTarget || this.activeEngineTarget.roomId !== roomId) {
+      return;
+    }
+
+    this.activeEngineTarget = {
+      ...this.activeEngineTarget,
+      isHosting
+    };
+    this.publishActiveEngineTarget();
+  }
+
   private clearActiveEngineTarget(attachmentId?: string | null) {
     if (attachmentId && this.activeEngineTarget?.attachmentId !== attachmentId) return;
 
@@ -1405,10 +1504,11 @@ export class VttSync implements OnDestroy {
     this.writeWindowTargets(nextTargets);
   }
 
-  private getWindowTarget(roomId: string | null): VttWindowTarget | null {
+  private getWindowTarget(roomId: string | null, hostingOnly = false): VttWindowTarget | null {
     const matchingTargets = this.readWindowTargets()
       .filter(target => target.sourceId !== this.windowInstanceId)
       .filter(target => !roomId || target.roomId === roomId)
+      .filter(target => !hostingOnly || target.isHosting)
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
     return matchingTargets[0] ?? null;
@@ -1435,6 +1535,7 @@ export class VttSync implements OnDestroy {
           attachmentId: target.attachmentId!,
           roomId: target.roomId!,
           windowLabel: target.windowLabel!,
+          isHosting: target.isHosting === true,
           updatedAt: target.updatedAt!
         }));
     } catch {

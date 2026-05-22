@@ -1,0 +1,571 @@
+<div
+  #editorRoot
+  class="canvas-editor"
+  [class.readonly]="readonly"
+  tabindex="0"
+  (mousedown)="focusEditor()">
+  <div class="canvas-toolbar">
+    @if (!readonly) {
+      <div class="toolbar-group" aria-label="Add cards">
+        <button type="button" mat-icon-button (click)="addTextNode()" aria-label="Add text card" matTooltip="Text card">
+          <mat-icon>sticky_note_2</mat-icon>
+        </button>
+        <button type="button" mat-icon-button (click)="openNotePicker()" aria-label="Attach note" matTooltip="Attach note">
+          <mat-icon>note_add</mat-icon>
+        </button>
+        <button type="button" mat-icon-button (click)="addFileNode()" aria-label="Add file card" matTooltip="File card">
+          <mat-icon>description</mat-icon>
+        </button>
+        <button type="button" mat-icon-button (click)="addLinkNode()" aria-label="Add link card" matTooltip="Link card">
+          <mat-icon>link</mat-icon>
+        </button>
+        <button type="button" mat-icon-button (click)="addGroupNode()" aria-label="Add group" matTooltip="Group">
+          <mat-icon>select_all</mat-icon>
+        </button>
+      </div>
+
+      <div class="toolbar-group" aria-label="Canvas actions">
+        <button
+          type="button"
+          mat-icon-button
+          (click)="undoCanvasChange()"
+          [disabled]="!canUndo"
+          aria-label="Undo"
+          matTooltip="Undo">
+          <mat-icon>undo</mat-icon>
+        </button>
+        <button
+          type="button"
+          mat-icon-button
+          (click)="redoCanvasChange()"
+          [disabled]="!canRedo"
+          aria-label="Redo"
+          matTooltip="Redo">
+          <mat-icon>redo</mat-icon>
+        </button>
+        <button
+          type="button"
+          mat-icon-button
+          [class.active]="connectionMode"
+          [disabled]="nodes.length < 2"
+          (click)="toggleConnectionMode()"
+          [attr.aria-label]="connectionMode ? 'Cancel connect' : 'Connect cards'"
+          [matTooltip]="connectionMode ? 'Cancel connect' : 'Connect cards'">
+          <mat-icon>timeline</mat-icon>
+        </button>
+        <button
+          type="button"
+          mat-icon-button
+          (click)="deleteSelected()"
+          [disabled]="!selectedNodeId && !selectedEdgeId"
+          aria-label="Delete selected"
+          matTooltip="Delete">
+          <mat-icon>delete</mat-icon>
+        </button>
+      </div>
+    }
+
+    <span class="toolbar-spacer"></span>
+    <span class="toolbar-mode">{{ canvasModeLabel }}</span>
+    <div class="toolbar-group zoom-group" aria-label="Zoom controls">
+      <button type="button" mat-icon-button (click)="zoomOut()" aria-label="Zoom out" matTooltip="Zoom out">
+        <mat-icon>remove</mat-icon>
+      </button>
+      <span class="zoom-label">{{ zoomPercent }}%</span>
+      <button type="button" mat-icon-button (click)="zoomIn()" aria-label="Zoom in" matTooltip="Zoom in">
+        <mat-icon>add</mat-icon>
+      </button>
+      <button type="button" mat-icon-button (click)="zoomToFit()" aria-label="Zoom to fit" matTooltip="Fit">
+        <mat-icon>fit_screen</mat-icon>
+      </button>
+      <button type="button" mat-icon-button (click)="resetZoom()" aria-label="Reset zoom" matTooltip="Reset">
+        <mat-icon>center_focus_strong</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <div
+    class="canvas-workspace"
+    [class.drag-target]="isCanvasDragTarget"
+    (dragover)="onCanvasDragOver($event)"
+    (dragleave)="onCanvasDragLeave($event)"
+    (drop)="onCanvasDrop($event)">
+    <div #stageContainer class="canvas-stage" [class.has-error]="!!parseError"></div>
+    <div class="canvas-preview-layer" aria-hidden="true">
+      @for (preview of previewOverlays; track preview.nodeId) {
+        <div
+          class="canvas-preview"
+          [class.is-loading]="preview.status === 'loading'"
+          [class.is-error]="preview.status === 'error'"
+          [class.is-note]="preview.kind === 'note'"
+          [class.is-audio]="preview.kind === 'audio'"
+          [class.is-webpage]="preview.kind === 'webpage' || preview.kind === 'webpage-image'"
+          [class.is-video-embed]="preview.kind === 'video-embed'"
+          [class.has-webpage-image]="preview.kind === 'webpage-image' && !!preview.safeUrl"
+          [ngStyle]="preview.style">
+          @if ((preview.kind === 'image' || preview.kind === 'note-image') && preview.safeUrl) {
+            <img [src]="preview.safeUrl" [alt]="preview.title">
+            <div class="preview-caption">
+              <strong>{{ preview.title }}</strong>
+            </div>
+          } @else if (preview.kind === 'video-embed' && preview.safeResourceUrl) {
+            <iframe
+              [src]="preview.safeResourceUrl"
+              [title]="preview.title"
+              loading="lazy"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen>
+            </iframe>
+            <div class="preview-caption">
+              <strong>{{ preview.title }}</strong>
+            </div>
+          } @else if (preview.kind === 'webpage' || preview.kind === 'webpage-image') {
+            @if (preview.safeUrl) {
+              <img class="preview-webpage-image" [src]="preview.safeUrl" [alt]="preview.title">
+            }
+            <div class="preview-webpage-body">
+              <header>
+                @if (preview.faviconUrl) {
+                  <img [src]="preview.faviconUrl" alt="">
+                } @else {
+                  <mat-icon>{{ preview.icon }}</mat-icon>
+                }
+                <span>{{ preview.siteName || preview.subtitle }}</span>
+              </header>
+              <strong>{{ preview.title }}</strong>
+              <p>{{ preview.text || preview.subtitle }}</p>
+            </div>
+          } @else if (preview.kind === 'pdf' && preview.safeResourceUrl) {
+            <embed [src]="preview.safeResourceUrl" type="application/pdf">
+            <div class="preview-caption">
+              <strong>{{ preview.title }}</strong>
+            </div>
+          } @else if (preview.kind === 'video' && preview.safeUrl) {
+            <video [src]="preview.safeUrl" muted playsinline preload="metadata"></video>
+            <div class="preview-caption">
+              <strong>{{ preview.title }}</strong>
+            </div>
+          } @else if (preview.kind === 'audio' && preview.safeUrl) {
+            <div class="preview-file-body">
+              <mat-icon>{{ preview.icon }}</mat-icon>
+              <strong>{{ preview.title }}</strong>
+              <span>{{ preview.subtitle }}</span>
+              <audio [src]="preview.safeUrl" preload="metadata"></audio>
+            </div>
+          } @else {
+            <div class="preview-file-body">
+              <mat-icon>{{ preview.icon }}</mat-icon>
+              <strong>{{ preview.title }}</strong>
+              @if (preview.text) {
+                <p>{{ preview.text }}</p>
+              } @else {
+                <span>{{ preview.subtitle }}</span>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    @if (isCanvasDragTarget && !readonly && !parseError) {
+      <div class="canvas-drop-hint" aria-live="polite">
+        <mat-icon>add_to_photos</mat-icon>
+        <div>
+          <strong>Drop to add file card</strong>
+          <span>The card will be placed at the drop position.</span>
+        </div>
+      </div>
+    }
+
+    @if (parseError) {
+      <div class="canvas-error">
+        <mat-icon>error</mat-icon>
+        <span>{{ parseError }}</span>
+      </div>
+    } @else if (!hasCanvasItems && !readonly) {
+      <div class="canvas-empty">
+        <div class="canvas-empty-icon">
+          <mat-icon>hub</mat-icon>
+        </div>
+        <div class="canvas-empty-copy">
+          <strong>Start a canvas</strong>
+          <span>Add a card or drop a vault file here.</span>
+        </div>
+        <div class="canvas-empty-actions">
+          <button type="button" mat-flat-button (click)="addTextNode()">
+            <mat-icon>sticky_note_2</mat-icon>
+            <span>Text card</span>
+          </button>
+          <button type="button" mat-stroked-button (click)="addFileNode()">
+            <mat-icon>description</mat-icon>
+            <span>File card</span>
+          </button>
+          <button type="button" mat-stroked-button (click)="openNotePicker()">
+            <mat-icon>note_add</mat-icon>
+            <span>Attach note</span>
+          </button>
+        </div>
+      </div>
+    }
+
+    @if (!parseError) {
+      <div class="canvas-statusbar" aria-live="polite">
+        <span class="status-pill">{{ canvasModeLabel }}</span>
+        <span>{{ canvasSummaryLabel }}</span>
+        <span>{{ canvasDetailLabel }}</span>
+      </div>
+    }
+
+    @if (notePickerOpen && !readonly) {
+      <button
+        type="button"
+        class="note-picker-backdrop"
+        (click)="closeNotePicker()"
+        aria-label="Close note picker">
+      </button>
+      <aside class="note-picker" aria-label="Attach note">
+        <header>
+          <div>
+            <span>Note</span>
+            <strong>{{ notePickerTitle }}</strong>
+            @if (!notePickerLoading && !notePickerError) {
+              <small>{{ visibleNoteOptions.length }} shown</small>
+            }
+          </div>
+          <button type="button" mat-icon-button (click)="closeNotePicker()" aria-label="Close note picker" matTooltip="Close">
+            <mat-icon>close</mat-icon>
+          </button>
+        </header>
+
+        <label class="note-picker-search">
+          <mat-icon>search</mat-icon>
+          <input
+            [(ngModel)]="notePickerQuery"
+            type="search"
+            placeholder="Search notes"
+            aria-label="Search notes"
+            spellcheck="false"
+            autofocus>
+        </label>
+
+        @if (notePickerLoading) {
+          <div class="note-picker-state">
+            <mat-icon class="rotating">sync</mat-icon>
+            <span>Loading notes</span>
+          </div>
+        } @else if (notePickerError) {
+          <div class="note-picker-state error">
+            <mat-icon>error</mat-icon>
+            <span>{{ notePickerError }}</span>
+            <button type="button" mat-stroked-button (click)="retryLoadNoteOptions()">Retry</button>
+          </div>
+        } @else if (visibleNoteOptions.length > 0) {
+          <div class="note-picker-list">
+            @for (option of visibleNoteOptions; track option.relativePath) {
+              <button
+                type="button"
+                class="note-picker-option"
+                (click)="attachNote(option)"
+                [attr.aria-label]="'Attach ' + option.relativePath">
+                <mat-icon>description</mat-icon>
+                <span>
+                  <strong>{{ option.name }}</strong>
+                  <small>{{ option.parentPath || 'Vault root' }}</small>
+                </span>
+              </button>
+            }
+          </div>
+        } @else {
+          <div class="note-picker-state">
+            <mat-icon>search_off</mat-icon>
+            <span>No matching notes</span>
+          </div>
+        }
+      </aside>
+    }
+
+    @if (connectionMode && !readonly) {
+      <div class="connection-assist" [class.has-source]="!!connectionSourceNodeId" aria-live="polite">
+        <mat-icon>{{ connectionSourceNodeId ? 'add_link' : 'timeline' }}</mat-icon>
+        <div>
+          <strong>{{ connectionAssistTitle }}</strong>
+          <span>{{ connectionAssistSubtitle }}</span>
+        </div>
+        @if (connectionSourceNodeId && nodes.length > 1) {
+          <button type="button" mat-stroked-button (click)="openCardLinkPicker()">
+            <mat-icon>search</mat-icon>
+            <span>Find card</span>
+          </button>
+        }
+        <button type="button" mat-icon-button (click)="cancelConnectionMode()" aria-label="Cancel connect" matTooltip="Cancel">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    }
+
+    @if (selectedNode; as node) {
+      <aside class="canvas-inspector" aria-label="Selected canvas card">
+        <header>
+          <div>
+            <span>{{ getNodeTypeLabel(node) }}</span>
+            <strong>{{ getNodeLabel(node) }}</strong>
+          </div>
+          <button type="button" mat-icon-button (click)="closeInspector()" aria-label="Close inspector" matTooltip="Close">
+            <mat-icon>close</mat-icon>
+          </button>
+        </header>
+
+        @if (!readonly && nodes.length > 1) {
+          <div class="inspector-actions">
+            <button
+              type="button"
+              mat-stroked-button
+              [class.active]="connectionMode && connectionSourceNodeId === node.id"
+              (click)="startConnectionFromSelected()">
+              <mat-icon>timeline</mat-icon>
+              <span>{{ connectionMode && connectionSourceNodeId === node.id ? 'Connecting' : 'Connect from card' }}</span>
+            </button>
+            <button type="button" mat-stroked-button (click)="openCardLinkPicker()">
+              <mat-icon>add_link</mat-icon>
+              <span>Link card</span>
+            </button>
+          </div>
+
+          @if (cardLinkPickerOpen) {
+            <section class="card-link-picker" aria-label="Link card">
+              <label class="card-link-search">
+                <mat-icon>search</mat-icon>
+                <input
+                  [(ngModel)]="cardLinkQuery"
+                  type="search"
+                  placeholder="Search cards"
+                  aria-label="Search cards"
+                  spellcheck="false"
+                  autofocus>
+              </label>
+
+              @if (visibleCardLinkTargets.length > 0) {
+                <div class="card-link-list">
+                  @for (target of visibleCardLinkTargets; track target.id) {
+                    <button
+                      type="button"
+                      class="card-link-option"
+                      [class.linked]="isCardAlreadyLinked(target.id)"
+                      (click)="linkSelectedCardTo(target.id)"
+                      [attr.aria-label]="'Link to ' + getCardLinkLabel(target)">
+                      <mat-icon>{{ getNodeIcon(target) }}</mat-icon>
+                      <span class="card-link-option-text">
+                        <strong>{{ getCardLinkLabel(target) }}</strong>
+                        <small>{{ getCardLinkDescription(target) }}</small>
+                      </span>
+                      <span class="card-link-status">
+                        {{ isCardAlreadyLinked(target.id) ? 'Linked' : 'Link' }}
+                      </span>
+                    </button>
+                  }
+                </div>
+              } @else {
+                <div class="card-link-empty">
+                  <mat-icon>search_off</mat-icon>
+                  <span>No matching cards</span>
+                </div>
+              }
+            </section>
+          }
+        }
+
+        @if (node.type === 'text') {
+          <label class="field stacked">
+            <span>Text</span>
+            <textarea
+              [ngModel]="getSelectedNodeString('text')"
+              (ngModelChange)="updateSelectedNodeField('text', $event)"
+              [readonly]="readonly"
+              rows="7">
+            </textarea>
+          </label>
+        } @else if (node.type === 'file') {
+          <label class="field">
+            <span>File</span>
+            <input
+              [ngModel]="getSelectedNodeString('file')"
+              (ngModelChange)="updateSelectedNodeField('file', $event)"
+              [readonly]="readonly"
+              spellcheck="false">
+          </label>
+          @if (!readonly) {
+            <button type="button" mat-stroked-button (click)="openNotePicker('selected')">
+              <mat-icon>note_add</mat-icon>
+              <span>Choose note</span>
+            </button>
+          }
+          <label class="field">
+            <span>Subpath</span>
+            <input
+              [ngModel]="getSelectedNodeString('subpath')"
+              (ngModelChange)="updateSelectedNodeField('subpath', $event)"
+              [readonly]="readonly"
+              spellcheck="false">
+          </label>
+          <button type="button" mat-stroked-button (click)="openSelectedFileNode()">
+            <mat-icon>open_in_new</mat-icon>
+            <span>Open</span>
+          </button>
+        } @else if (node.type === 'link') {
+          <label class="field">
+            <span>URL</span>
+            <input
+              [ngModel]="getSelectedNodeString('url')"
+              (ngModelChange)="updateSelectedNodeField('url', $event)"
+              [readonly]="readonly"
+              spellcheck="false">
+          </label>
+          <button type="button" mat-stroked-button (click)="openSelectedLinkNode()">
+            <mat-icon>open_in_new</mat-icon>
+            <span>Open</span>
+          </button>
+        } @else if (node.type === 'group') {
+          <label class="field">
+            <span>Label</span>
+            <input
+              [ngModel]="getSelectedNodeString('label')"
+              (ngModelChange)="updateSelectedNodeField('label', $event)"
+              [readonly]="readonly"
+              spellcheck="false">
+          </label>
+        }
+
+        <div class="field color-field">
+          <span>Colour</span>
+          <div class="color-picker-control">
+            <div class="color-picker-row">
+              <input
+                class="native-color-picker"
+                type="color"
+                [ngModel]="getSelectedNodeColorPickerValue()"
+                (ngModelChange)="updateSelectedNodeColor($event)"
+                [disabled]="readonly"
+                aria-label="Choose card colour">
+              <input
+                class="color-value-input"
+                [ngModel]="getSelectedNodeString('color')"
+                (ngModelChange)="updateSelectedNodeColor($event)"
+                [readonly]="readonly"
+                placeholder="#bae6fd or 5"
+                spellcheck="false"
+                aria-label="Card colour value">
+              <button
+                type="button"
+                mat-icon-button
+                (click)="clearSelectedNodeColor()"
+                [disabled]="readonly || !getSelectedNodeString('color')"
+                aria-label="Reset card colour"
+                matTooltip="Reset colour">
+                <mat-icon>format_color_reset</mat-icon>
+              </button>
+            </div>
+            <div class="color-swatches" aria-label="Card colour presets">
+              @for (option of canvasColorOptions; track option.value) {
+                <button
+                  type="button"
+                  class="color-swatch"
+                  [class.active]="isSelectedNodeColorActive(option)"
+                  [style.background]="option.hex"
+                  (click)="updateSelectedNodeColor(option.value)"
+                  [disabled]="readonly"
+                  [attr.aria-label]="option.label">
+                </button>
+              }
+            </div>
+          </div>
+        </div>
+
+        <div class="dimension-grid">
+          <label class="field compact">
+            <span>X</span>
+            <input type="number" [ngModel]="getSelectedNodeNumber('x')" (ngModelChange)="updateSelectedNodeNumber('x', $event)" [readonly]="readonly">
+          </label>
+          <label class="field compact">
+            <span>Y</span>
+            <input type="number" [ngModel]="getSelectedNodeNumber('y')" (ngModelChange)="updateSelectedNodeNumber('y', $event)" [readonly]="readonly">
+          </label>
+          <label class="field compact">
+            <span>W</span>
+            <input type="number" [ngModel]="getSelectedNodeNumber('width')" (ngModelChange)="updateSelectedNodeNumber('width', $event)" [readonly]="readonly">
+          </label>
+          <label class="field compact">
+            <span>H</span>
+            <input type="number" [ngModel]="getSelectedNodeNumber('height')" (ngModelChange)="updateSelectedNodeNumber('height', $event)" [readonly]="readonly">
+          </label>
+        </div>
+      </aside>
+    } @else if (selectedEdge; as edge) {
+      <aside class="canvas-inspector edge" aria-label="Selected canvas edge">
+        <header>
+          <div>
+            <span>Link</span>
+            <strong>{{ getEdgeTitle(edge) }}</strong>
+            <small>{{ getEdgeDescription(edge) }}</small>
+          </div>
+          <button type="button" mat-icon-button (click)="closeInspector()" aria-label="Close inspector" matTooltip="Close">
+            <mat-icon>close</mat-icon>
+          </button>
+        </header>
+
+        <label class="field">
+          <span>Label</span>
+          <input
+            [ngModel]="getSelectedEdgeString('label')"
+            (ngModelChange)="updateSelectedEdgeField('label', $event)"
+            [readonly]="readonly"
+            spellcheck="false">
+        </label>
+        <div class="field color-field">
+          <span>Colour</span>
+          <div class="color-picker-control">
+            <div class="color-picker-row">
+              <input
+                class="native-color-picker"
+                type="color"
+                [ngModel]="getSelectedEdgeColorPickerValue()"
+                (ngModelChange)="updateSelectedEdgeColor($event)"
+                [disabled]="readonly"
+                aria-label="Choose edge colour">
+              <input
+                class="color-value-input"
+                [ngModel]="getSelectedEdgeString('color')"
+                (ngModelChange)="updateSelectedEdgeColor($event)"
+                [readonly]="readonly"
+                placeholder="#8fa4b8 or 5"
+                spellcheck="false"
+                aria-label="Edge colour value">
+              <button
+                type="button"
+                mat-icon-button
+                (click)="clearSelectedEdgeColor()"
+                [disabled]="readonly || !getSelectedEdgeString('color')"
+                aria-label="Reset edge colour"
+                matTooltip="Reset colour">
+                <mat-icon>format_color_reset</mat-icon>
+              </button>
+            </div>
+            <div class="color-swatches" aria-label="Edge colour presets">
+              @for (option of canvasColorOptions; track option.value) {
+                <button
+                  type="button"
+                  class="color-swatch"
+                  [class.active]="isSelectedEdgeColorActive(option)"
+                  [style.background]="option.hex"
+                  (click)="updateSelectedEdgeColor(option.value)"
+                  [disabled]="readonly"
+                  [attr.aria-label]="option.label">
+                </button>
+              }
+            </div>
+          </div>
+        </div>
+      </aside>
+    }
+  </div>
+</div>

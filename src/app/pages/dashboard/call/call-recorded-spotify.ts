@@ -4,7 +4,8 @@ export function createRecordedSpotifyStateFromCurrent(
   track: any,
   isPaused: boolean,
   shuffle: boolean,
-  volumePercent: number
+  volumePercent: number,
+  position: number = 0
 ): RecordedSpotifyState | null {
   if (!track?.uri) {
     return null;
@@ -15,7 +16,7 @@ export function createRecordedSpotifyStateFromCurrent(
     name: track.name,
     artist: getSpotifyTrackArtist(track),
     image: getSpotifyTrackImage(track),
-    position: 0,
+    position,
     playing: !isPaused,
     paused: isPaused,
     contextUri: null,

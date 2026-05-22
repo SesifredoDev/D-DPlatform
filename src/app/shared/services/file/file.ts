@@ -19,6 +19,9 @@ export class FileService {
    */
   resolveFileUrl(url: string): string {
     if (!url) return url;
+    if (this.isDdbSheetPdfUrl(url)) {
+      return `${environment.apiURL}ddb/pdf?url=${encodeURIComponent(url)}`;
+    }
     if (/^https?:\/\//i.test(url)) return url;
     return new URL(url, environment.backendURL).toString();
   }
@@ -109,5 +112,20 @@ export class FileService {
 
   private isAstralFile(file: File): boolean {
     return file.name.toLowerCase().endsWith('.astral');
+  }
+
+  private isDdbSheetPdfUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      const hostname = parsed.hostname.toLowerCase();
+      const pathname = parsed.pathname.toLowerCase();
+
+      return parsed.protocol === 'https:' &&
+        (hostname === 'www.dndbeyond.com' || hostname === 'dndbeyond.com') &&
+        pathname.startsWith('/sheet-pdfs/') &&
+        pathname.endsWith('.pdf');
+    } catch {
+      return false;
+    }
   }
 }

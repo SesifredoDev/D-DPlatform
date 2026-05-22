@@ -15,6 +15,7 @@ import { Crepe } from '@milkdown/crepe';
 import { wikilinkPlugin } from './wikilink-plugin';
 import { editorViewOptionsCtx } from '@milkdown/core';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
+import { dndStatsheetNodeViewPlugin } from './dnd-statsheet-node-view';
 
 @Component({
   selector: 'app-milkdown-editor',
@@ -27,6 +28,10 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
   @ViewChild('editorRef') editorRef!: ElementRef;
 
   @Input() markdown: string = '';
+  @Input() set editorMarkdown(value: string | null | undefined) {
+    this.markdown = value ?? '';
+  }
+
   @Input() isPreview: boolean = false;
   @Input() serverId: string = '';
   @Input() currentFilePath: string = '';
@@ -62,6 +67,9 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
     const shouldRecreate =
       (changes['isPreview'] && !changes['isPreview'].isFirstChange()) ||
+      (changes['editorMarkdown'] &&
+        !changes['editorMarkdown'].isFirstChange() &&
+        this.markdown !== this.lastMarkdown) ||
       (changes['markdown'] &&
         !changes['markdown'].isFirstChange() &&
         changes['markdown'].currentValue !== this.lastMarkdown) ||
@@ -98,6 +106,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       .config((ctx) => {
         ctx.set(editorViewOptionsCtx, { editable: () => !this.isPreview });
       })
+      .use(dndStatsheetNodeViewPlugin(this.vaultService))
       .use(wikilinkPlugin);
 
     localCrepe.on((listener) => {

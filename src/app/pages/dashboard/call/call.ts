@@ -40,8 +40,11 @@ import { IServer, TemporaryDmDuration } from '../../../shared/models/server/serv
 import { MarkdownComponent } from 'ngx-markdown';
 import { AuthService } from '../../../shared/services/auth/auth';
 import { DeviceService } from '../../../shared/services/device/device';
+import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
+import { MilkdownEditorComponent } from '../../../shared/components/milkdown-editor/milkdown-editor.component';
 import { SessionRecordingService } from '../../../shared/services/session-recording/session-recording';
 import type {
+  RecordedCallEnvironmentEvent,
   RecordedCallEnvironmentAction,
   SessionPlaybackState,
   SessionRecording,
@@ -53,6 +56,7 @@ import type { AstralRecordingImportResponse } from '../../../shared/models/astra
 import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
 import type { AstralPlaybackDropRequest } from '../../../shared/models/astral-recording/astral-playback-drop.model';
 import { AstralOptimizerService } from '../../../shared/services/astral-recording/astral-optimizer';
+import { VttSync } from '../../../shared/services/vttsync/vttsync';
 import { CallSessionRecordingWorker, MicTestRecordingWorker } from './call-recording.workers';
 import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
 import {
@@ -122,16 +126,27 @@ import {
   toFiniteRecordingNumber
 } from './call-session-recording.helpers';
 export type { VttStopEvent, VttPlaybackEvent } from '../../../shared/models/pages/dashboard/call/call.model';
+
+interface CallSessionNoteUpdatedEventDetail {
+  serverId?: string | null;
+  channelId?: string | null;
+  path?: string;
+  appendedContent?: string;
+  content?: string;
+  select?: boolean;
+}
+
 @Component({
   selector: 'app-video-call',
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent]
+  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent, MilkdownEditorComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
   @Input() character!: ICharacter;
+  @Input() isTabActive: boolean = true;
 
   @Output() hostVtt = new EventEmitter<string>();
   @Output() joinVtt = new EventEmitter<string>();
@@ -141,6 +156,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   @ViewChild('localVideo') localVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
   @ViewChild('micTestAudio') micTestAudio?: ElementRef<HTMLAudioElement>;
+  @ViewChild('sessionNoteSearchInput') set sessionNoteSearchInput(value: ElementRef<HTMLInputElement> | undefined) {
+    this.sessionNoteSearchInputRef = value;
+    if (value && this.showSessionNotePicker) {
+      setTimeout(() => value.nativeElement.focus(), 0);
+    }
+  }
   @ViewChild('gridContainer') set gridContainer(value: ElementRef<HTMLElement> | undefined) {
     this.gridContainerRef = value;
     this.observeSceneMainLayoutSize();
@@ -226,12 +247,41 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   activeOverlayImage: string | null = null;
   activeOverlayText: string | null = null;
   activeTemporaryAtmosphereBackground: string | null = null;
+  broadcastOverlayNoteSaving: 'current' | 'new' | null = null;
+  broadcastOverlayNoteStatus = '';
+  private lastBroadcastOverlayActivatedAt = 0;
+  private readonly broadcastOverlayDismissGraceMs = 250;
+
+  // Session notes state
+  showSessionNotes = false;
+  sessionNotesVaultName: string | null = null;
+  sessionNotesPermissionGranted = false;
+  sessionNotesLoading = false;
+  sessionNotesError = '';
+  sessionNoteEntries: VaultEntry[] = [];
+  selectedSessionNotePath = '';
+  selectedSessionNoteName = '';
+  selectedSessionNoteContent = '';
+  sessionNotesSaveState: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
+  showSessionNotePicker = false;
+  sessionNotesSearchQuery = '';
+  sessionNotesActiveOptionIndex = 0;
+  isCreatingSessionNote = false;
+  newSessionNoteName = '';
+  selectedSessionNoteTemplate = 'session';
+  private sessionNotesSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private sessionNoteSearchInputRef?: ElementRef<HTMLInputElement>;
+  readonly sessionNoteTemplates = [
+    { value: 'session', label: 'Session' },
+    { value: 'blank', label: 'Blank' }
+  ];
 
   // Spotify Requests
   spotifyRequests: any[] = [];
   showSpotifyRequests: boolean = false;
   playbackSpotifyState: RecordedSpotifyState | null = null;
-  playbackSpotifyVolumePercent = 100;
+  playbackSpotifyVolumePercent = 25;
+  soundCloudVolumePercent = 25;
 
   // DM Mode State
   isServerOwner: boolean = false;
@@ -284,6 +334,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private callPlaybackClockStartTimeMs = 0;
   private visiblePlaybackSyncToken = 0;
   private lastAppliedPlaybackSpotifySignature = '';
+  private playbackSpotifyBaseState: RecordedSpotifyState | null = null;
+  private playbackSpotifyRecordedAtMs = 0;
+  private forceCallPlaybackEnvironmentReset = false;
+  private readonly callPlaybackEnvironmentSeekResetThresholdMs = 1500;
   private isImportingAstralPlayback = false;
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
@@ -301,11 +355,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private serverService: ServerService,
     private authService: AuthService,
     private deviceService: DeviceService,
+    private obsidianVaultService: ObsidianVaultService,
     private snackBar: MatSnackBar,
     private sessionRecording: SessionRecordingService,
     private astralRecording: AstralRecordingService,
     private astralOptimizer: AstralOptimizerService,
-    private astralPlaybackDrop: AstralPlaybackDropService
+    private astralPlaybackDrop: AstralPlaybackDropService,
+    private vttSync: VttSync
   ) {
     this.activeColors = this.themeService.getColors();
     this.rememberValidThemeBackground(this.activeColors);
@@ -452,6 +508,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private bindSoundCloudState() {
+    this.soundCloudVolumePercent = this.spotify.getVolumePercent();
+    this.subscriptions.add(this.spotify.volumePercent$.subscribe(volumePercent => {
+      this.soundCloudVolumePercent = this.normalizeSoundCloudVolumePercent(volumePercent);
+      this.cdr.detectChanges();
+    }));
     this.subscriptions.add(this.videoService.spotifySync$.subscribe(state => {
       void this.applyIncomingSoundCloudSync(state);
     }));
@@ -467,7 +528,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private async applyIncomingSoundCloudSync(state: any) {
-    if (!state.uri || !this.localStream) return;
+    if (!this.localStream) return;
+
+    const hasVolumeUpdate = state.volumePercent !== undefined && state.volumePercent !== null;
+    const isVolumeOnlyCommand = state.command === 'volume';
+    if (!state.uri && !isVolumeOnlyCommand) return;
 
     if (this.isServerOwner) {
       if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
@@ -478,12 +543,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.isSyncing = true;
     }
 
-    const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
-    if (recordedSpotifyState) {
-      this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
-    }
-
     try {
+      if (hasVolumeUpdate) {
+        await this.spotify.setVolumePercent(state.volumePercent, true);
+      }
+
+      const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
+      if (recordedSpotifyState) {
+        this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+      }
+
+      if (isVolumeOnlyCommand || !state.uri) {
+        return;
+      }
+
       const currentState = await this.spotify.getPlaybackState();
       const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
       const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
@@ -576,6 +649,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         playing: !state.paused,
         contextUri: state.context?.uri,
         shuffle: state.shuffle_state,
+        volumePercent: this.getCurrentSpotifyVolumePercent(),
         hostId: this.character.ownerId
       };
 
@@ -641,7 +715,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
+      if (url === this.activeOverlayImage && !(url && this.activeOverlayText)) {
+        return;
+      }
       this.activeOverlayImage = url;
+      if (url) {
+        this.lastBroadcastOverlayActivatedAt = Date.now();
+        this.broadcastOverlayNoteStatus = '';
+        this.activeOverlayText = null;
+      }
       this.recordCallEnvironmentEvent('overlay-image', { url });
       this.cdr.detectChanges();
     }));
@@ -650,13 +732,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
+      if (text === this.activeOverlayText && !(text && this.activeOverlayImage)) {
+        return;
+      }
       this.activeOverlayText = text;
+      if (text) {
+        this.lastBroadcastOverlayActivatedAt = Date.now();
+        this.broadcastOverlayNoteStatus = '';
+        this.activeOverlayImage = null;
+      }
       this.recordCallEnvironmentEvent('overlay-text', { text });
       this.cdr.detectChanges();
     }));
 
     this.subscriptions.add(this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
+      if (url === this.activeTemporaryAtmosphereBackground) {
         return;
       }
       this.activeTemporaryAtmosphereBackground = url;
@@ -733,12 +826,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }));
 
     this.subscriptions.add(this.astralPlaybackDrop.requests$.subscribe(request => {
-      if (request.channelId !== this.channelId) {
-        return;
-      }
-
-      this.promptAstralPlaybackRequest(request);
+      this.handleAstralPlaybackRequest(request);
     }));
+    this.handlePendingAstralPlaybackRequest();
   }
 
   checkServerOwner() {
@@ -1151,6 +1241,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.cdr.detectChanges();
   }
 
+  private handleAstralPlaybackRequest(request: AstralPlaybackDropRequest) {
+    if (request.channelId !== this.channelId) {
+      return;
+    }
+
+    this.astralPlaybackDrop.clearPendingRequest(request);
+    this.promptAstralPlaybackRequest(request);
+  }
+
+  private handlePendingAstralPlaybackRequest() {
+    const request = this.astralPlaybackDrop.takePendingRequest(this.channelId);
+    if (request) {
+      this.promptAstralPlaybackRequest(request);
+    }
+  }
+
   cancelAstralPlaybackPrompt() {
     this.clearAstralPlaybackPrompt();
   }
@@ -1351,6 +1457,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private clearSpotifyPlaybackForSessionStart() {
     this.playbackSpotifyState = null;
+    this.playbackSpotifyBaseState = null;
+    this.playbackSpotifyRecordedAtMs = 0;
     this.lastAppliedPlaybackSpotifySignature = '';
     void this.spotify.clearCurrentPlayback(true);
   }
@@ -1384,6 +1492,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private applyCallPlaybackState(state: SessionPlaybackState) {
     const nextPlaybackMode = state.active && hasPlayableCallRecording(state.recording);
+    const wasCallPlaybackMode = this.isCallPlaybackMode;
+    const wasPlaybackPaused = this.callPlaybackPaused;
 
     if (nextPlaybackMode && !this.isCallPlaybackMode) {
       this.callEnvironmentBeforePlayback = this.createCallEnvironmentState();
@@ -1410,6 +1520,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.prepareCallPlaybackSources(state.recording!);
       this.syncCallPlaybackSourcesToState(state);
       this.applyCallPlaybackEnvironment(state);
+      if (wasCallPlaybackMode && wasPlaybackPaused !== state.paused) {
+        this.syncRecordedSpotifyPlaybackForTime(state.currentTimeMs, true);
+      }
     }
 
     this.cdr.detectChanges();
@@ -1423,7 +1536,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (this.shouldResetCallPlaybackEnvironment(recording, state.currentTimeMs)) {
-      this.resetCallPlaybackEnvironment(recording);
+      this.resetCallPlaybackEnvironment(recording, state.currentTimeMs);
     }
 
     const events = recording.callEnvironment?.events ?? [];
@@ -1439,18 +1552,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private shouldResetCallPlaybackEnvironment(recording: SessionRecording, currentTimeMs: number): boolean {
-    return this.callPlaybackRecordingId !== recording.id || currentTimeMs < this.callPlaybackLastTimeMs;
+    const elapsedSinceLastStateMs = currentTimeMs - this.callPlaybackLastTimeMs;
+    return this.forceCallPlaybackEnvironmentReset ||
+      this.callPlaybackRecordingId !== recording.id ||
+      currentTimeMs < this.callPlaybackLastTimeMs ||
+      elapsedSinceLastStateMs > this.callPlaybackEnvironmentSeekResetThresholdMs;
   }
 
-  private resetCallPlaybackEnvironment(recording: SessionRecording) {
+  private resetCallPlaybackEnvironment(recording: SessionRecording, currentTimeMs: number = 0) {
     this.callPlaybackRecordingId = recording.id;
     this.callPlaybackEnvironmentEventIndex = 0;
     this.callPlaybackLastTimeMs = 0;
+    this.forceCallPlaybackEnvironmentReset = false;
     this.callPlaybackParticipantSnapshots.clear();
 
     const initialState = recording.callEnvironment?.initialState as RecordedCallEnvironmentState | null;
     if (initialState) {
-      this.applyCallEnvironmentState(initialState);
+      this.applyCallEnvironmentState(initialState, currentTimeMs);
     }
   }
 
@@ -1458,6 +1576,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.callPlaybackRecordingId = null;
     this.callPlaybackEnvironmentEventIndex = 0;
     this.callPlaybackLastTimeMs = 0;
+    this.forceCallPlaybackEnvironmentReset = false;
   }
 
   private restoreCallEnvironmentAfterPlayback() {
@@ -1469,7 +1588,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.callEnvironmentBeforePlayback = null;
   }
 
-  private applyCallEnvironmentEvent(event: { action: RecordedCallEnvironmentAction; data: any }) {
+  private applyCallEnvironmentEvent(event: RecordedCallEnvironmentEvent) {
     const data = event.data;
     this.isApplyingCallPlaybackEnvironment = true;
     try {
@@ -1479,9 +1598,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           break;
         case 'overlay-image':
           this.activeOverlayImage = data?.url ?? data ?? null;
+          if (this.activeOverlayImage) {
+            this.activeOverlayText = null;
+          }
           break;
         case 'overlay-text':
           this.activeOverlayText = data?.text ?? data ?? null;
+          if (this.activeOverlayText) {
+            this.activeOverlayImage = null;
+          }
           break;
         case 'temporary-atmosphere-background':
           this.activeTemporaryAtmosphereBackground = data?.url ?? data ?? null;
@@ -1509,7 +1634,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           this.applyRecordedVttSession(data);
           break;
         case 'spotify-state':
-          this.applyRecordedSpotifyState(data);
+          this.applyRecordedSpotifyState(data, event.timeMs, this.callPlaybackCurrentTimeMs);
           break;
         case 'spotify-requests':
           this.spotifyRequests = cloneSpotifyRequests(data);
@@ -1520,7 +1645,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  private applyCallEnvironmentState(state: RecordedCallEnvironmentState) {
+  private applyCallEnvironmentState(state: RecordedCallEnvironmentState, playbackTimeMs: number = this.callPlaybackCurrentTimeMs) {
     this.isApplyingCallPlaybackEnvironment = true;
     try {
       this.applyRecordedTheme(state.activeColors);
@@ -1532,7 +1657,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         : [];
       this.isDmMode = !!state.isDmMode;
       this.applyRecordedVttSession(state.vttSession);
-      this.applyRecordedSpotifyState(state.spotify);
+      this.applyRecordedSpotifyState(state.spotify, 0, playbackTimeMs);
       this.spotifyRequests = cloneSpotifyRequests(state.spotifyRequests);
       this.setCallPlaybackParticipantSnapshots(state.participants);
       this.refreshSceneMainCharacterFlags();
@@ -1611,7 +1736,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.spotify.currentTrack$.value,
       this.spotify.isPaused$.value,
       this.spotify.shuffleState$.value,
-      this.getCurrentSpotifyVolumePercent()
+      this.getCurrentSpotifyVolumePercent(),
+      this.spotify.playbackPositionMs$.value
     );
   }
 
@@ -1624,26 +1750,65 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     );
   }
 
-  private applyRecordedSpotifyState(state: Partial<RecordedSpotifyState> | null | undefined) {
+  private applyRecordedSpotifyState(
+    state: Partial<RecordedSpotifyState> | null | undefined,
+    recordedAtMs: number = this.callPlaybackCurrentTimeMs,
+    playbackTimeMs: number = this.callPlaybackCurrentTimeMs
+  ) {
     if (!state?.uri) {
       this.playbackSpotifyState = null;
+      this.playbackSpotifyBaseState = null;
+      this.playbackSpotifyRecordedAtMs = 0;
       this.lastAppliedPlaybackSpotifySignature = '';
+      if (this.isCallPlaybackMode && !this.isRestoringCallPlaybackEnvironment) {
+        void this.spotify.clearCurrentPlayback(true);
+      }
       return;
     }
 
-    this.playbackSpotifyState = createRecordedSpotifyState(
+    this.playbackSpotifyBaseState = createRecordedSpotifyState(
       state,
       this.getCurrentSpotifyVolumePercent()
     );
+    this.playbackSpotifyRecordedAtMs = Math.max(0, Number(recordedAtMs) || 0);
+    this.syncRecordedSpotifyPlaybackForTime(playbackTimeMs);
+  }
+
+  private syncRecordedSpotifyPlaybackForTime(playbackTimeMs: number, force: boolean = false) {
+    if (!this.playbackSpotifyBaseState) {
+      return;
+    }
+
+    this.playbackSpotifyState = {
+      ...this.playbackSpotifyBaseState,
+      position: this.getRecordedSpotifyPositionAtPlaybackTime(
+        this.playbackSpotifyBaseState,
+        this.playbackSpotifyRecordedAtMs,
+        playbackTimeMs
+      )
+    };
     this.playbackSpotifyVolumePercent = this.playbackSpotifyState.volumePercent;
+    if (force) {
+      this.lastAppliedPlaybackSpotifySignature = '';
+    }
     this.syncSpotifyPlayerToPlaybackState(this.playbackSpotifyState);
   }
 
+  private getRecordedSpotifyPositionAtPlaybackTime(
+    state: RecordedSpotifyState,
+    recordedAtMs: number,
+    playbackTimeMs: number
+  ): number {
+    const basePositionMs = Math.max(0, Number(state.position) || 0);
+    if (state.paused || !state.playing) {
+      return basePositionMs;
+    }
+
+    return Math.max(0, Math.round(basePositionMs + Math.max(0, playbackTimeMs - recordedAtMs)));
+  }
+
   private getCurrentSpotifyVolumePercent(): number {
-    const devices = this.spotify.devices$.value ?? [];
-    const activeDeviceId = this.spotify.activeDeviceId$.value;
-    const activeDevice = devices.find(device => device.id === activeDeviceId) ?? devices.find(device => device.is_active);
-    return normalizeSpotifyVolume(activeDevice?.volume_percent ?? this.playbackSpotifyVolumePercent ?? 100);
+    return normalizeSpotifyVolume(this.spotify.getVolumePercent());
   }
 
   setPlaybackSpotifyVolume(value: number | string) {
@@ -1655,7 +1820,38 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         volumePercent
       };
     }
-    void this.spotify.setVolume(volumePercent / 100);
+    if (this.playbackSpotifyBaseState) {
+      this.playbackSpotifyBaseState = {
+        ...this.playbackSpotifyBaseState,
+        volumePercent
+      };
+    }
+    void this.spotify.setVolumePercent(volumePercent, true);
+  }
+
+  setSoundCloudVolume(value: number | string) {
+    const volumePercent = this.normalizeSoundCloudVolumePercent(value);
+    this.soundCloudVolumePercent = volumePercent;
+    void this.spotify.setVolumePercent(volumePercent);
+  }
+
+  adjustSoundCloudVolume(delta: number) {
+    this.setSoundCloudVolume(this.soundCloudVolumePercent + delta);
+  }
+
+  getSoundCloudVolumeIcon(): string {
+    if (this.soundCloudVolumePercent <= 0) return 'volume_off';
+    if (this.soundCloudVolumePercent < 50) return 'volume_down';
+    return 'volume_up';
+  }
+
+  private normalizeSoundCloudVolumePercent(value: number | string): number {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return this.soundCloudVolumePercent;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(numericValue)));
   }
 
   private syncSpotifyPlayerToPlaybackState(state: RecordedSpotifyState) {
@@ -1663,10 +1859,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
+    const shouldPlay = state.playing && !this.callPlaybackPaused;
     const signature = [
       state.uri,
-      state.playing ? 'playing' : 'paused',
-      Math.floor(state.position / 1000),
+      shouldPlay ? 'playing' : 'paused',
+      Math.round(state.position / 250),
       state.contextUri ?? '',
       state.volumePercent
     ].join('|');
@@ -1675,8 +1872,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     this.lastAppliedPlaybackSpotifySignature = signature;
-    void this.spotify.setVolume(state.volumePercent / 100);
-    if (state.playing) {
+    void this.spotify.setVolumePercent(state.volumePercent, true);
+    if (shouldPlay) {
       void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined);
       return;
     }
@@ -1986,7 +2183,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.visiblePlaybackSyncToken = 0;
     this.activePlaybackVttRoomId = null;
     this.playbackSpotifyState = null;
-    this.playbackSpotifyVolumePercent = 100;
+    this.playbackSpotifyBaseState = null;
+    this.playbackSpotifyRecordedAtMs = 0;
+    this.playbackSpotifyVolumePercent = this.getCurrentSpotifyVolumePercent();
     this.lastAppliedPlaybackSpotifySignature = '';
     this.callPlaybackMediaHost?.remove();
     this.callPlaybackMediaHost = null;
@@ -2047,20 +2246,31 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.callPlaybackPaused = paused;
+    const wasPaused = this.callPlaybackPaused;
     if (paused) {
       this.pauseCallPlaybackSources();
+      this.callPlaybackPaused = true;
     } else {
+      this.callPlaybackPaused = false;
       this.playCallPlaybackSources();
     }
 
-    this.sessionRecording.setPlaybackPaused(paused);
+    if (wasPaused !== paused) {
+      this.syncRecordedSpotifyPlaybackForTime(this.callPlaybackCurrentTimeMs, true);
+    }
+
+    if (paused) {
+      this.sessionRecording.setPlaybackTime(this.callPlaybackCurrentTimeMs, true);
+    } else {
+      this.sessionRecording.setPlaybackPaused(false);
+    }
   }
 
   seekCallPlayback(value: number | string) {
     const currentTimeMs = Math.max(0, Number(value) || 0);
     this.callPlaybackCurrentTimeMs = currentTimeMs;
     this.seekCallPlaybackSources(currentTimeMs);
+    this.forceCallPlaybackEnvironmentReset = true;
     this.sessionRecording.setPlaybackTime(currentTimeMs, this.callPlaybackPaused);
   }
 
@@ -3450,6 +3660,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @HostListener('document:click', ['$event'])
   handleDocumentClick(event: MouseEvent) {
+    if (!this.isTabActive) {
+      return;
+    }
+
     if (this.isClickInsideOverlayFeature(event)) {
       return;
     }
@@ -3459,6 +3673,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @HostListener('document:contextmenu', ['$event'])
   handleDocumentContextMenu(event: MouseEvent) {
+    if (!this.isTabActive) {
+      return;
+    }
+
     if (this.isClickInsideOverlayFeature(event)) {
       return;
     }
@@ -3468,7 +3686,29 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   @HostListener('document:keydown.escape')
   handleDocumentEscape() {
+    if (!this.isTabActive) {
+      return;
+    }
+
     this.closeClickOffOverlays();
+  }
+
+  @HostListener('window:call-session-note-updated', ['$event'])
+  handleExternalSessionNoteUpdate(event: Event) {
+    const detail = (event as CustomEvent<CallSessionNoteUpdatedEventDetail>).detail;
+    if (!detail?.path) {
+      return;
+    }
+
+    if (detail.serverId && detail.serverId !== this.getSessionNotesServerId()) {
+      return;
+    }
+
+    if (detail.channelId && detail.channelId !== this.channelId) {
+      return;
+    }
+
+    void this.applyExternalSessionNoteUpdate(detail);
   }
 
   @HostListener('window:resize')
@@ -3482,7 +3722,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return target instanceof Element && !!target.closest(this.clickOffSafeSelector);
   }
 
-  private closeClickOffOverlays() {
+  private closeClickOffOverlays(dismissBroadcastOverlay: boolean = true) {
     this.closeRemoteContextMenu();
 
     if (this.showThemePicker) {
@@ -3506,7 +3746,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.cancelAstralPlaybackPrompt();
     }
 
+    this.closeSessionNotePicker();
+
+    if (!dismissBroadcastOverlay) {
+      return;
+    }
+
+    if (this.isBroadcastOverlayInDismissGracePeriod()) {
+      return;
+    }
+
     this.dismissOverlay();
+  }
+
+  private isBroadcastOverlayInDismissGracePeriod(): boolean {
+    return !!(this.activeOverlayImage || this.activeOverlayText) &&
+      Date.now() - this.lastBroadcastOverlayActivatedAt < this.broadcastOverlayDismissGraceMs;
   }
 
   ngOnDestroy() {
@@ -3518,6 +3773,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.stopMicInputMonitor();
     this.subscriptions.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
+    if (this.sessionNotesSaveTimer) {
+      clearTimeout(this.sessionNotesSaveTimer);
+      this.sessionNotesSaveTimer = null;
+      void this.saveSessionNote();
+    }
 
     // Just clean up local hardware previews.
     // The actual call room disconnection is now handled by TabService.closeTab()
@@ -3655,12 +3915,654 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   stopVttSession() {
     const roomId = this.vttSession.roomId || this.getVttRoomId();
+    void this.vttSync.endSessionForRoom(roomId);
     this.stopVtt.emit({ roomId, endSession: true });
   }
 
   dismissOverlay() {
     this.activeOverlayImage = null;
     this.activeOverlayText = null;
+    this.broadcastOverlayNoteStatus = '';
+  }
+
+  get hasCurrentSessionNoteForBroadcast(): boolean {
+    return !!this.getCurrentSessionNotePath();
+  }
+
+  async addActiveBroadcastToCurrentNote() {
+    const path = this.getCurrentSessionNotePath();
+    if (!path) {
+      this.broadcastOverlayNoteStatus = 'Select or create a session note first.';
+      return;
+    }
+
+    await this.writeActiveBroadcastOverlayToNote(path, 'current');
+  }
+
+  async createNoteFromActiveBroadcast() {
+    const path = this.getDefaultBroadcastOverlayNoteName();
+    await this.writeActiveBroadcastOverlayToNote(path, 'new');
+  }
+
+  async toggleSessionNotes() {
+    const nextState = !this.showSessionNotes;
+    this.closeClickOffOverlays(false);
+    this.showSessionNotes = nextState;
+
+    if (nextState) {
+      await this.ensureSessionNotesReady();
+    }
+  }
+
+  closeSessionNotes() {
+    this.closeSessionNotePicker();
+    this.showSessionNotes = false;
+  }
+
+  async attachSessionNotesVault() {
+    await this.ensureSessionNotesReady(true);
+  }
+
+  async refreshSessionNotes() {
+    if (!this.sessionNotesPermissionGranted) {
+      await this.ensureSessionNotesReady();
+      return;
+    }
+
+    await this.loadSessionNoteEntries(false);
+  }
+
+  async selectSessionNoteByPath(path: string) {
+    if (!path || path === this.selectedSessionNotePath) {
+      return;
+    }
+
+    await this.flushPendingSessionNoteSave();
+    const entry = this.sessionNoteEntries.find(note => note.relativePath === path);
+    if (!entry) {
+      return;
+    }
+
+    try {
+      this.sessionNotesError = '';
+      this.selectedSessionNotePath = entry.relativePath;
+      this.selectedSessionNoteName = this.getSessionNoteDisplayName(entry.relativePath);
+      this.selectedSessionNoteContent = await this.obsidianVaultService.readFile(
+        this.getSessionNotesServerId(),
+        entry.relativePath
+      );
+      this.sessionNotesSaveState = 'saved';
+      this.rememberSelectedSessionNote(entry.relativePath);
+    } catch (error) {
+      this.sessionNotesError = 'Unable to open that note.';
+      this.sessionNotesSaveState = 'error';
+      console.error('Failed to open session note', error);
+    }
+  }
+
+  private async applyExternalSessionNoteUpdate(detail: CallSessionNoteUpdatedEventDetail) {
+    const path = detail.path;
+    if (!path) {
+      return;
+    }
+
+    const hadPendingSave = !!this.sessionNotesSaveTimer;
+    if (this.sessionNotesSaveTimer) {
+      clearTimeout(this.sessionNotesSaveTimer);
+      this.sessionNotesSaveTimer = null;
+    }
+
+    this.rememberSelectedSessionNote(path);
+
+    if (detail.select || path === this.selectedSessionNotePath) {
+      this.selectedSessionNotePath = path;
+      this.selectedSessionNoteName = this.getSessionNoteDisplayName(path);
+
+      if (typeof detail.content === 'string') {
+        this.selectedSessionNoteContent = detail.content;
+      } else if (detail.appendedContent && hadPendingSave) {
+        this.selectedSessionNoteContent = this.appendSessionNoteContent(
+          this.selectedSessionNoteContent,
+          detail.appendedContent
+        );
+        await this.saveSessionNote();
+      } else if (detail.appendedContent) {
+        this.selectedSessionNoteContent = this.appendSessionNoteContent(
+          this.selectedSessionNoteContent,
+          detail.appendedContent
+        );
+      } else if (this.sessionNotesPermissionGranted) {
+        this.selectedSessionNoteContent = await this.obsidianVaultService.readFile(
+          this.getSessionNotesServerId(),
+          path
+        );
+      }
+
+      this.sessionNotesSaveState = 'saved';
+    }
+
+    if (this.showSessionNotes && this.sessionNotesPermissionGranted) {
+      await this.loadSessionNoteEntries(false);
+    }
+
+    this.cdr.detectChanges();
+  }
+
+  toggleSessionNotePicker() {
+    if (this.sessionNotesLoading || this.sessionNoteEntries.length === 0) {
+      return;
+    }
+
+    if (this.showSessionNotePicker) {
+      this.closeSessionNotePicker();
+      return;
+    }
+
+    this.openSessionNotePicker();
+  }
+
+  openSessionNotePicker() {
+    if (this.sessionNotesLoading || this.sessionNoteEntries.length === 0) {
+      return;
+    }
+
+    this.showSessionNotePicker = true;
+    this.sessionNotesSearchQuery = '';
+    const selectedIndex = this.sessionNoteEntries.findIndex(note => note.relativePath === this.selectedSessionNotePath);
+    this.sessionNotesActiveOptionIndex = Math.max(0, selectedIndex);
+    this.focusSessionNoteSearch();
+  }
+
+  closeSessionNotePicker() {
+    this.showSessionNotePicker = false;
+    this.sessionNotesSearchQuery = '';
+    this.sessionNotesActiveOptionIndex = 0;
+  }
+
+  onSessionNoteSearchChange(value: string) {
+    this.sessionNotesSearchQuery = value;
+    this.sessionNotesActiveOptionIndex = 0;
+  }
+
+  async selectSessionNoteFromPicker(note: VaultEntry) {
+    await this.selectSessionNoteByPath(note.relativePath);
+    this.closeSessionNotePicker();
+  }
+
+  handleSessionNotePickerKeydown(event: KeyboardEvent) {
+    if (!this.showSessionNotePicker) {
+      return;
+    }
+
+    const options = this.filteredSessionNoteEntries;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeSessionNotePicker();
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      this.sessionNotesActiveOptionIndex = options.length
+        ? (this.sessionNotesActiveOptionIndex + 1) % options.length
+        : 0;
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      this.sessionNotesActiveOptionIndex = options.length
+        ? (this.sessionNotesActiveOptionIndex - 1 + options.length) % options.length
+        : 0;
+      return;
+    }
+
+    if (event.key === 'Enter' && options[this.sessionNotesActiveOptionIndex]) {
+      event.preventDefault();
+      void this.selectSessionNoteFromPicker(options[this.sessionNotesActiveOptionIndex]);
+    }
+  }
+
+  startCreatingSessionNote() {
+    if (!this.sessionNotesPermissionGranted) {
+      return;
+    }
+
+    this.isCreatingSessionNote = true;
+    this.newSessionNoteName = this.getDefaultSessionNoteName();
+    this.selectedSessionNoteTemplate = 'session';
+    this.sessionNotesError = '';
+  }
+
+  cancelCreatingSessionNote() {
+    this.isCreatingSessionNote = false;
+    this.newSessionNoteName = '';
+    this.selectedSessionNoteTemplate = 'session';
+  }
+
+  async createSessionNote() {
+    const path = this.buildSessionNotePath(this.newSessionNoteName);
+    if (!path) {
+      this.sessionNotesError = 'Enter a note name.';
+      return;
+    }
+
+    try {
+      this.sessionNotesError = '';
+      const content = this.getSessionNoteTemplateContent(path, this.selectedSessionNoteTemplate);
+      await this.obsidianVaultService.writeFile(this.getSessionNotesServerId(), path, content);
+      this.cancelCreatingSessionNote();
+      await this.loadSessionNoteEntries(false);
+      await this.selectSessionNoteByPath(path);
+    } catch (error) {
+      this.sessionNotesError = await this.tryRecoverSessionNotesVault(error)
+        ? 'Vault folder reconnected. Create the note again.'
+        : 'Unable to create note.';
+      console.error('Failed to create session note', error);
+    }
+  }
+
+  onSessionNoteContentChange(content: string) {
+    this.selectedSessionNoteContent = content;
+    this.scheduleSessionNoteSave();
+  }
+
+  private async writeActiveBroadcastOverlayToNote(path: string, mode: 'current' | 'new') {
+    const broadcastContent = this.getActiveBroadcastOverlayMarkdown();
+    if (!broadcastContent) {
+      this.broadcastOverlayNoteStatus = 'No broadcast content to add.';
+      return;
+    }
+
+    this.broadcastOverlayNoteSaving = mode;
+    this.broadcastOverlayNoteStatus = '';
+
+    try {
+      await this.ensureSessionNotesReady();
+      if (!this.sessionNotesPermissionGranted) {
+        this.broadcastOverlayNoteStatus = this.sessionNotesError || 'Vault access is required for session notes.';
+        return;
+      }
+
+      await this.flushPendingSessionNoteSave();
+      const serverId = this.getSessionNotesServerId();
+      const section = this.getBroadcastOverlayNoteSection(broadcastContent);
+      let nextContent = '';
+
+      if (mode === 'new') {
+        nextContent = this.getBroadcastOverlayNoteFileContent(path, section);
+      } else if (path === this.selectedSessionNotePath) {
+        nextContent = this.appendSessionNoteContent(this.selectedSessionNoteContent, section);
+      } else {
+        const currentContent = await this.obsidianVaultService.readFile(serverId, path);
+        nextContent = this.appendSessionNoteContent(currentContent, section);
+      }
+
+      await this.obsidianVaultService.writeFile(serverId, path, nextContent);
+      this.rememberSelectedSessionNote(path);
+      this.selectedSessionNotePath = path;
+      this.selectedSessionNoteName = this.getSessionNoteDisplayName(path);
+      this.selectedSessionNoteContent = nextContent;
+      this.sessionNotesSaveState = 'saved';
+      this.broadcastOverlayNoteStatus = mode === 'new'
+        ? `Created ${path}`
+        : `Added to ${this.getSessionNoteDisplayName(path)}`;
+
+      if (this.showSessionNotes) {
+        await this.loadSessionNoteEntries(false);
+      }
+    } catch (error) {
+      this.sessionNotesSaveState = 'error';
+      this.broadcastOverlayNoteStatus = await this.tryRecoverSessionNotesVault(error)
+        ? 'Vault folder reconnected. Try again.'
+        : 'Unable to add broadcast to notes.';
+      console.error('Failed to save broadcast overlay to session notes', error);
+    } finally {
+      this.broadcastOverlayNoteSaving = null;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private appendSessionNoteContent(current: string, section: string): string {
+    return `${current.trimEnd()}\n\n${section.trim()}\n`;
+  }
+
+  private getActiveBroadcastOverlayMarkdown(): string {
+    if (this.activeOverlayText?.trim()) {
+      return this.activeOverlayText.trim();
+    }
+
+    if (this.activeOverlayImage) {
+      return this.formatMarkdownImage('Broadcast Image', this.activeOverlayImage);
+    }
+
+    return '';
+  }
+
+  private formatMarkdownImage(alt: string, url: string): string {
+    const safeAlt = alt.replace(/[\[\]\r\n]/g, ' ').trim() || 'Image';
+    return `![${safeAlt}](${this.encodeMarkdownUrl(url)})`;
+  }
+
+  private encodeMarkdownUrl(url: string): string {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    try {
+      return this.escapeMarkdownUrlDelimiters(new URL(trimmed, window.location.origin).toString());
+    } catch {
+      return this.escapeMarkdownUrlDelimiters(encodeURI(trimmed));
+    }
+  }
+
+  private escapeMarkdownUrlDelimiters(url: string): string {
+    return url.replace(/[()]/g, value => `%${value.charCodeAt(0).toString(16).toUpperCase()}`);
+  }
+
+  private getBroadcastOverlayNoteSection(content: string): string {
+    return [
+      `## Broadcast - ${this.getSessionNoteDateTime()}`,
+      '',
+      content,
+      ''
+    ].join('\n');
+  }
+
+  private getBroadcastOverlayNoteFileContent(path: string, section: string): string {
+    const title = this.getSessionNoteDisplayName(path);
+    return [
+      '---',
+      `title: ${title}`,
+      'tags:',
+      '  - broadcast',
+      '  - call',
+      `date: ${this.getSessionNoteDate()}`,
+      '---',
+      '',
+      `# ${title}`,
+      '',
+      section.trim(),
+      ''
+    ].join('\n');
+  }
+
+  private async ensureSessionNotesReady(forceAttach: boolean = false) {
+    const serverId = this.getSessionNotesServerId();
+    if (!serverId) {
+      this.sessionNotesError = 'Open a server before using session notes.';
+      return;
+    }
+
+    this.sessionNotesLoading = true;
+    this.sessionNotesError = '';
+
+    try {
+      let handle = await this.obsidianVaultService.getVaultHandle(serverId);
+      if (!handle || forceAttach) {
+        if (!this.obsidianVaultService.isFileSystemApiSupported()) {
+          this.sessionNotesError = 'Local vault access needs a Chromium browser.';
+          return;
+        }
+
+        this.sessionNotesVaultName = await this.obsidianVaultService.attachVaultToServer(serverId);
+        handle = await this.obsidianVaultService.getVaultHandle(serverId);
+      }
+
+      if (!handle) {
+        this.sessionNotesError = 'Attach a vault folder to use session notes.';
+        return;
+      }
+
+      this.sessionNotesVaultName = handle.name;
+      this.sessionNotesPermissionGranted = await this.obsidianVaultService.hasPermission(serverId);
+      if (!this.sessionNotesPermissionGranted) {
+        this.sessionNotesPermissionGranted = await this.obsidianVaultService.requestPermission(handle);
+      }
+
+      if (!this.sessionNotesPermissionGranted) {
+        this.sessionNotesError = 'Vault access is required for session notes.';
+        return;
+      }
+
+      await this.loadSessionNoteEntries();
+    } catch (error) {
+      this.sessionNotesError = 'Unable to set vault folder.';
+      console.error('Failed to prepare session notes vault', error);
+    } finally {
+      this.sessionNotesLoading = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  private async loadSessionNoteEntries(useCache: boolean = true) {
+    const serverId = this.getSessionNotesServerId();
+    if (!serverId || !this.sessionNotesPermissionGranted) {
+      return;
+    }
+
+    this.sessionNotesLoading = true;
+    try {
+      const entries = await this.obsidianVaultService.listVaultFiles(serverId, useCache);
+      this.sessionNoteEntries = this.flattenSessionNoteEntries(entries);
+      this.closeSessionNotePicker();
+      const rememberedPath = this.getRememberedSessionNotePath();
+      const nextPath = this.selectedSessionNotePath || rememberedPath || '';
+      if (nextPath && this.sessionNoteEntries.some(entry => entry.relativePath === nextPath)) {
+        await this.selectSessionNoteByPath(nextPath);
+      }
+    } catch (error) {
+      this.sessionNotesError = await this.tryRecoverSessionNotesVault(error)
+        ? 'Vault folder reconnected. Refresh notes.'
+        : 'Unable to load session notes.';
+      console.error('Failed to load session notes', error);
+    } finally {
+      this.sessionNotesLoading = false;
+    }
+  }
+
+  private flattenSessionNoteEntries(entries: VaultEntry[]): VaultEntry[] {
+    return entries
+      .flatMap(entry => entry.kind === 'directory'
+        ? this.flattenSessionNoteEntries(entry.children || [])
+        : [entry])
+      .filter(entry => this.isMarkdownNote(entry.name))
+      .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  }
+
+  private isMarkdownNote(fileName: string): boolean {
+    const lowerName = fileName.toLowerCase();
+    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
+  }
+
+  private scheduleSessionNoteSave() {
+    if (!this.selectedSessionNotePath) {
+      return;
+    }
+
+    if (this.sessionNotesSaveTimer) {
+      clearTimeout(this.sessionNotesSaveTimer);
+    }
+
+    this.sessionNotesSaveState = 'saving';
+    this.sessionNotesSaveTimer = setTimeout(() => {
+      void this.saveSessionNote();
+    }, 900);
+  }
+
+  private async flushPendingSessionNoteSave() {
+    if (!this.sessionNotesSaveTimer) {
+      return;
+    }
+
+    clearTimeout(this.sessionNotesSaveTimer);
+    this.sessionNotesSaveTimer = null;
+    await this.saveSessionNote();
+  }
+
+  private async saveSessionNote() {
+    if (!this.selectedSessionNotePath) {
+      return;
+    }
+
+    this.sessionNotesSaveTimer = null;
+    try {
+      this.sessionNotesSaveState = 'saving';
+      await this.obsidianVaultService.writeFile(
+        this.getSessionNotesServerId(),
+        this.selectedSessionNotePath,
+        this.selectedSessionNoteContent
+      );
+      this.sessionNotesSaveState = 'saved';
+    } catch (error) {
+      this.sessionNotesSaveState = 'error';
+      this.sessionNotesError = await this.tryRecoverSessionNotesVault(error)
+        ? 'Vault folder reconnected. Save again.'
+        : 'Unable to save note.';
+      console.error('Failed to save session note', error);
+    }
+  }
+
+  private async tryRecoverSessionNotesVault(error: unknown): Promise<boolean> {
+    if (!String((error as Error)?.message || error).toLowerCase().includes('vault')) {
+      return false;
+    }
+
+    await this.ensureSessionNotesReady(true);
+    return this.sessionNotesPermissionGranted;
+  }
+
+  getSessionNotesServerId(): string {
+    return this.serverService.getCurrentServer()?._id || '';
+  }
+
+  private getSessionNotesStorageKey(): string {
+    return `call-session-note:${this.getSessionNotesServerId()}:${this.channelId}`;
+  }
+
+  private rememberSelectedSessionNote(path: string) {
+    try {
+      localStorage.setItem(this.getSessionNotesStorageKey(), path);
+    } catch {
+      // Non-critical preference.
+    }
+  }
+
+  private getRememberedSessionNotePath(): string {
+    try {
+      return localStorage.getItem(this.getSessionNotesStorageKey()) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private getCurrentSessionNotePath(): string {
+    return this.selectedSessionNotePath || this.getRememberedSessionNotePath();
+  }
+
+  private getDefaultSessionNoteName(): string {
+    const date = this.getSessionNoteDate();
+    return `Session Notes/Session ${date}.md`;
+  }
+
+  private getDefaultBroadcastOverlayNoteName(): string {
+    return `Broadcasts/Broadcast ${this.getSessionNoteDateTimeForPath()}.md`;
+  }
+
+  private buildSessionNotePath(value: string): string | null {
+    const normalized = value
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/[<>:"|?*\x00-\x1F]/g, '-');
+
+    if (!normalized) {
+      return null;
+    }
+
+    return /\.(md|markdown)$/i.test(normalized) ? normalized : `${normalized}.md`;
+  }
+
+  private getSessionNoteTemplateContent(path: string, template: string): string {
+    if (template === 'blank') {
+      return '';
+    }
+
+    const title = this.getSessionNoteDisplayName(path);
+    const date = this.getSessionNoteDate();
+    return [
+      '---',
+      `title: ${title}`,
+      'tags:',
+      '  - session',
+      '  - call',
+      `date: ${date}`,
+      '---',
+      '',
+      `# ${title}`,
+      '',
+      '## Recap',
+      '',
+      '## Scenes',
+      '',
+      '## NPCs',
+      '',
+      '## Decisions',
+      '',
+      '## Items and Rewards',
+      '',
+      '## Follow Ups',
+      ''
+    ].join('\n');
+  }
+
+  getSessionNoteDisplayName(path: string): string {
+    const fileName = path.split('/').pop() || path;
+    return fileName.replace(/\.(md|markdown)$/i, '');
+  }
+
+  get filteredSessionNoteEntries(): VaultEntry[] {
+    const query = this.sessionNotesSearchQuery.trim().toLowerCase();
+    if (!query) {
+      return this.sessionNoteEntries;
+    }
+
+    const terms = query.split(/\s+/).filter(Boolean);
+    return this.sessionNoteEntries.filter(note => {
+      const text = `${note.relativePath} ${this.getSessionNoteDisplayName(note.relativePath)}`.toLowerCase();
+      return terms.every(term => text.includes(term));
+    });
+  }
+
+  private focusSessionNoteSearch() {
+    setTimeout(() => this.sessionNoteSearchInputRef?.nativeElement.focus(), 0);
+  }
+
+  getSessionNotesSaveLabel(): string {
+    if (this.sessionNotesSaveState === 'saving') return 'Saving';
+    if (this.sessionNotesSaveState === 'error') return 'Save failed';
+    if (this.selectedSessionNotePath) return 'Saved';
+    return 'No note';
+  }
+
+  private getSessionNoteDate(): string {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private getSessionNoteDateTime(): string {
+    const date = new Date();
+    const hours = `${date.getHours()}`.padStart(2, '0');
+    const minutes = `${date.getMinutes()}`.padStart(2, '0');
+    return `${this.getSessionNoteDate()} ${hours}:${minutes}`;
+  }
+
+  private getSessionNoteDateTimeForPath(): string {
+    return this.getSessionNoteDateTime().replace(':', '-');
   }
 
   handleSongRequest(request: any) {

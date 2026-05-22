@@ -55,6 +55,7 @@ export class CreateCharacterComponent implements OnInit {
       ac: [10, [Validators.required, Validators.min(0)]],
       ddbId: [null],
       ddbUsername: [null],
+      ddbPdfLink: [null],
       iconUrl: [''],
       strength: [10], dexterity: [10], constitution: [10],
       intelligence: [10], wisdom: [10], charisma: [10],
@@ -66,6 +67,32 @@ export class CreateCharacterComponent implements OnInit {
 
   get classArray() {
     return this.charForm.get('classes') as FormArray;
+  }
+
+  get hasAssignedIcon(): boolean {
+    return !!this.selectedIcon || !!this.charForm.get('iconUrl')?.value;
+  }
+
+  get iconAssignmentLabel(): string {
+    if (this.selectedIcon) {
+      return this.formatFileLabel(this.selectedIcon);
+    }
+
+    return this.charForm.get('iconUrl')?.value ? 'Image assigned' : 'Select an avatar image';
+  }
+
+  get hasAssignedPdf(): boolean {
+    return !!this.selectedPdf || !!this.charForm.get('ddbPdfLink')?.value;
+  }
+
+  get pdfAssignmentLabel(): string {
+    if (this.selectedPdf) {
+      return this.formatFileLabel(this.selectedPdf);
+    }
+
+    return this.charForm.get('ddbPdfLink')?.value
+      ? 'D&D Beyond PDF linked'
+      : 'Full character sheet (optional)';
   }
 
   addClass(className = '', subclassName = '', level = 1) {
@@ -95,6 +122,9 @@ export class CreateCharacterComponent implements OnInit {
       this.ddbService.getSurfaceInformation(id).subscribe({
         next: (data) => {
           while (this.classArray.length) { this.classArray.removeAt(0); }
+          this.selectedIcon = null;
+          const ddbPdfLink = data.ddbPdfLink || data.pdfLink ||
+            this.ddbService.getPdfLinkFromCharacterId(data.id, data.username);
 
           this.charForm.patchValue({
             name: data.name,
@@ -102,6 +132,7 @@ export class CreateCharacterComponent implements OnInit {
             ac: data.ac,
             ddbId: data.id,
             ddbUsername: data.username,
+            ddbPdfLink,
             iconUrl: data.icon,
             strength: data.baseStats.strength,
             dexterity: data.baseStats.dexterity,
@@ -124,6 +155,8 @@ export class CreateCharacterComponent implements OnInit {
 
   onFileSelected(event: any, type: 'icon' | 'pdf') {
     const file = event.target.files[0];
+    if (!file) return;
+
     if (type === 'icon') {
       this.selectedIcon = file;
       // Show local preview
@@ -147,8 +180,8 @@ export class CreateCharacterComponent implements OnInit {
       ac: formVal.ac,
       ddbId: formVal.ddbId,
       ddbUsername: formVal.ddbUsername,
+      ddbPdfLink: formVal.ddbPdfLink,
       icon: this.selectedIcon ? null : formVal.iconUrl,
-      pdfLink: this.selectedPdf ? null : null,
       baseStats: {
         strength: formVal.strength,
         dexterity: formVal.dexterity,
@@ -178,6 +211,10 @@ export class CreateCharacterComponent implements OnInit {
         this.isSaving = false;
       }
     });
+  }
+
+  private formatFileLabel(file: File): string {
+    return file.name;
   }
 
   close = () => {

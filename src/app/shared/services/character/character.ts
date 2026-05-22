@@ -36,7 +36,7 @@ export class CharacterService {
 
   private buildCharacterFormData(
     characterData: Partial<ICharacter>,
-    assets?: { icon?: File | null; pdf?: File | null }
+    assets?: { icon?: File | null; pdf?: File | null; ddbPdf?: File | null }
   ): FormData {
     const formData = new FormData();
 
@@ -58,6 +58,10 @@ export class CharacterService {
 
     if (characterData.ddbUsername !== undefined && characterData.ddbUsername !== null) {
       formData.append('ddbUsername', characterData.ddbUsername);
+    }
+
+    if (characterData.ddbPdfLink !== undefined && characterData.ddbPdfLink !== null) {
+      formData.append('ddbPdfLink', characterData.ddbPdfLink);
     }
 
     if (characterData.servers !== undefined) {
@@ -84,12 +88,16 @@ export class CharacterService {
       formData.append('pdfLink', characterData.pdfLink || '');
     }
 
+    if (assets?.ddbPdf) {
+      formData.append('ddbPdf', assets.ddbPdf, assets.ddbPdf.name);
+    }
+
     return formData;
   }
 
   saveCharacter(
     characterData: Partial<ICharacter>,
-    assets?: { icon?: File | null; pdf?: File | null }
+    assets?: { icon?: File | null; pdf?: File | null; ddbPdf?: File | null }
   ): Observable<ICharacter> {
     const formData = this.buildCharacterFormData(characterData, assets);
     return this.http.post<ICharacter>(this.apiUrl, formData, { withCredentials: true });
@@ -98,7 +106,7 @@ export class CharacterService {
   updateCharacter(
     id: string,
     characterData: Partial<ICharacter>,
-    assets?: { icon?: File | null; pdf?: File | null }
+    assets?: { icon?: File | null; pdf?: File | null; ddbPdf?: File | null }
   ): Observable<any> {
     const formData = this.buildCharacterFormData(characterData, assets);
     return this.http.put(`${this.apiUrl}/${id}`, formData, { withCredentials: true });

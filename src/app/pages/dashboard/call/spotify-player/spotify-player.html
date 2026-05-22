@@ -251,23 +251,65 @@
 
           <!-- Player Controls -->
           <div class="controls-center">
-            <div class="playback-btns">
-              <button (click)="toggleShuffle()" [class.active]="spotify.shuffleState$ | async" title="Shuffle" class="shuffle-btn">
+            <div class="playback-btns" [class.locked]="!canControlPlayback">
+              <button
+                (click)="toggleShuffle()"
+                [class.active]="spotify.shuffleState$ | async"
+                [disabled]="!canControlPlayback"
+                [title]="canControlPlayback ? 'Shuffle' : playbackControlTitle"
+                class="shuffle-btn">
                 <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M14.83,13.41L13.42,14.82L16.59,18H15V20H21V16H19V17.59L14.83,13.41M14.83,10.59L19,6.41V8H21V2H15V4H16.59L13.42,7.17L14.83,8.58M9.17,13.41L5,17.59V16H3V22H9V20H7.41L10.58,16.83L9.17,15.42M9.17,10.58L10.58,9.17L7.41,6H9V4H3V10H5V8.41L9.17,12.58L10.58,11.17" /></svg>
               </button>
-              <button (click)="previousTrack()" title="Previous"><svg viewBox="0 0 24 24" width="20"><path fill="currentColor" d="M6,18V6H8V18H6M9.5,12L18,6V18L9.5,12Z" /></svg></button>
-              <button (click)="togglePlay()" class="play-btn" [title]="(spotify.isPaused$ | async) ? 'Play' : 'Pause'">
+              <button
+                (click)="previousTrack()"
+                [disabled]="!canControlPlayback"
+                [title]="canControlPlayback ? 'Previous' : playbackControlTitle">
+                <svg viewBox="0 0 24 24" width="20"><path fill="currentColor" d="M6,18V6H8V18H6M9.5,12L18,6V18L9.5,12Z" /></svg>
+              </button>
+              <button
+                (click)="togglePlay()"
+                class="play-btn"
+                [disabled]="!canControlPlayback"
+                [title]="canControlPlayback ? ((spotify.isPaused$ | async) ? 'Play' : 'Pause') : playbackControlTitle">
                 <svg *ngIf="spotify.isPaused$ | async" viewBox="0 0 24 24" width="24"><path fill="currentColor" d="M8,5.14V19.14L19,12.14L8,5.14Z" /></svg>
                 <svg *ngIf="!(spotify.isPaused$ | async)" viewBox="0 0 24 24" width="24"><path fill="currentColor" d="M14,19H18V5H14M6,19H10V5H6V19Z" /></svg>
               </button>
-              <button (click)="nextTrack()" title="Next"><svg viewBox="0 0 24 24" width="20"><path fill="currentColor" d="M16,18H18V6H16M6,18L14.5,12L6,6V18Z" /></svg></button>
+              <button
+                (click)="nextTrack()"
+                [disabled]="!canControlPlayback"
+                [title]="canControlPlayback ? 'Next' : playbackControlTitle">
+                <svg viewBox="0 0 24 24" width="20"><path fill="currentColor" d="M16,18H18V6H16M6,18L14.5,12L6,6V18Z" /></svg>
+              </button>
+            </div>
+
+            <div class="playback-timeline" [class.disabled]="!canControlPlayback || !((spotify.playbackDurationMs$ | async) ?? 0)">
+              <span>{{ formatPlaybackTime((spotify.playbackPositionMs$ | async) ?? 0) }}</span>
+              <input
+                type="range"
+                min="0"
+                [max]="(spotify.playbackDurationMs$ | async) ?? 0"
+                step="500"
+                [ngModel]="(spotify.playbackPositionMs$ | async) ?? 0"
+                (ngModelChange)="seekPlayback($event)"
+                [disabled]="!canControlPlayback || !((spotify.playbackDurationMs$ | async) ?? 0)"
+                [title]="playbackControlTitle"
+                aria-label="SoundCloud playback timeline"
+              >
+              <span>{{ formatPlaybackTime((spotify.playbackDurationMs$ | async) ?? 0) }}</span>
             </div>
           </div>
 
           <!-- Volume Control -->
           <div class="volume-right">
             <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16.02C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z" /></svg>
-            <input type="range" min="0" max="1" step="0.05" value="0.5" (input)="updateVolume($event)">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              [ngModel]="(spotify.volumePercent$ | async) ?? 25"
+              (ngModelChange)="updateVolume($event)"
+            >
           </div>
         </div>
       </div>

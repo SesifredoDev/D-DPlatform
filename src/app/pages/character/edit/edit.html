@@ -24,12 +24,20 @@
 
           <div class="tab-pane">
             <div class="identity-header">
-              <div class="avatar-preview-box glass">
-                <img [src]="charForm.get('iconUrl')?.value || 'https://www.gravatar.com/avatar/0?d=identicon'" class="preview-img">
-                <label class="icon-edit-overlay">
-                  <mat-icon>photo_camera</mat-icon>
-                  <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*" hidden>
-                </label>
+              <div class="avatar-stack">
+                <div class="avatar-preview-box glass">
+                  <img [src]="charForm.get('iconUrl')?.value || 'https://www.gravatar.com/avatar/0?d=identicon'" class="preview-img">
+                  <label class="icon-edit-overlay">
+                    <mat-icon>photo_camera</mat-icon>
+                    <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*" hidden>
+                  </label>
+                </div>
+                @if (hasAssignedIcon) {
+                  <div class="upload-status" [attr.title]="iconAssignmentLabel">
+                    <mat-icon>check_circle</mat-icon>
+                    <span>{{ iconAssignmentLabel }}</span>
+                  </div>
+                }
               </div>
               <div class="identity-main">
                 <mat-form-field appearance="outline" class="glass-field full-width">
@@ -129,11 +137,18 @@
 
           <div class="tab-pane">
             <div class="media-upload-grid">
-              <div class="upload-zone glass">
+              <div class="upload-zone glass" [class.has-file]="hasAssignedPdf">
                 <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
                 <div class="upload-info">
-                  <label>Update PDF Sheet</label>
-                  <span>Replace current character PDF</span>
+                  <label>{{ hasAssignedPdf ? 'Update PDF Sheet' : 'Attach PDF Sheet' }}</label>
+                  @if (hasAssignedPdf) {
+                    <div class="upload-status" [attr.title]="pdfAssignmentLabel">
+                      <mat-icon>check_circle</mat-icon>
+                      <span>{{ pdfAssignmentLabel }}</span>
+                    </div>
+                  } @else {
+                    <span>Attach a character PDF</span>
+                  }
                   <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
                 </div>
               </div>

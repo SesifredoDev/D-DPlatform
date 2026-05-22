@@ -36,6 +36,11 @@ import type {
   ServerManagementPermission
 } from '../../../shared/models/pages/dashboard/side-panel/side-panel.model';
 
+interface LastOpenSidePanelState {
+  serverId?: string | null;
+  channelId?: string | null;
+}
+
 @Component({
 
   selector: 'app-side-panel',
@@ -60,6 +65,7 @@ import type {
 })
 
 export class SidePanel implements AfterViewInit, OnDestroy {
+  private static readonly lastOpenStateStorageKey = 'side-panel:last-open';
 
   @Input() collapsed = false;
   @Input() collapsible = false;
@@ -179,6 +185,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   currentUserId: string | null = null;
 
   private subscriptions: Subscription = new Subscription();
+  private hasRequestedInitialServerDetails = false;
 
 
   constructor(
@@ -229,7 +236,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
           ...this.characters
         ]
 
-        this.onCharacterChange(this.characters[0]);
+        this.restoreActiveCharacter();
         this.cdr.markForCheck();
       });
 
@@ -241,10 +248,17 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       this.servers = servers;
       if (servers.length > 0) {
         if (!this.selectedServer) {
-          this.selectServer(servers[0]);
+          this.restoreInitialServer(servers);
+        } else if (!servers.some(server => server._id === this.selectedServer?._id)) {
+          this.tabService.closeAllTabs();
+          this.restoreServerWithoutClosingTabs(servers[0]);
+        } else if (!this.hasRequestedInitialServerDetails) {
+          this.hasRequestedInitialServerDetails = true;
+          this.serverService.getServerDetails(this.selectedServer._id);
         }
       } else {
         this.selectedServer = null;
+        this.rememberLastOpenState({ serverId: null, channelId: null });
       }
       this.cdr.markForCheck();
     }));
@@ -326,6 +340,10 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       return;
     }
 
+    this.rememberLastOpenState({
+      serverId: this.selectedServer?._id ?? channel.server,
+      channelId: channel._id ?? null
+    });
     this.channelService.setChannelObservable(channel);
     this.actionPerformed.emit();
   }
@@ -342,6 +360,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   selectServer(server: any) {
     this.tabService.closeAllTabs()
+    this.rememberLastOpenState({ serverId: server._id, channelId: null });
     this.serverService.getServerDetails(server._id);
     this.cdr.markForCheck();
     // Usually selecting a server doesn't close side panel as you might want to select a channel next,
@@ -480,8 +499,14 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   }
 
   openVTT() {
-    if (!this.selectedServer?._id) return;
-    this.tabService.openTab(this.selectedServer?._id, "vtt", "vtt", "left");
+    const serverId = this.selectedServer?._id;
+    if (!serverId) return;
+
+    const canHostVtt = this.serverService.canUserDm(this.selectedServer, this.currentUserId);
+    this.tabService.openTab(serverId, "vtt", "vtt", "left", {
+      vttSessionRoomId: serverId,
+      vttSessionMode: canHostVtt ? 'host' : 'join'
+    });
     this.actionPerformed.emit();
   }
 
@@ -560,6 +585,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     if (!this.selectedServer) return;
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
         if (channel._id) {
+          this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
           this.channelService.setChannelObservable(channel);
           this.tabService.openTab(channel._id, channel.name, 'whisper');
           this.actionPerformed.emit();
@@ -575,6 +601,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, ownerId).subscribe(channel => {
       if (channel._id) {
+        this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
         this.channelService.setChannelObservable(channel);
         this.tabService.openTab(channel._id, channel.name, 'whisper');
         this.actionPerformed.emit();
@@ -585,6 +612,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   private applyServerDetails(server: IServer) {
     this.selectedServer = server;
     this.channels = this.getVisibleChannels(server);
+    this.rememberLastOpenState({ serverId: server._id });
 
     if (this.currentUserId &&
       this.obsidianService.isOwner(server, this.currentUserId) &&
@@ -592,13 +620,100 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       this.channels.push(this.obsidianService.getObsidianChannel(server._id));
     }
 
-    const currentChannelId = this.channelService.currentChannel?._id;
-    const currentChannelStillExists = this.channels.some(channel => channel._id === currentChannelId);
-    if (this.channels[0] && !currentChannelStillExists) this.selectChannel(this.channels[0]);
+    this.restoreOpenChannel(server);
 
     this.groupMembersByRole(server);
     this.messagingSocketService.joinServerRoom(server._id);
     this.cdr.markForCheck();
+  }
+
+  private restoreActiveCharacter() {
+    const activeCharacter = this.charService.activeCharacter.value;
+    const restoredCharacter = activeCharacter?._id
+      ? this.characters.find(character => character._id === activeCharacter._id)
+      : null;
+
+    this.onCharacterChange(restoredCharacter ?? this.characters[0]);
+  }
+
+  private restoreInitialServer(servers: IServer[]) {
+    const lastOpenState = this.readLastOpenState();
+    const savedServerId = lastOpenState.serverId ?? this.serverService.getCurrentServer()?._id;
+    const savedChannelServerId = this.channelService.currentChannel?.server;
+    const serverIdToRestore = savedServerId ?? savedChannelServerId;
+    const serverToRestore = serverIdToRestore
+      ? servers.find(server => server._id === serverIdToRestore)
+      : null;
+
+    this.restoreServerWithoutClosingTabs(serverToRestore ?? servers[0]);
+  }
+
+  private restoreServerWithoutClosingTabs(server: IServer) {
+    this.hasRequestedInitialServerDetails = true;
+    this.rememberLastOpenState({ serverId: server._id });
+    this.serverService.getServerDetails(server._id);
+  }
+
+  private restoreOpenChannel(server: IServer) {
+    const currentChannel = this.channelService.currentChannel;
+    const currentChannelBelongsToServer = currentChannel?.server === server._id;
+    const currentChannelStillExists = this.channels.some(channel => channel._id === currentChannel?._id);
+    const currentChannelCanStayOpen = currentChannelBelongsToServer &&
+      (currentChannelStillExists || currentChannel?.type === ChannelType.Whisper);
+
+    if (currentChannelCanStayOpen) {
+      this.rememberLastOpenState({ serverId: server._id, channelId: currentChannel?._id ?? null });
+      return;
+    }
+
+    const lastOpenChannelId = this.readLastOpenState().channelId;
+    const restoredChannel = lastOpenChannelId
+      ? this.channels.find(channel => channel._id === lastOpenChannelId)
+      : null;
+
+    if (restoredChannel) {
+      this.selectChannel(restoredChannel);
+      return;
+    }
+
+    if (this.channels[0]) this.selectChannel(this.channels[0]);
+  }
+
+  private readLastOpenState(): LastOpenSidePanelState {
+    if (typeof window === 'undefined') return {};
+
+    try {
+      const rawState = window.localStorage.getItem(SidePanel.lastOpenStateStorageKey);
+      if (!rawState) return {};
+
+      const parsedState = JSON.parse(rawState) as LastOpenSidePanelState;
+      return {
+        serverId: typeof parsedState.serverId === 'string' ? parsedState.serverId : null,
+        channelId: typeof parsedState.channelId === 'string' ? parsedState.channelId : null
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  private rememberLastOpenState(nextState: LastOpenSidePanelState) {
+    if (typeof window === 'undefined') return;
+
+    const state = {
+      ...this.readLastOpenState(),
+      ...nextState
+    };
+
+    try {
+      if (!state.serverId && !state.channelId) {
+        window.localStorage.removeItem(SidePanel.lastOpenStateStorageKey);
+        return;
+      }
+
+      window.localStorage.setItem(SidePanel.lastOpenStateStorageKey, JSON.stringify(state));
+    } catch (error) {
+      console.warn('Failed to remember last open side panel state', error);
+    }
   }
 
   private getVisibleChannels(server: IServer): IChannel[] {

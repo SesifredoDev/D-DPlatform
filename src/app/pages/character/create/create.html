@@ -38,6 +38,13 @@
                   </button>
                 </mat-form-field>
               </div>
+
+              @if (charForm.get('ddbPdfLink')?.value) {
+                <div class="ddb-pdf-linked">
+                  <mat-icon>picture_as_pdf</mat-icon>
+                  <span>D&D Beyond PDF linked</span>
+                </div>
+              }
             </section>
 
             <div class="divider-text"><span>OR MANUAL ENTRY</span></div>
@@ -150,7 +157,7 @@
           <div class="tab-pane">
             <div class="media-upload-grid">
 
-              <div class="upload-zone glass" [class.has-file]="charForm.get('iconUrl')?.value">
+              <div class="upload-zone glass" [class.has-file]="hasAssignedIcon">
                 <div class="upload-preview">
                   @if (charForm.get('iconUrl')?.value) {
                     <img [src]="charForm.get('iconUrl')?.value" class="preview-img">
@@ -160,16 +167,30 @@
                 </div>
                 <div class="upload-info">
                   <label>Profile Icon</label>
-                  <span>Select an avatar image</span>
+                  @if (hasAssignedIcon) {
+                    <div class="upload-status" [attr.title]="iconAssignmentLabel">
+                      <mat-icon>check_circle</mat-icon>
+                      <span>{{ iconAssignmentLabel }}</span>
+                    </div>
+                  } @else {
+                    <span>Select an avatar image</span>
+                  }
                   <input type="file" (change)="onFileSelected($event, 'icon')" accept="image/*">
                 </div>
               </div>
 
-              <div class="upload-zone glass">
+              <div class="upload-zone glass" [class.has-file]="hasAssignedPdf">
                 <mat-icon class="pdf-icon">picture_as_pdf</mat-icon>
                 <div class="upload-info">
                   <label>Character PDF</label>
-                  <span>Full character sheet (optional)</span>
+                  @if (hasAssignedPdf) {
+                    <div class="upload-status" [attr.title]="pdfAssignmentLabel">
+                      <mat-icon>check_circle</mat-icon>
+                      <span>{{ pdfAssignmentLabel }}</span>
+                    </div>
+                  } @else {
+                    <span>Full character sheet (optional)</span>
+                  }
                   <input type="file" (change)="onFileSelected($event, 'pdf')" accept="application/pdf">
                 </div>
               </div>

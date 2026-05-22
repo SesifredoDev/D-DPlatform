@@ -7,6 +7,7 @@ export interface BroadcastData {
   imageUrl?: string;
   source?: string;
   filename?: string;
+  channelId?: string;
   embeddedFiles?: BroadcastEmbeddedFile[];
   preferTextForBroadcast?: boolean;
   composeMode?: boolean;

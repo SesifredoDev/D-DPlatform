@@ -17,7 +17,7 @@ import {CommonModule} from '@angular/common';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
-import {ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
+import {ObsidianPreviewTabRequest, ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 import {VttSync} from '../../shared/services/vttsync/vttsync';
 import {TauriTabPanelService} from '../../shared/services/tab/tauri-tab-panel.service';
 import {TabDragTransferService, type TabDragPayload} from '../../shared/services/tab/tab-drag-transfer.service';
@@ -359,15 +359,12 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   onNativeTabDragEnd(tab: Tab) {
-    this.draggingTabId = null;
+    this.finishNativeTabDrag();
     if (this.shouldPopOutUnhandledDrag(tab)) {
       void this.openTabInTauriPanel(tab);
     }
 
     this.tabDragTransfer.clearSoon();
-    window.setTimeout(() => {
-      this.suppressNextTabClick = false;
-    });
   }
 
   onNativeTabDragOver(event: DragEvent) {
@@ -386,6 +383,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     const payload = this.readNativeTabDrop(event);
     if (!payload) return;
 
+    this.finishNativeTabDrag();
     this.tabDragTransfer.markHandled(payload.tabId);
     if (targetTab?.id === payload.tabId) {
       this.tabDragTransfer.clearSoon();
@@ -408,6 +406,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     const payload = this.readNativeTabDrop(event);
     if (!payload) return;
 
+    this.finishNativeTabDrag();
     this.tabDragTransfer.markHandled(payload.tabId);
     if (this.isBlockedLiveCallTransfer(payload)) {
       this.showActiveCallMoveBlockedMessage();
@@ -434,6 +433,15 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
       case 'obsidian': return 'book';
       default: return 'window';
     }
+  }
+
+  openObsidianPreviewTab(request: ObsidianPreviewTabRequest, sourceTab: Tab) {
+    this.tabService.openObsidianPreviewTab({
+      serverId: request.serverId,
+      path: request.path,
+      title: request.title,
+      pane: this.resolveObsidianPreviewPane(sourceTab),
+    });
   }
 
   onHostVtt(channelId: string) {
@@ -508,10 +516,18 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     this.onDragOver(event);
   }
 
+  @HostListener('window:storage', ['$event'])
+  onStorage(event: StorageEvent) {
+    if (this.tabDragTransfer.isHandledStorageEvent(event, this.draggingTabId)) {
+      this.finishNativeTabDrag();
+    }
+  }
+
   @HostListener('drop', ['$event'])
   onFileDrop(event: DragEvent) {
     const tabPayload = this.readNativeTabDrop(event);
     if (tabPayload) {
+      this.finishNativeTabDrag();
       this.tabDragTransfer.markHandled(tabPayload.tabId);
       if (this.isBlockedLiveCallTransfer(tabPayload)) {
         this.showActiveCallMoveBlockedMessage();
@@ -576,6 +592,10 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     return this.userInfo?._id ?? this.userInfo?.id ?? '0';
   }
 
+  get canControlSoundCloudPlayback(): boolean {
+    return this.serverService.canUserDm(this.serverService.getCurrentServer(), this.userId);
+  }
+
   private scheduleLeftWidthUpdate(pointerClientX: number) {
     this.pendingLeftWidth = this.resolveLeftWidthFromPointer(pointerClientX);
     if (this.pendingLeftWidth === null || this.animationFrameId !== null) {
@@ -631,6 +651,13 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     return tab.type === 'call' &&
       this.videoService.currentChannelId === tab.id &&
       !!this.videoService.getLocalStream();
+  }
+
+  private finishNativeTabDrag() {
+    this.draggingTabId = null;
+    window.setTimeout(() => {
+      this.suppressNextTabClick = false;
+    });
   }
 
   private isBlockedLiveCallTransfer(payload: TabDragPayload): boolean {
@@ -721,6 +748,14 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     }
 
     return this.leftPaneId;
+  }
+
+  private resolveObsidianPreviewPane(sourceTab: Tab): TabPane {
+    if (this.isMobile) {
+      return this.leftPaneId;
+    }
+
+    return sourceTab.pane === this.leftPaneId ? this.rightPaneId : sourceTab.pane;
   }
 
   private getCurrentViewTabs(): Tab[] {

@@ -6,6 +6,14 @@ import { ThemeService } from '../theme/theme.service';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import type { TabType, MainTabPane, TabPane, Tab, TabPanel, TabSyncMessage } from '../../models/tab/tab-service.model';
 export type { TabType, MainTabPane, TabPane, Tab, TabPanel } from '../../models/tab/tab-service.model';
+
+export interface ObsidianPreviewTabOptions {
+  serverId: string;
+  path: string;
+  title?: string;
+  pane?: TabPane;
+}
+
 @Injectable({ providedIn: 'root' })
 export class TabService {
   private static readonly tabSyncEvent = 'dd-platform-tabs-sync';
@@ -59,6 +67,24 @@ export class TabService {
     // Deactivate others in the same pane
     const updated = current.map(t => t.pane === pane ? { ...t, active: false } : t);
     this.publishTabs([...updated, newTab]);
+  }
+
+  openObsidianPreviewTab(options: ObsidianPreviewTabOptions) {
+    const normalizedPath = options.path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!options.serverId || !normalizedPath) return;
+
+    const fallbackTitle = normalizedPath
+      .split('/')
+      .pop()
+      ?.replace(/\.(md|markdown)$/i, '') || 'Preview';
+
+    const tabId = `obsidian-preview:${options.serverId}:${normalizedPath.toLowerCase()}`;
+    this.openTab(tabId, options.title || fallbackTitle, 'obsidian', options.pane ?? 'right', {
+      serverId: options.serverId,
+      openPath: normalizedPath,
+      openRequestId: Date.now(),
+      previewOnly: true,
+    });
   }
 
   selectTab(id: string) {

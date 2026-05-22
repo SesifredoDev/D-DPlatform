@@ -613,16 +613,51 @@
           </div>
 
           <div class="tool-group tool-group-utilities" aria-label="Player tools">
-            <button
-              type="button"
-              (click)="toggleSpotifyOverlay()"
-              class="btn-action btn-spotify call-overlay-trigger"
-              [class.active]="showSpotify"
-              matTooltip="Spotify"
-              aria-label="Spotify"
-            >
-              <mat-icon>music_note</mat-icon>
-            </button>
+            <div class="spotify-volume-control call-overlay-trigger">
+              <button
+                type="button"
+                (click)="toggleSpotifyOverlay()"
+                class="btn-action btn-spotify"
+                [class.active]="showSpotify"
+                aria-label="SoundCloud"
+              >
+                <mat-icon>music_note</mat-icon>
+              </button>
+
+              <div class="music-volume-popover call-overlay-content" (click)="$event.stopPropagation()">
+                <div class="music-volume-readout">
+                  <mat-icon>{{ getSoundCloudVolumeIcon() }}</mat-icon>
+                  <strong>{{ soundCloudVolumePercent }}%</strong>
+                </div>
+                <input
+                  class="music-volume-slider"
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  [ngModel]="soundCloudVolumePercent"
+                  (ngModelChange)="setSoundCloudVolume($event)"
+                  aria-label="SoundCloud volume"
+                />
+                <div class="music-volume-fine-control">
+                  <button type="button" (click)="adjustSoundCloudVolume(-1)" aria-label="Lower SoundCloud volume">
+                    <mat-icon>remove</mat-icon>
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    [ngModel]="soundCloudVolumePercent"
+                    (ngModelChange)="setSoundCloudVolume($event)"
+                    aria-label="SoundCloud volume percent"
+                  />
+                  <button type="button" (click)="adjustSoundCloudVolume(1)" aria-label="Raise SoundCloud volume">
+                    <mat-icon>add</mat-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <button
               *ngIf="!isMobileBrowser"
@@ -947,6 +982,186 @@
     </div>
   }
 
+  <button
+    type="button"
+    class="session-notes-fab call-overlay-trigger"
+    [class.active]="showSessionNotes"
+    (click)="toggleSessionNotes()"
+    matTooltip="Session notes"
+    aria-label="Session notes">
+    <mat-icon>{{ showSessionNotes ? 'close' : 'edit_note' }}</mat-icon>
+  </button>
+
+  <section class="session-notes-panel glass call-overlay-content" *ngIf="showSessionNotes">
+    <header class="session-notes-header">
+      <div>
+        <span class="session-notes-kicker">{{ sessionNotesVaultName || 'Vault' }}</span>
+        <h3>Session Notes</h3>
+      </div>
+      <div class="session-notes-actions">
+        <span
+          class="session-notes-save-state"
+          [class.saving]="sessionNotesSaveState === 'saving'"
+          [class.error]="sessionNotesSaveState === 'error'">
+          <mat-icon>{{ sessionNotesSaveState === 'saving' ? 'sync' : sessionNotesSaveState === 'error' ? 'error' : 'cloud_done' }}</mat-icon>
+          <span>{{ getSessionNotesSaveLabel() }}</span>
+        </span>
+        <button
+          type="button"
+          class="session-notes-icon-button"
+          (click)="refreshSessionNotes()"
+          [disabled]="sessionNotesLoading"
+          matTooltip="Refresh notes"
+          aria-label="Refresh notes">
+          <mat-icon [class.rotating]="sessionNotesLoading">refresh</mat-icon>
+        </button>
+        <button
+          type="button"
+          class="session-notes-icon-button"
+          (click)="closeSessionNotes()"
+          matTooltip="Close notes"
+          aria-label="Close notes">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    </header>
+
+    <div class="session-notes-alert" *ngIf="sessionNotesError">
+      <mat-icon>error</mat-icon>
+      <span>{{ sessionNotesError }}</span>
+    </div>
+
+    <div class="session-notes-loading" *ngIf="sessionNotesLoading">
+      <mat-icon class="rotating">sync</mat-icon>
+      <span>Loading</span>
+    </div>
+
+    <div class="session-notes-setup" *ngIf="!sessionNotesLoading && !sessionNotesPermissionGranted">
+      <button type="button" class="session-notes-primary" (click)="attachSessionNotesVault()">
+        <mat-icon>folder_open</mat-icon>
+        <span>Set Vault Folder</span>
+      </button>
+    </div>
+
+    <ng-container *ngIf="sessionNotesPermissionGranted">
+      <div class="session-notes-toolbar">
+        <div class="session-notes-combobox" [class.open]="showSessionNotePicker">
+          <button
+            type="button"
+            class="session-notes-combobox-trigger"
+            (click)="toggleSessionNotePicker()"
+            [disabled]="sessionNotesLoading || sessionNoteEntries.length === 0"
+            aria-haspopup="listbox"
+            [attr.aria-expanded]="showSessionNotePicker"
+            aria-label="Select session note">
+            <mat-icon>description</mat-icon>
+            <span class="session-notes-combobox-value">
+              {{ selectedSessionNotePath || (sessionNoteEntries.length ? 'Select note' : 'No markdown notes') }}
+            </span>
+            <mat-icon class="session-notes-combobox-chevron">expand_more</mat-icon>
+          </button>
+
+          <div class="session-notes-combobox-menu" *ngIf="showSessionNotePicker">
+            <label class="session-notes-search">
+              <mat-icon>search</mat-icon>
+              <input
+                #sessionNoteSearchInput
+                type="search"
+                [ngModel]="sessionNotesSearchQuery"
+                (ngModelChange)="onSessionNoteSearchChange($event)"
+                (keydown)="handleSessionNotePickerKeydown($event)"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Search notes"
+                aria-label="Search session notes">
+            </label>
+
+            <ng-container *ngIf="filteredSessionNoteEntries as filteredNotes">
+              <div class="session-notes-options" role="listbox" aria-label="Session notes">
+                <button
+                  type="button"
+                  class="session-notes-option"
+                  *ngFor="let note of filteredNotes; let index = index"
+                  [class.active]="note.relativePath === selectedSessionNotePath"
+                  [class.highlighted]="index === sessionNotesActiveOptionIndex"
+                  (mouseenter)="sessionNotesActiveOptionIndex = index"
+                  (mousedown)="$event.preventDefault()"
+                  (click)="selectSessionNoteFromPicker(note)"
+                  role="option"
+                  [attr.aria-selected]="note.relativePath === selectedSessionNotePath">
+                  <span>{{ getSessionNoteDisplayName(note.relativePath) }}</span>
+                  <small>{{ note.relativePath }}</small>
+                </button>
+
+                <div class="session-notes-options-empty" *ngIf="filteredNotes.length === 0">
+                  No notes found
+                </div>
+              </div>
+            </ng-container>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="session-notes-secondary"
+          (click)="isCreatingSessionNote ? cancelCreatingSessionNote() : startCreatingSessionNote()">
+          <mat-icon>{{ isCreatingSessionNote ? 'close' : 'note_add' }}</mat-icon>
+          <span>{{ isCreatingSessionNote ? 'Cancel' : 'New' }}</span>
+        </button>
+      </div>
+
+      <form class="session-notes-create" *ngIf="isCreatingSessionNote" (ngSubmit)="createSessionNote()">
+        <label>
+          <span>File</span>
+          <input
+            name="sessionNoteName"
+            [(ngModel)]="newSessionNoteName"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Session Notes/Session 2026-05-22.md">
+        </label>
+        <label>
+          <span>Template</span>
+          <select
+            name="sessionNoteTemplate"
+            [(ngModel)]="selectedSessionNoteTemplate"
+            aria-label="Select note template">
+            <option *ngFor="let template of sessionNoteTemplates" [value]="template.value">
+              {{ template.label }}
+            </option>
+          </select>
+        </label>
+        <button type="submit" class="session-notes-primary">
+          <mat-icon>add</mat-icon>
+          <span>Create</span>
+        </button>
+      </form>
+
+      <div class="session-notes-editor-shell" *ngIf="selectedSessionNotePath; else noSessionNoteSelected">
+        <div class="session-notes-file-title">
+          <mat-icon>article</mat-icon>
+          <div>
+            <strong>{{ selectedSessionNoteName }}</strong>
+            <span>{{ selectedSessionNotePath }}</span>
+          </div>
+        </div>
+        <app-milkdown-editor
+          [editorMarkdown]="selectedSessionNoteContent"
+          [serverId]="getSessionNotesServerId()"
+          [currentFilePath]="selectedSessionNotePath"
+          (markdownChange)="onSessionNoteContentChange($event)">
+        </app-milkdown-editor>
+      </div>
+
+      <ng-template #noSessionNoteSelected>
+        <div class="session-notes-empty">
+          <mat-icon>edit_note</mat-icon>
+          <span>Select or create a note</span>
+        </div>
+      </ng-template>
+    </ng-container>
+  </section>
+
   <div class="astral-playback-overlay" *ngIf="pendingAstralPlaybackRequest">
     <div class="astral-playback-prompt glass call-overlay-content" role="dialog" aria-modal="true" aria-labelledby="astralPlaybackTitle">
       <button
@@ -1059,19 +1274,65 @@
   <!-- BROADCAST OVERLAY -->
   <div class="broadcast-overlay" *ngIf="activeOverlayImage || activeOverlayText">
     <div class="broadcast-image-container glass call-overlay-content" *ngIf="activeOverlayImage">
+      <div class="broadcast-overlay-toolbar">
+        <div class="broadcast-note-actions">
+          <button
+            type="button"
+            class="broadcast-note-action"
+            (click)="addActiveBroadcastToCurrentNote()"
+            [disabled]="!!broadcastOverlayNoteSaving || !hasCurrentSessionNoteForBroadcast"
+            [matTooltip]="hasCurrentSessionNoteForBroadcast ? 'Add broadcast to current session note' : 'Select or create a session note first'">
+            <mat-icon>{{ broadcastOverlayNoteSaving === 'current' ? 'sync' : 'note_add' }}</mat-icon>
+            <span>{{ broadcastOverlayNoteSaving === 'current' ? 'Adding' : 'Add to Current Note' }}</span>
+          </button>
+          <button
+            type="button"
+            class="broadcast-note-action"
+            (click)="createNoteFromActiveBroadcast()"
+            [disabled]="!!broadcastOverlayNoteSaving"
+            matTooltip="Create a new note from this broadcast">
+            <mat-icon>{{ broadcastOverlayNoteSaving === 'new' ? 'sync' : 'add' }}</mat-icon>
+            <span>{{ broadcastOverlayNoteSaving === 'new' ? 'Creating' : 'New Note' }}</span>
+          </button>
+        </div>
+        <span class="broadcast-note-status" *ngIf="broadcastOverlayNoteStatus">{{ broadcastOverlayNoteStatus }}</span>
+        <button class="btn-dismiss" (click)="dismissOverlay()" aria-label="Dismiss broadcast">
+          <mat-icon>close</mat-icon>
+          <span>Dismiss</span>
+        </button>
+      </div>
       <img [src]="activeOverlayImage" alt="Broadcast Image">
-      <button class="btn-dismiss" (click)="dismissOverlay()">
-        <mat-icon>close</mat-icon>
-        <span>Dismiss</span>
-      </button>
     </div>
 
     <div class="broadcast-markdown-container glass call-overlay-content" *ngIf="activeOverlayText">
+      <div class="broadcast-overlay-toolbar">
+        <div class="broadcast-note-actions">
+          <button
+            type="button"
+            class="broadcast-note-action"
+            (click)="addActiveBroadcastToCurrentNote()"
+            [disabled]="!!broadcastOverlayNoteSaving || !hasCurrentSessionNoteForBroadcast"
+            [matTooltip]="hasCurrentSessionNoteForBroadcast ? 'Add broadcast to current session note' : 'Select or create a session note first'">
+            <mat-icon>{{ broadcastOverlayNoteSaving === 'current' ? 'sync' : 'note_add' }}</mat-icon>
+            <span>{{ broadcastOverlayNoteSaving === 'current' ? 'Adding' : 'Add to Current Note' }}</span>
+          </button>
+          <button
+            type="button"
+            class="broadcast-note-action"
+            (click)="createNoteFromActiveBroadcast()"
+            [disabled]="!!broadcastOverlayNoteSaving"
+            matTooltip="Create a new note from this broadcast">
+            <mat-icon>{{ broadcastOverlayNoteSaving === 'new' ? 'sync' : 'add' }}</mat-icon>
+            <span>{{ broadcastOverlayNoteSaving === 'new' ? 'Creating' : 'New Note' }}</span>
+          </button>
+        </div>
+        <span class="broadcast-note-status" *ngIf="broadcastOverlayNoteStatus">{{ broadcastOverlayNoteStatus }}</span>
+        <button class="btn-dismiss" (click)="dismissOverlay()" aria-label="Dismiss broadcast">
+          <mat-icon>close</mat-icon>
+          <span>Dismiss</span>
+        </button>
+      </div>
       <markdown [data]="activeOverlayText"></markdown>
-      <button class="btn-dismiss" (click)="dismissOverlay()">
-        <mat-icon>close</mat-icon>
-        <span>Dismiss</span>
-      </button>
     </div>
   </div>
 

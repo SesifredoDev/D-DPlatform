@@ -37,6 +37,68 @@
     <!-- Main Content Area -->
     <div class="viewer-content">
 
+      <ng-template #pdfEditor let-state="state">
+        <div class="pdf-toolbar">
+          <div class="pdf-status">
+            <span
+              class="status-pill"
+              [class.interactive]="isInteractivePdf(state)"
+              [class.error]="!!state.loadError || !!state.saveError"
+              [class.saved]="!!state.saveMessage && !state.isDirty"
+            >
+              <mat-icon>{{ state.loadError || state.saveError ? 'error' : isInteractivePdf(state) ? 'edit_note' : 'description' }}</mat-icon>
+              <span>{{ state.saveError || state.saveMessage || pdfStatusLabel(state) }}</span>
+            </span>
+            @if (state.readOnlyFieldCount > 0) {
+              <span class="status-note">{{ state.readOnlyFieldCount }} read-only fields</span>
+            }
+          </div>
+
+          <div class="pdf-actions">
+            <button
+              mat-icon-button
+              type="button"
+              (click)="reloadPdfForm(state)"
+              [disabled]="state.isLoading || state.isSaving"
+              matTooltip="Reload PDF"
+            >
+              <mat-icon [class.rotating]="state.isLoading">refresh</mat-icon>
+            </button>
+            @if (isInteractivePdf(state)) {
+              <button
+                mat-raised-button
+                type="button"
+                class="save-pdf-btn"
+                (click)="savePdfEdits(state)"
+                [disabled]="!canSavePdfEdits(state)"
+              >
+                <mat-icon>{{ state.isSaving ? 'sync' : 'save' }}</mat-icon>
+                <span>{{ state.isSaving ? 'SAVING' : 'SAVE PDF' }}</span>
+              </button>
+            }
+          </div>
+        </div>
+
+        <div
+          class="pdf-workspace"
+          (input)="onPdfViewerFormInput(state)"
+          (change)="onPdfViewerFormInput(state)"
+        >
+          <div class="pdf-container">
+            <pdf-viewer
+              [src]="state.viewerUrl || ''"
+              [render-text]="true"
+              [original-size]="false"
+              [zoom]="zoom"
+              [page]="page"
+              (after-load-complete)="onPdfViewerLoaded(state, $event)"
+              (error)="onPdfViewerError(state, $event)"
+              class="pdf-view"
+            ></pdf-viewer>
+          </div>
+        </div>
+      </ng-template>
+
       <mat-tab-group class="modern-tabs" mat-stretch-tabs="false">
 
         <!-- Stats Overview Tab -->
@@ -80,19 +142,22 @@
           </div>
         </mat-tab>
 
-        <!-- PDF View Tab -->
-        @if (pdfUrl) {
-          <mat-tab label="Sheet (PDF)">
-            <div class="pdf-container">
-              <pdf-viewer
-                [src]="pdfUrl"
-                [render-text]="true"
-                [original-size]="false"
-                [zoom]="zoom"
-                [page]="page"
-                class="pdf-view"
-              ></pdf-viewer>
-            </div>
+        <!-- PDF View Tabs -->
+        @if (customPdf.viewerUrl) {
+          <mat-tab label="Custom PDF">
+            <ng-container
+              [ngTemplateOutlet]="pdfEditor"
+              [ngTemplateOutletContext]="{ state: customPdf }"
+            ></ng-container>
+          </mat-tab>
+        }
+
+        @if (ddbPdf.viewerUrl) {
+          <mat-tab label="DDB PDF">
+            <ng-container
+              [ngTemplateOutlet]="pdfEditor"
+              [ngTemplateOutletContext]="{ state: ddbPdf }"
+            ></ng-container>
           </mat-tab>
         }
 

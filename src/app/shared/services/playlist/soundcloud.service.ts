@@ -27,12 +27,14 @@ export class SoundCloudService {
   private static readonly pinnedItemsStateKey = 'soundcloud:pinned-items';
   private static readonly browserDeviceId = 'soundcloud-widget';
   private static readonly widgetIframeAllow = 'autoplay; encrypted-media';
+  private static readonly defaultVolumePercent = 25;
 
   private widget: any = null;
   private widgetScriptPromise: Promise<void> | null = null;
   private currentWidgetUrl: string | null = null;
-  private volumePercent = 50;
+  private volumePercent = SoundCloudService.defaultVolumePercent;
   private currentPositionMs = 0;
+  private currentDurationMs = 0;
   private lastContextUri: string | null = null;
   private localQueue: SoundCloudSearchResult[] = [];
   private queueIndex = -1;
@@ -45,6 +47,9 @@ export class SoundCloudService {
   public isAuthorized$ = new BehaviorSubject<boolean>(true);
   public error$ = new BehaviorSubject<string | null>(null);
   public devices$ = new BehaviorSubject<SoundCloudDevice[]>([]);
+  public volumePercent$ = new BehaviorSubject<number>(SoundCloudService.defaultVolumePercent);
+  public playbackPositionMs$ = new BehaviorSubject<number>(0);
+  public playbackDurationMs$ = new BehaviorSubject<number>(0);
   public activeDeviceId$ = new BehaviorSubject<string | null>(SoundCloudService.browserDeviceId);
   public savedItems$ = new BehaviorSubject<SoundCloudSearchResult[]>([]);
   public savedPlaylists$ = new BehaviorSubject<any[]>([]);
@@ -283,7 +288,8 @@ export class SoundCloudService {
   async clearCurrentPlayback(skipSync: boolean = true) {
     await this.pause(skipSync).catch(() => null);
     this.currentTrack$.next(null);
-    this.currentPositionMs = 0;
+    this.updatePlaybackPosition(0);
+    this.updatePlaybackDuration(0);
     this.lastContextUri = null;
   }
 
@@ -310,14 +316,15 @@ export class SoundCloudService {
     if (!this.widget) return;
     if (!skipSync) this.lastActionTime = Date.now();
 
-    this.widget.seekTo(positionMs);
-    this.currentPositionMs = positionMs;
+    const nextPositionMs = this.normalizePlaybackPosition(positionMs);
+    this.widget.seekTo(nextPositionMs);
+    this.updatePlaybackPosition(nextPositionMs);
 
     if (!skipSync) {
       const state = await this.getPlaybackState();
       this.syncAction$.next({
         command: 'seek',
-        data: this.createSyncPayload(state?.track_window?.current_track, positionMs, state?.paused ?? true, state?.context?.uri ?? null),
+        data: this.createSyncPayload(state?.track_window?.current_track, nextPositionMs, state?.paused ?? true, state?.context?.uri ?? null),
         source: 'manual'
       });
     }
@@ -335,6 +342,7 @@ export class SoundCloudService {
     } else if (this.widget) {
       this.widget.next();
       await this.delay(300);
+      this.applyWidgetVolume();
       await this.syncCurrentSound();
     }
 
@@ -359,6 +367,7 @@ export class SoundCloudService {
     } else if (this.widget) {
       this.widget.prev();
       await this.delay(300);
+      this.applyWidgetVolume();
       await this.syncCurrentSound();
     }
 
@@ -386,11 +395,35 @@ export class SoundCloudService {
     }
   }
 
-  async setVolume(v: number) {
-    this.volumePercent = Math.max(0, Math.min(100, Math.round(Number(v) * 100)));
+  getVolumePercent(): number {
+    return this.volumePercent;
+  }
+
+  async setVolume(v: number | string, skipSync: boolean = false) {
+    const numericValue = Number(v);
+    const ratio = Number.isFinite(numericValue) ? numericValue : this.volumePercent / 100;
+    await this.setVolumePercent(ratio * 100, skipSync);
+  }
+
+  async setVolumePercent(v: number | string, skipSync: boolean = false) {
+    this.volumePercent = this.normalizeVolumePercent(v);
+    this.volumePercent$.next(this.volumePercent);
     this.devices$.next([this.getBrowserDevice()]);
-    if (this.widget) {
-      this.widget.setVolume(this.volumePercent);
+    this.applyWidgetVolume();
+
+    if (!skipSync) {
+      this.lastActionTime = Date.now();
+      const state = await this.getPlaybackState().catch(() => null);
+      this.syncAction$.next({
+        command: 'volume',
+        data: this.createSyncPayload(
+          state?.track_window?.current_track,
+          state?.position || 0,
+          state?.paused ?? this.isPaused$.value,
+          state?.context?.uri ?? null
+        ),
+        source: 'manual'
+      });
     }
   }
 
@@ -406,10 +439,14 @@ export class SoundCloudService {
   async getPlaybackState() {
     const currentTrack = await this.syncCurrentSound().catch(() => this.currentTrack$.value);
     const position = await this.getWidgetValue<number>('getPosition').catch(() => this.currentPositionMs);
+    const duration = await this.getWidgetValue<number>('getDuration').catch(() => currentTrack?.duration ?? this.currentDurationMs);
+    this.updatePlaybackPosition(position ?? this.currentPositionMs);
+    this.updatePlaybackDuration(duration ?? currentTrack?.duration ?? this.currentDurationMs);
 
     return {
       paused: this.isPaused$.value,
       position: position ?? this.currentPositionMs,
+      duration: this.currentDurationMs,
       shuffle_state: this.shuffleState$.value,
       track_window: { current_track: currentTrack },
       context: { uri: this.lastContextUri }
@@ -1078,17 +1115,23 @@ export class SoundCloudService {
       if (autoPlay) {
         widget.play();
       }
+      this.applyWidgetVolume();
       return;
     }
 
     await new Promise<void>(resolve => {
       widget.load(url, {
         auto_play: autoPlay,
-        callback: () => resolve()
+        callback: () => {
+          this.applyWidgetVolume();
+          resolve();
+        }
       });
       setTimeout(resolve, 1500);
     });
     this.currentWidgetUrl = url;
+    this.applyWidgetVolume();
+    this.updatePlaybackPosition(0);
   }
 
   private getWidgetIframeSource(url: string, autoPlay: boolean): string {
@@ -1110,17 +1153,18 @@ export class SoundCloudService {
     this.widget.bind(events.READY, () => {
       this.isReady$.next(true);
       void this.syncCurrentSound();
-      this.widget.setVolume(this.volumePercent);
+      this.applyWidgetVolume();
     });
     this.widget.bind(events.PLAY, () => {
       this.isPaused$.next(false);
+      this.applyWidgetVolume();
       void this.syncCurrentSound();
     });
     this.widget.bind(events.PAUSE, () => {
       this.isPaused$.next(true);
     });
     this.widget.bind(events.PLAY_PROGRESS, (progress: any) => {
-      this.currentPositionMs = Math.max(0, Math.round(progress?.currentPosition || 0));
+      this.updatePlaybackPosition(progress?.currentPosition);
     });
     this.widget.bind(events.FINISH, () => {
       this.isPaused$.next(true);
@@ -1144,6 +1188,7 @@ export class SoundCloudService {
         ?? sound.permalink_url
     });
     this.currentTrack$.next(track);
+    this.updatePlaybackDuration(track.duration);
     this.updateSavedMetadata(track);
     return track;
   }
@@ -1216,6 +1261,61 @@ export class SoundCloudService {
       type: 'Computer',
       volume_percent: this.volumePercent
     };
+  }
+
+  private applyWidgetVolume() {
+    const widget = this.widget;
+    if (!widget || typeof widget.setVolume !== 'function') {
+      return;
+    }
+
+    widget.setVolume(this.volumePercent);
+    setTimeout(() => {
+      if (this.widget === widget) {
+        widget.setVolume(this.volumePercent);
+      }
+    }, 250);
+  }
+
+  private normalizeVolumePercent(value: number | string): number {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return this.volumePercent;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(numericValue)));
+  }
+
+  private updatePlaybackPosition(value: number | string | null | undefined) {
+    const positionMs = this.normalizePlaybackPosition(value);
+    this.currentPositionMs = positionMs;
+    this.playbackPositionMs$.next(positionMs);
+  }
+
+  private updatePlaybackDuration(value: number | string | null | undefined) {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    const durationMs = Number.isFinite(numericValue)
+      ? Math.max(0, Math.round(numericValue))
+      : 0;
+
+    this.currentDurationMs = durationMs;
+    this.playbackDurationMs$.next(durationMs);
+
+    if (durationMs > 0 && this.currentPositionMs > durationMs) {
+      this.updatePlaybackPosition(durationMs);
+    }
+  }
+
+  private normalizePlaybackPosition(value: number | string | null | undefined): number {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return this.currentPositionMs;
+    }
+
+    const roundedValue = Math.max(0, Math.round(numericValue));
+    return this.currentDurationMs > 0
+      ? Math.min(this.currentDurationMs, roundedValue)
+      : roundedValue;
   }
 
   private createSavedItem(url: string, type?: 'track' | 'playlist'): SoundCloudSearchResult {

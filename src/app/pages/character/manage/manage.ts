@@ -232,6 +232,9 @@ export class Manage implements OnInit, OnDestroy {
 
     this.ddbService.getSurfaceInformation(char.ddbId.toString()).subscribe({
       next: (data) => {
+        const ddbPdfLink = data.ddbPdfLink || data.pdfLink ||
+          this.ddbService.getPdfLinkFromCharacterId(data.id, data.username);
+        const shouldUseDdbPdf = !char.pdfLink || char.pdfLink === char.ddbPdfLink;
         const updatedData: Partial<ICharacter> = {
           _id: char._id,
           name: data.name,
@@ -239,6 +242,8 @@ export class Manage implements OnInit, OnDestroy {
           ac: data.ac,
           ddbId: data.id,
           ddbUsername: data.username,
+          ddbPdfLink,
+          pdfLink: shouldUseDdbPdf ? ddbPdfLink : char.pdfLink,
           icon: data.icon,
           baseStats: data.baseStats,
           classes: data.classes.map((c: any) => ({

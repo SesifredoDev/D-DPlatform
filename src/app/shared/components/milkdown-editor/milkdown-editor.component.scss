@@ -24,25 +24,26 @@
   .milkdown-crepe {
     /* Override Crepe CSS variables for dark theme */
     --crepe-color-background: transparent;
-    --crepe-color-on-background: #dbdee1;
-    --crepe-color-primary: #00a8fc;
-    --crepe-color-surface: #2b2d31;
-    --crepe-color-outline: #1e1f22;
-    --crepe-color-on-surface: #dbdee1;
-    --crepe-color-on-surface-variant: #b5bac1;
+    --crepe-color-on-background: var(--on-background, #dbdee1);
+    --crepe-color-primary: var(--primary, #00a8fc);
+    --crepe-color-surface: var(--surface, #2b2d31);
+    --crepe-color-outline: var(--outline, #1e1f22);
+    --crepe-color-on-surface: var(--on-background, #dbdee1);
+    --crepe-color-on-surface-variant: var(--on-surface-variant, #b5bac1);
 
     background: transparent;
-    color: #dbdee1;
+    color: var(--on-background, #dbdee1);
     box-shadow: none;
     max-width: none;
     font-size: 16px;
     line-height: 1.6;
 
-    .editor {
+    .editor,
+    .ProseMirror {
       background: transparent !important;
-      color: #dbdee1;
+      color: var(--on-background, #dbdee1);
       padding: 0;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: var(--font-family-main);
       outline: none;
 
       h1 { font-size: 2.25rem; margin-top: 2rem; margin-bottom: 1rem; border-bottom: 1px solid var(--obsidian-border-light); padding-bottom: 0.3rem; }
@@ -52,8 +53,8 @@
       p { margin-bottom: 1.2rem; }
 
       blockquote {
-        border-left: 3px solid var(--obsidian-accent);
-        background: rgba(88, 101, 242, 0.05);
+        border-left: 3px solid var(--primary, var(--obsidian-accent));
+        background: rgba(var(--primary-rgb, 114, 137, 218), 0.08);
         padding: 0.8rem 1.2rem;
         margin: 1.5rem 0;
         color: var(--obsidian-text-muted);
@@ -69,17 +70,424 @@
       }
 
       pre {
-        background: #1e1f22 !important;
+        background: rgba(0, 0, 0, 0.24) !important;
         border-radius: 8px;
         padding: 1rem;
         border: 1px solid var(--obsidian-border);
+      }
+
+      .dnd-statsheet {
+        width: min(1120px, 100%);
+        box-sizing: border-box;
+        margin: 1.25rem 0 1.75rem;
+        padding: 28px 28px 24px;
+        border: 2px solid #1f1710;
+        border-top: 8px solid #8a6a2a;
+        border-bottom: 8px solid #8a6a2a;
+        border-radius: 0;
+        background:
+          repeating-linear-gradient(98deg, rgba(100, 70, 20, 0.026) 0 1px, transparent 1px 6px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0) 42%),
+          linear-gradient(180deg, #fff8dd 0%, #f6e7b5 47%, #fff5d1 100%);
+        color: #160f08;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+          inset 0 0 34px rgba(111, 69, 12, 0.12),
+          0 12px 30px rgba(0, 0, 0, 0.24);
+        font-family: Georgia, 'Times New Roman', serif;
+        line-height: 1.35;
+        position: relative;
+        overflow: hidden;
+
+        &::before,
+        &::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          right: 0;
+          height: 1px;
+          pointer-events: none;
+        }
+
+        &::before {
+          top: 3px;
+          background: rgba(255, 255, 255, 0.55);
+        }
+
+        &::after {
+          bottom: 3px;
+          background: rgba(255, 255, 255, 0.42);
+        }
+
+        dl,
+        dt,
+        dd,
+        h3,
+        h4,
+        p {
+          margin: 0;
+        }
+
+        input,
+        textarea {
+          width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          border: 0;
+          border-bottom: 1px solid rgba(138, 33, 9, 0);
+          border-radius: 0;
+          background: transparent;
+          color: #160f08 !important;
+          -webkit-text-fill-color: #160f08;
+          font: inherit;
+          letter-spacing: 0;
+          outline: none;
+          caret-color: #8a2109;
+          transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+
+          &::placeholder {
+            color: rgba(122, 38, 14, 0.42);
+            -webkit-text-fill-color: rgba(122, 38, 14, 0.42);
+          }
+
+          &:focus {
+            border-bottom-color: rgba(130, 35, 16, 0.62);
+            background: rgba(255, 255, 255, 0.36);
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.28);
+          }
+        }
+
+        textarea {
+          display: block;
+          min-height: 2rem;
+          overflow: hidden;
+          resize: none;
+        }
+
+        button {
+          font-family: var(--font-family-main);
+        }
+      }
+
+      .dnd-statsheet--builder.ProseMirror-selectednode {
+        outline: 2px solid rgba(var(--primary-rgb, 114, 137, 218), 0.42);
+        outline-offset: 3px;
+      }
+
+      .dnd-statsheet__grid {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.94fr) minmax(340px, 1fr);
+        gap: 38px;
+      }
+
+      .dnd-statsheet__left,
+      .dnd-statsheet__right {
+        min-width: 0;
+      }
+
+      .dnd-statsheet__right {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .dnd-statsheet__name {
+        display: block;
+        min-height: 2.45rem;
+        padding: 0;
+        color: #8b1f07 !important;
+        font-size: 2.42rem !important;
+        font-weight: 700 !important;
+        line-height: 1 !important;
+        font-variant: small-caps;
+        text-transform: uppercase;
+      }
+
+      .dnd-statsheet__meta {
+        display: block;
+        min-height: 1.45rem;
+        margin-top: 4px;
+        padding: 0;
+        color: #15110d !important;
+        font-size: 1.08rem !important;
+        font-style: italic !important;
+        line-height: 1.25 !important;
+      }
+
+      .dnd-statsheet__rule {
+        height: 6px;
+        margin: 18px 0 15px;
+        border-radius: 0 999px 999px 0;
+        background: linear-gradient(90deg, #a72517 0%, #a72517 30%, rgba(167, 37, 23, 0.02) 100%);
+      }
+
+      .dnd-statsheet__basics {
+        display: grid;
+        gap: 7px;
+        color: #8b1f07;
+        font-size: 1.04rem;
+        line-height: 1.24;
+
+        div {
+          display: grid;
+          grid-template-columns: max-content minmax(0, 1fr);
+          gap: 6px;
+          align-items: baseline;
+        }
+
+        dt {
+          font-weight: 700;
+        }
+
+        dd {
+          color: #2d170f;
+
+          input {
+            padding: 0 1px;
+            color: #2d170f !important;
+            -webkit-text-fill-color: #2d170f;
+          }
+        }
+      }
+
+      .dnd-statsheet__abilities {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 6px;
+        color: #8b1f07;
+        text-align: center;
+        border-top: 1px solid rgba(138, 33, 9, 0.14);
+        border-bottom: 1px solid rgba(138, 33, 9, 0.14);
+        padding: 6px 0;
+
+        label,
+        div {
+          min-width: 0;
+          padding: 2px 1px;
+        }
+
+        span,
+        input,
+        strong,
+        small {
+          display: block;
+        }
+
+        span {
+          font-size: 1.03rem;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+
+        input {
+          margin-top: 5px;
+          padding: 0;
+          border-bottom-color: transparent;
+          color: #8b1f07 !important;
+          -webkit-text-fill-color: #8b1f07;
+          font-size: 1.04rem;
+          text-align: center;
+        }
+
+        strong {
+          margin-top: 4px;
+          color: #8a2109;
+          font-size: 1.02rem;
+          font-weight: 400;
+          line-height: 1.2;
+        }
+
+        small {
+          color: #8b1f07;
+          font-size: 0.9rem;
+          line-height: 1.1;
+        }
+      }
+
+      .dnd-statsheet__attribute-section {
+        display: grid;
+        gap: 10px;
+      }
+
+      .dnd-statsheet__attributes {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        column-gap: 18px;
+        color: #8b1f07;
+        font-size: 1.04rem;
+        line-height: 1.22;
+      }
+
+      .dnd-statsheet__attribute-row {
+        display: grid;
+        grid-template-columns: minmax(92px, max-content) minmax(0, 1fr) 24px;
+        gap: 6px;
+        align-items: baseline;
+
+        dt {
+          min-width: 0;
+
+          input {
+            padding: 0 1px;
+            color: #8b1f07 !important;
+            -webkit-text-fill-color: #8b1f07;
+            font-weight: 700;
+          }
+        }
+
+        dd {
+          min-width: 0;
+
+          input {
+            padding: 0 1px;
+            color: #8b1f07 !important;
+            -webkit-text-fill-color: #8b1f07;
+          }
+        }
+      }
+
+      .dnd-statsheet__attribute-row--wide {
+        grid-column: 1 / -1;
+      }
+
+      .dnd-statsheet__sections {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+
+      .dnd-statsheet__section {
+        min-width: 0;
+      }
+
+      .dnd-statsheet__section-heading {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 28px;
+        gap: 8px;
+        align-items: end;
+        margin-bottom: 12px;
+        border-bottom: 1px solid rgba(168, 36, 22, 0.85);
+
+        input,
+        h4 {
+          padding: 0 0 3px;
+          color: #8b1f07 !important;
+          -webkit-text-fill-color: #8b1f07;
+          font-size: 1.95rem;
+          font-weight: 700;
+          line-height: 1.15;
+        }
+
+        h4 {
+          min-width: 0;
+        }
+      }
+
+      .dnd-statsheet__section--pinned .dnd-statsheet__section-heading {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .dnd-statsheet__entry {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 24px;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .dnd-statsheet__entry-text {
+        display: grid;
+        grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
+        gap: 6px;
+        align-items: start;
+        color: #090604;
+        font-size: 1.04rem;
+        line-height: 1.48;
+
+        input {
+          width: max-content;
+          max-width: 180px;
+          padding: 0 2px 0 0;
+          color: #090604 !important;
+          -webkit-text-fill-color: #090604;
+          font-style: italic;
+          font-weight: 700;
+          line-height: 1.48;
+        }
+
+        textarea {
+          color: #090604 !important;
+          -webkit-text-fill-color: #090604;
+          font-size: 1.04rem;
+          line-height: 1.48;
+          overflow-wrap: anywhere;
+        }
+
+        strong {
+          color: #090604;
+          font-style: italic;
+          font-weight: 700;
+        }
+      }
+
+      .dnd-statsheet__add-button,
+      .dnd-statsheet__icon-button {
+        border: 1px solid rgba(138, 33, 9, 0.22);
+        background: rgba(255, 255, 255, 0.18);
+        color: #8b1f07;
+        cursor: pointer;
+        transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      }
+
+      .dnd-statsheet__add-button {
+        width: max-content;
+        max-width: 100%;
+        margin-top: 2px;
+        padding: 4px 9px;
+        border-radius: 3px;
+        font-size: 0.74rem;
+        font-weight: 600;
+        opacity: 0.46;
+      }
+
+      .dnd-statsheet__icon-button {
+        width: 22px;
+        height: 22px;
+        display: inline-grid;
+        place-items: center;
+        padding: 0;
+        border-radius: 50%;
+        opacity: 0;
+
+        .material-icons {
+          width: 16px;
+          height: 16px;
+          font-size: 16px;
+          line-height: 16px;
+        }
+      }
+
+      .dnd-statsheet:hover .dnd-statsheet__icon-button,
+      .dnd-statsheet:focus-within .dnd-statsheet__icon-button,
+      .dnd-statsheet__icon-button:focus,
+      .dnd-statsheet__add-button:hover,
+      .dnd-statsheet__add-button:focus {
+        opacity: 1;
+      }
+
+      .dnd-statsheet__add-button:hover,
+      .dnd-statsheet__add-button:focus,
+      .dnd-statsheet__icon-button:hover,
+      .dnd-statsheet__icon-button:focus {
+        border-color: rgba(138, 33, 9, 0.45);
+        background: rgba(255, 255, 255, 0.52);
       }
     }
   }
 
   // Wikilink styling
   .wikilink {
-    color: var(--obsidian-accent);
+    color: var(--primary, var(--obsidian-accent));
     cursor: pointer;
     text-decoration: none;
     border-bottom: 1px solid transparent;
@@ -90,11 +498,75 @@
     }
   }
 
+  .dnd-statsheet {
+    color: #160f08 !important;
+    -webkit-text-fill-color: #160f08;
+
+    input,
+    textarea {
+      color: #160f08 !important;
+      -webkit-text-fill-color: #160f08 !important;
+      text-shadow: none !important;
+    }
+
+    input::selection,
+    textarea::selection {
+      color: #fff8dd !important;
+      -webkit-text-fill-color: #fff8dd !important;
+      background: #8b1f07;
+    }
+  }
+
+  .dnd-statsheet__name,
+  .dnd-statsheet__basics,
+  .dnd-statsheet__attributes,
+  .dnd-statsheet__abilities,
+  .dnd-statsheet__section-heading input,
+  .dnd-statsheet__section-heading h4 {
+    color: #8b1f07 !important;
+    -webkit-text-fill-color: #8b1f07 !important;
+  }
+
+  .dnd-statsheet__meta,
+  .dnd-statsheet__entry-text,
+  .dnd-statsheet__entry-text input,
+  .dnd-statsheet__entry-text textarea {
+    color: #090604 !important;
+    -webkit-text-fill-color: #090604 !important;
+  }
+
   /* Clean mobile adjustments */
   @media (max-width: 480px) {
     padding: 0.5rem 1rem 5rem;
-    .milkdown-crepe .editor {
+    .milkdown-crepe .editor,
+    .milkdown-crepe .ProseMirror {
       font-size: 15px;
+
+      .dnd-statsheet {
+        padding: 14px;
+      }
+
+      .dnd-statsheet__grid {
+        grid-template-columns: 1fr;
+        gap: 18px;
+      }
+
+      .dnd-statsheet__name {
+        font-size: 1.8rem !important;
+      }
+
+      .dnd-statsheet__abilities {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .dnd-statsheet__attributes {
+        grid-template-columns: 1fr;
+      }
+
+      .dnd-statsheet__entry-text {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
     }
   }
 }

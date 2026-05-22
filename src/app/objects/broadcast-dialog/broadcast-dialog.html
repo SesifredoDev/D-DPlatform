@@ -144,6 +144,56 @@
            </div>
         </div>
       </mat-tab>
+
+      <mat-tab label="Notes" *ngIf="canUseBroadcastNotes">
+        <div class="section notes-section">
+          <div class="notes-status-row">
+            <div>
+              <strong>{{ notesVaultName || 'Obsidian vault' }}</strong>
+              <span>{{ notesPermissionGranted ? 'Ready' : 'Vault access needed' }}</span>
+            </div>
+            <button
+              mat-stroked-button
+              type="button"
+              [disabled]="notesLoading || uploading"
+              (click)="attachBroadcastNotesVault()">
+              <mat-icon>folder_open</mat-icon>
+              <span>{{ notesVaultName ? 'Change Vault' : 'Set Vault Folder' }}</span>
+            </button>
+          </div>
+
+          <div class="notes-error" *ngIf="notesError">
+            <mat-icon>error</mat-icon>
+            <span>{{ notesError }}</span>
+          </div>
+
+          <mat-radio-group
+            class="notes-action-group"
+            [ngModel]="notesAction"
+            (ngModelChange)="onNotesActionChange($event)">
+            <label class="note-action-card" [class.disabled]="!currentSessionNotePath">
+              <mat-radio-button
+                value="current"
+                [disabled]="!currentSessionNotePath || uploading">
+                Add to current note
+              </mat-radio-button>
+              <p>{{ currentSessionNotePath || 'Open or select a session note in the call first.' }}</p>
+            </label>
+
+            <label class="note-action-card">
+              <mat-radio-button value="new" [disabled]="uploading">
+                Create new note
+              </mat-radio-button>
+              <input
+                type="text"
+                [(ngModel)]="newBroadcastNotePath"
+                [disabled]="notesAction !== 'new' || uploading"
+                placeholder="Broadcasts/Broadcast 2026-05-22 16-00.md"
+                aria-label="New broadcast note path">
+            </label>
+          </mat-radio-group>
+        </div>
+      </mat-tab>
     </mat-tab-group>
 
   </section>

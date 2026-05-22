@@ -23,6 +23,12 @@ export class dndbeyond {
     return `https://www.dndbeyond.com/characters/${id}`;
   }
 
+  getPdfLinkFromCharacterId(id: string | number, username: string | null | undefined): string | null {
+    if (!id || !username) return null;
+
+    return `https://www.dndbeyond.com/sheet-pdfs/${encodeURIComponent(username)}_${id}.pdf`;
+  }
+
   getSurfaceInformation(query: string): Observable<any> {
     const encodedQuery = encodeURIComponent(query);
     return this.http.get<any>(`${this.baseUrl}/${encodedQuery}`);

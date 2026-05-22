@@ -19,6 +19,7 @@ export interface ICharacter {
   servers: string[];
   ddbId?: number | null;
   ddbUsername?: string | null;
+  ddbPdfLink?: string | null;
   pdfLink?: string | null;
   name: string;
   race?: string;

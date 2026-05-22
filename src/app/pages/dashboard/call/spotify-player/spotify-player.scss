@@ -467,10 +467,12 @@
   }
 
   .controls-center {
+    flex: 1.4;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
+    gap: 8px;
+    min-width: 180px;
 
     .playback-btns {
       display: flex;
@@ -480,6 +482,13 @@
       button {
         background: none; border: none; color: var(--spotify-text-muted); cursor: pointer; padding: 4px;
         &:hover { color: #fff; }
+        &:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+        }
+        &:disabled:hover {
+          color: var(--spotify-text-muted);
+        }
       }
 
       .play-btn {
@@ -494,6 +503,43 @@
         transition: transform 0.1s;
         &:hover { transform: scale(1.05); }
         &:active { transform: scale(0.95); }
+        &:disabled {
+          background: rgba(255, 255, 255, 0.22);
+          color: rgba(255, 255, 255, 0.55);
+          transform: none;
+        }
+      }
+    }
+
+    .playback-timeline {
+      width: min(360px, 100%);
+      display: grid;
+      grid-template-columns: 42px minmax(90px, 1fr) 42px;
+      align-items: center;
+      gap: 8px;
+      color: var(--spotify-text-muted);
+
+      span {
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 1;
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+
+      input {
+        width: 100%;
+        height: 4px;
+        accent-color: var(--spotify-green);
+        cursor: pointer;
+      }
+
+      &.disabled {
+        opacity: 0.45;
+
+        input {
+          cursor: not-allowed;
+        }
       }
     }
   }
@@ -514,6 +560,33 @@
     }
 
     @media (max-width: 350px) { display: none; }
+  }
+}
+
+@media (max-width: 620px) {
+  .playback-footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+
+    .current-track {
+      grid-column: 1;
+    }
+
+    .volume-right {
+      grid-column: 2;
+    }
+
+    .controls-center {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      width: 100%;
+      min-width: 0;
+
+      .playback-timeline {
+        width: 100%;
+      }
+    }
   }
 }
 

@@ -110,6 +110,23 @@ export class TabDragTransferService {
     return payload.sourceWindowId === this.windowId;
   }
 
+  isHandledStorageEvent(event: StorageEvent, tabId: string | null): boolean {
+    if (event.key !== TabDragTransferService.handledStorageKey || !event.newValue || !tabId) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(event.newValue) as Partial<TabDragHandledPayload>;
+      if (payload.tabId !== tabId || !payload.handledAt) {
+        return false;
+      }
+
+      return Date.now() - payload.handledAt <= TabDragTransferService.maxAgeMs;
+    } catch {
+      return false;
+    }
+  }
+
   clear() {
     if (this.cleanupTimer !== null) {
       window.clearTimeout(this.cleanupTimer);

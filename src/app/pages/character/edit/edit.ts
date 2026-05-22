@@ -41,6 +41,7 @@ export class Edit implements OnInit {
       race: [data.race, Validators.required],
       ac: [data.ac, [Validators.required, Validators.min(0)]],
       ddbId: [data.ddbId],
+      ddbPdfLink: [data.ddbPdfLink],
       iconUrl: [data.icon],
       strength: [data.baseStats?.strength || 10],
       dexterity: [data.baseStats?.dexterity || 10],
@@ -59,6 +60,34 @@ export class Edit implements OnInit {
   }
 
   get classArray() { return this.charForm.get('classes') as FormArray; }
+
+  get hasAssignedIcon(): boolean {
+    return !!this.selectedIcon || !!this.charForm.get('iconUrl')?.value;
+  }
+
+  get iconAssignmentLabel(): string {
+    if (this.selectedIcon) {
+      return this.formatFileLabel(this.selectedIcon);
+    }
+
+    return this.charForm.get('iconUrl')?.value ? 'Image attached' : 'No image attached';
+  }
+
+  get hasAssignedPdf(): boolean {
+    return !!this.selectedPdf || !!this.data.pdfLink || !!this.data.ddbPdfLink;
+  }
+
+  get pdfAssignmentLabel(): string {
+    if (this.selectedPdf) {
+      return this.formatFileLabel(this.selectedPdf);
+    }
+
+    if (this.data.pdfLink) {
+      return 'PDF attached';
+    }
+
+    return this.data.ddbPdfLink ? 'D&D Beyond PDF linked' : 'No PDF attached';
+  }
 
   addClass(className = '', subclassName = '', level = 1) {
     const classGroup = this.fb.group({
@@ -105,8 +134,9 @@ export class Edit implements OnInit {
       race: formVal.race,
       ac: formVal.ac,
       ddbId: formVal.ddbId,
+      ddbPdfLink: formVal.ddbPdfLink,
       icon: this.selectedIcon ? null : formVal.iconUrl,
-      pdfLink: this.selectedPdf ? null : this.data.pdfLink || null,
+      pdfLink: this.selectedPdf ? null : this.getCustomPdfLinkToPreserve(),
       baseStats: {
         strength: formVal.strength,
         dexterity: formVal.dexterity,
@@ -138,6 +168,32 @@ export class Edit implements OnInit {
         this.isSaving = false;
       }
     });
+  }
+
+  private formatFileLabel(file: File): string {
+    return file.name;
+  }
+
+  private getCustomPdfLinkToPreserve(): string | null {
+    const pdfLink = this.data.pdfLink || null;
+    const ddbPdfLink = this.data.ddbPdfLink || null;
+    if (!pdfLink) {
+      return null;
+    }
+
+    if (ddbPdfLink && this.normalizePdfLink(pdfLink) === this.normalizePdfLink(ddbPdfLink)) {
+      return null;
+    }
+
+    if (ddbPdfLink && /dndbeyond\.com\/sheet-pdfs\/.+\.pdf/i.test(pdfLink)) {
+      return null;
+    }
+
+    return pdfLink;
+  }
+
+  private normalizePdfLink(link: string): string {
+    return link.split('?')[0].replace(/\/+$/, '').toLowerCase();
   }
 
   close() { this.dialogRef.close(); }

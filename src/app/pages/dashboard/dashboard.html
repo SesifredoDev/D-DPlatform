@@ -58,7 +58,7 @@
       @for (tab of leftTabs; track tab.id) {
         <div [hidden]="!tab.active" class="full-height">
           @if (tab.type === 'call') {
-            <app-video-call [channelId]="tab.id" [character]="activeCharacter"
+            <app-video-call [channelId]="tab.id" [character]="activeCharacter" [isTabActive]="tab.active"
                             (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)" (playbackVtt)="onPlaybackVtt($event)"></app-video-call>
           } @else if (tab.type === 'text' || tab.type === 'whisper') {
             <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
@@ -70,12 +70,19 @@
                             [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"
                             [isPlaybackMode]="tab.data?.vttSessionMode === 'playback'"></app-vtt-canvas>
           } @else if (tab.type === 'spotify') {
-            <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
+            <app-spotify-player
+              [isCallActive]="true"
+              [isTab]="true"
+              [isServerOwner]="canControlSoundCloudPlayback"
+              [userName]="activeCharacter?.name || userInfo?.username || 'Unknown Player'">
+            </app-spotify-player>
           } @else if (tab.type === 'obsidian') {
             <app-obsidian-view
               [serverId]="tab.data.serverId"
               [openPath]="tab.data?.openPath ?? null"
-              [openRequestId]="tab.data?.openRequestId ?? null">
+              [openRequestId]="tab.data?.openRequestId ?? null"
+              [previewOnly]="tab.data?.previewOnly === true"
+              (previewTabRequested)="openObsidianPreviewTab($event, tab)">
             </app-obsidian-view>
           }
         </div>
@@ -131,7 +138,7 @@
         @for (tab of rightTabs; track tab.id) {
           <div [hidden]="!tab.active" class="full-height">
             @if (tab.type === 'call') {
-              <app-video-call [channelId]="tab.id" [character]="activeCharacter"
+              <app-video-call [channelId]="tab.id" [character]="activeCharacter" [isTabActive]="tab.active"
                               (hostVtt)="onHostVtt($event)" (joinVtt)="onJoinVtt($event)" (stopVtt)="onStopVtt($event)" (playbackVtt)="onPlaybackVtt($event)"></app-video-call>
             } @else if (tab.type === 'text' || tab.type === 'whisper') {
               <app-text-channel [channelId]="tab.id" [currentCharacterId]="activeCharacterID"></app-text-channel>
@@ -143,13 +150,20 @@
                               [isJoiningVttSession]="(tab.data?.vttSessionRoomId || tab.id) === vttJoinSessionId || tab.data?.vttSessionMode === 'join'"
                               [isPlaybackMode]="tab.data?.vttSessionMode === 'playback'"></app-vtt-canvas>
             } @else if (tab.type === 'spotify') {
-              <app-spotify-player [isCallActive]="true" [isTab]="true"></app-spotify-player>
+              <app-spotify-player
+                [isCallActive]="true"
+                [isTab]="true"
+                [isServerOwner]="canControlSoundCloudPlayback"
+                [userName]="activeCharacter?.name || userInfo?.username || 'Unknown Player'">
+              </app-spotify-player>
             } @else if (tab.type === 'obsidian') {
               <app-obsidian-view
-                [serverId]="tab.data.serverId"
-                [openPath]="tab.data?.openPath ?? null"
-                [openRequestId]="tab.data?.openRequestId ?? null">
-              </app-obsidian-view>
+              [serverId]="tab.data.serverId"
+              [openPath]="tab.data?.openPath ?? null"
+              [openRequestId]="tab.data?.openRequestId ?? null"
+              [previewOnly]="tab.data?.previewOnly === true"
+              (previewTabRequested)="openObsidianPreviewTab($event, tab)">
+            </app-obsidian-view>
             }
           </div>
         }

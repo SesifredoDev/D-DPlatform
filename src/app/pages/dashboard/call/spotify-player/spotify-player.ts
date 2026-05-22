@@ -375,19 +375,23 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   async togglePlay() {
+    if (!this.canControlPlayback) return;
     await this.spotify.togglePlay();
   }
 
   async toggleShuffle() {
+    if (!this.canControlPlayback) return;
     const currentState = this.spotify.shuffleState$.value;
     await this.spotify.toggleShuffle(!currentState);
   }
 
   async nextTrack() {
+    if (!this.canControlPlayback) return;
     await this.spotify.nextTrack();
   }
 
   async previousTrack() {
+    if (!this.canControlPlayback) return;
     await this.spotify.previousTrack();
   }
 
@@ -396,8 +400,29 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     this.showDevicePicker = false;
   }
 
-  async updateVolume(event: any) {
-    await this.spotify.setVolume(event.target.value);
+  async updateVolume(value: number | string) {
+    await this.spotify.setVolumePercent(value);
+  }
+
+  async seekPlayback(value: number | string) {
+    if (!this.canControlPlayback) return;
+    await this.spotify.seek(this.normalizePlaybackTime(value));
+  }
+
+  get canControlPlayback(): boolean {
+    return this.isServerOwner || !this.isCallActive;
+  }
+
+  get playbackControlTitle(): string {
+    return this.canControlPlayback ? '' : 'Only DMs can control playback';
+  }
+
+  formatPlaybackTime(value: number | string | null | undefined): string {
+    const totalSeconds = Math.floor(this.normalizePlaybackTime(value) / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }
 
   ngOnDestroy() {
@@ -484,5 +509,10 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   private isSoundCloudLink(value: string): boolean {
     return value.includes('soundcloud.com/') || value.startsWith('soundcloud:');
+  }
+
+  private normalizePlaybackTime(value: number | string | null | undefined): number {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numericValue) ? Math.max(0, Math.round(numericValue)) : 0;
   }
 }

@@ -27,6 +27,7 @@ import type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, P
 export type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
 @Injectable({ providedIn: 'root' })
 export class Video {
+  private static readonly overlayTextTopic = 'overlay-text';
   private static readonly vttSessionStateKey = 'video:vtt-session';
   private static readonly selectedVideoSourceStateKey = 'video:selected-video-source';
   private static readonly selectedAudioSourceStateKey = 'video:selected-audio-source';
@@ -109,9 +110,9 @@ export class Video {
   public spotifyRequest$ = this.soundCloudRequest$;
   public themeSync$ = new Subject<ThemeColors>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
-  public overlayImage$ = new Subject<string | null>();
-  public overlayText$ = new Subject<string | null>();
-  public temporaryAtmosphereBackground$ = new Subject<string | null>();
+  public overlayImage$ = new BehaviorSubject<string | null>(null);
+  public overlayText$ = new BehaviorSubject<string | null>(null);
+  public temporaryAtmosphereBackground$ = new BehaviorSubject<string | null>(null);
   public callKicked$ = new Subject<string>();
   public readonly deviceInfo$;
   public readonly companionDevices$ = new BehaviorSubject<CompanionDeviceOption[]>([]);
@@ -207,6 +208,12 @@ export class Video {
   }
 
   private setupRoomListeners() {
+    this.room.registerTextStreamHandler(Video.overlayTextTopic, reader => {
+      void reader.readAll()
+        .then(text => this.overlayText$.next(text))
+        .catch(error => console.error('Failed to read overlay text stream', error));
+    });
+
     this.room
       .on(RoomEvent.Reconnecting, () => {
         this.rebuildAllParticipantStreams();
@@ -712,11 +719,19 @@ export class Video {
     this.overlayImage$.next(url);
   }
 
-  broadcastOverlayText(text: string | null) {
-    if (this.room.state !== 'connected') return;
+  async broadcastOverlayText(text: string | null): Promise<boolean> {
+    if (this.room.state !== 'connected') return false;
+
+    if (text) {
+      await this.room.localParticipant.sendText(text, { topic: Video.overlayTextTopic });
+      this.overlayText$.next(text);
+      return true;
+    }
+
     const payload = new TextEncoder().encode(JSON.stringify({ type: 'overlay-text', text }));
-    this.room.localParticipant.publishData(payload, { reliable: true });
+    await this.room.localParticipant.publishData(payload, { reliable: true });
     this.overlayText$.next(text);
+    return true;
   }
 
   broadcastTemporaryAtmosphereBackground(url: string | null) {
@@ -988,6 +1003,10 @@ export class Video {
   }
 
   getLocalStream() { return this.localStream; }
+
+  isCallConnected(): boolean {
+    return this.room.state === 'connected';
+  }
 
   getCallRecordingParticipants(localStream: MediaStream | null = this.localStream): CallRecordingParticipant[] {
     const participants = this.remoteStreams$.value;

@@ -10,6 +10,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatRadioModule } from '@angular/material/radio';
 
 import { ServerService } from '../../shared/services/server/server';
 import { IChannel } from '../../shared/models/server/channel.model';
@@ -18,9 +19,13 @@ import { Video } from '../../shared/services/video/video';
 import { VttSync } from '../../shared/services/vttsync/vttsync';
 import { FileService } from '../../shared/services/file/file';
 import { UserService } from '../../shared/services/user/user';
+import { ObsidianVaultService } from '../../shared/services/ObsidianVault/obsidian-vault-service';
 import { DomSanitizer, SafeHtml, SafeUrl } from '@angular/platform-browser';
 import type { BroadcastData, BroadcastEmbeddedFile, UploadedBroadcastAsset, BroadcastProcessingContext } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
 export type { BroadcastData, BroadcastEmbeddedFile } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
+
+type BroadcastNoteAction = 'none' | 'current' | 'new';
+
 @Component({
   selector: 'app-broadcast-dialog',
   standalone: true,
@@ -35,7 +40,8 @@ export type { BroadcastData, BroadcastEmbeddedFile } from '../../shared/models/o
     MatProgressSpinnerModule,
     MatTabsModule,
     MatFormFieldModule,
-    MatInputModule
+    MatInputModule,
+    MatRadioModule
   ],
   templateUrl: './broadcast-dialog.html',
   styleUrls: ['./broadcast-dialog.scss']
@@ -72,6 +78,13 @@ export class BroadcastDialog implements OnInit {
 
   currentServerId: string | null = null;
   readonly isComposerMode: boolean;
+  notesAction: BroadcastNoteAction = 'none';
+  notesVaultName: string | null = null;
+  notesPermissionGranted: boolean = false;
+  notesLoading: boolean = false;
+  notesError: string = '';
+  currentSessionNotePath: string = '';
+  newBroadcastNotePath: string = '';
 
   constructor(
     @Inject(MAT_DIALOG_DATA) public data: BroadcastData,
@@ -82,6 +95,7 @@ export class BroadcastDialog implements OnInit {
     private vttSync: VttSync,
     private fileService: FileService,
     private userService: UserService,
+    private obsidianVaultService: ObsidianVaultService,
     private sanitizer: DomSanitizer
   ) {
     this.isComposerMode = !!data.composeMode;
@@ -124,6 +138,26 @@ export class BroadcastDialog implements OnInit {
     return this.hasImageContentForVtt && this.vttSync.canSetBroadcastBackground();
   }
 
+  get canAddToBroadcastNotes(): boolean {
+    if (!this.hasContent || !this.currentServerId) {
+      return false;
+    }
+
+    if (this.notesAction === 'current') {
+      return !!this.currentSessionNotePath;
+    }
+
+    if (this.notesAction === 'new') {
+      return !!this.buildBroadcastNotePath(this.newBroadcastNotePath);
+    }
+
+    return false;
+  }
+
+  get canUseBroadcastNotes(): boolean {
+    return !!this.currentServerId;
+  }
+
   ngOnInit() {
     const currentServer = this.serverService.getCurrentServer();
     if (currentServer) {
@@ -135,8 +169,11 @@ export class BroadcastDialog implements OnInit {
       });
     }
 
-    this.isCallActive = !!this.videoService.currentChannelId;
+    this.isCallActive = this.videoService.isCallConnected();
     this.isVttActive = this.vttSync.isConnected;
+    this.currentSessionNotePath = this.getRememberedSessionNotePath();
+    this.newBroadcastNotePath = this.getDefaultBroadcastNotePath();
+    void this.refreshBroadcastNotesVaultState();
   }
 
   canBroadcast() {
@@ -146,7 +183,13 @@ export class BroadcastDialog implements OnInit {
     const canSetVttBackground = this.canSetVttBackground && this.setVttBackground;
     const canBroadcastToTextChannels = this.hasContent && this.selectedChannels.length > 0;
     const canBroadcastToWhispers = this.hasContent && this.selectedMembers.length > 0;
-    return canBroadcastToCall || canBroadcastToVtt || canSetTemporaryAtmosphere || canSetVttBackground || canBroadcastToTextChannels || canBroadcastToWhispers;
+    return canBroadcastToCall ||
+      canBroadcastToVtt ||
+      canSetTemporaryAtmosphere ||
+      canSetVttBackground ||
+      canBroadcastToTextChannels ||
+      canBroadcastToWhispers ||
+      this.canAddToBroadcastNotes;
   }
 
   onDraftTextChange(value: string) {
@@ -155,6 +198,18 @@ export class BroadcastDialog implements OnInit {
     this.data.text = hasDraftText ? value : undefined;
     this.textPreview = hasDraftText ? value : null;
     this.hasText = hasDraftText;
+  }
+
+  onNotesActionChange(value: BroadcastNoteAction) {
+    this.notesAction = value;
+    this.notesError = '';
+    if (value === 'new' && !this.newBroadcastNotePath.trim()) {
+      this.newBroadcastNotePath = this.getDefaultBroadcastNotePath();
+    }
+  }
+
+  async attachBroadcastNotesVault() {
+    await this.ensureBroadcastNotesVault(true);
   }
 
   onComposerFileSelected(event: Event) {
@@ -234,13 +289,17 @@ export class BroadcastDialog implements OnInit {
         console.log('[BroadcastDialog] Processing standalone image URL content', this.data.imageUrl);
         const asset = await this.processImageReference(this.data.imageUrl, this.data.filename || 'image', context);
         context.standaloneImageForCallVtt = asset.url;
-        contentResult = `![${asset.filename}](${asset.url})`;
+        contentResult = this.formatMarkdownImage(asset.filename, asset.url);
       }
 
       finalMessageContent += contentResult;
       finalMessageContent = finalMessageContent.replace(/\n{3,}/g, '\n\n').trim();
       context.textForCall = contentResult;
       console.log('[BroadcastDialog] Final content compiled', { finalMessageContent, contextAttachments: context.attachments.length });
+
+      if (this.canAddToBroadcastNotes) {
+        await this.writeBroadcastToNotes(finalMessageContent);
+      }
 
       // 4. Send to Text Channels
       if (this.selectedChannels.length > 0) {
@@ -266,7 +325,7 @@ export class BroadcastDialog implements OnInit {
       if (this.broadcastToCall && this.isCallActive) {
         if (context.textForCall) {
           console.log('[BroadcastDialog] Broadcasting overlay text');
-          this.videoService.broadcastOverlayText(context.textForCall);
+          await this.videoService.broadcastOverlayText(context.textForCall);
         } else if (context.standaloneImageForCallVtt) {
           console.log('[BroadcastDialog] Broadcasting overlay image');
           this.videoService.broadcastOverlayImage(context.standaloneImageForCallVtt);
@@ -304,6 +363,9 @@ export class BroadcastDialog implements OnInit {
 
       this.dialogRef.close();
     } catch (error) {
+      if (this.notesAction !== 'none' && !this.notesError) {
+        this.notesError = 'Unable to add broadcast to notes.';
+      }
       console.error('[BroadcastDialog] Broadcast failed', error);
     } finally {
       this.uploading = false;
@@ -364,7 +426,7 @@ export class BroadcastDialog implements OnInit {
       result += text.slice(lastIndex, match.index);
       const [fullMatch, alt, url] = match;
       const asset = await this.processImageReference(url, alt, context);
-      result += `![${asset.filename}](${asset.url})`;
+      result += this.formatMarkdownImage(asset.filename, asset.url);
       lastIndex = (match.index || 0) + fullMatch.length;
     }
 
@@ -384,7 +446,7 @@ export class BroadcastDialog implements OnInit {
       const alt = img.getAttribute('alt') || 'image';
 
       const asset = await this.processImageReference(src, alt, context);
-      img.replaceWith(doc.createTextNode(`![${asset.filename}](${asset.url})`));
+        img.replaceWith(doc.createTextNode(this.formatMarkdownImage(asset.filename, asset.url)));
     }
 
     // Convert common HTML elements to Markdown
@@ -452,6 +514,252 @@ export class BroadcastDialog implements OnInit {
     return `image-${context.uploadedBlobImageIndex}`;
   }
 
+  private async writeBroadcastToNotes(content: string) {
+    const serverId = this.currentServerId;
+    if (!serverId) {
+      this.notesError = 'Open a server before adding broadcasts to notes.';
+      throw new Error(this.notesError);
+    }
+
+    const hasVault = await this.ensureBroadcastNotesVault();
+    if (!hasVault) {
+      throw new Error(this.notesError || 'Vault access is required.');
+    }
+
+    const noteContent = this.buildBroadcastNoteContent(content);
+    if (this.notesAction === 'current') {
+      if (!this.currentSessionNotePath) {
+        this.notesError = 'Select a current session note first.';
+        throw new Error(this.notesError);
+      }
+
+      const current = await this.obsidianVaultService.readFile(serverId, this.currentSessionNotePath);
+      const next = this.appendMarkdownSection(current, noteContent);
+      await this.obsidianVaultService.writeFile(serverId, this.currentSessionNotePath, next);
+      this.notifySessionNoteUpdated(this.currentSessionNotePath, { appendedContent: noteContent });
+      return;
+    }
+
+    const path = this.buildBroadcastNotePath(this.newBroadcastNotePath);
+    if (!path) {
+      this.notesError = 'Enter a note name.';
+      throw new Error(this.notesError);
+    }
+
+    const title = this.getBroadcastNoteTitle(path);
+    const fullContent = [
+      '---',
+      `title: ${title}`,
+      'tags:',
+      '  - broadcast',
+      `date: ${this.getBroadcastNoteDate()}`,
+      '---',
+      '',
+      `# ${title}`,
+      '',
+      noteContent.trim(),
+      ''
+    ].join('\n');
+
+    await this.obsidianVaultService.writeFile(serverId, path, fullContent);
+    this.rememberSessionNotePath(path);
+    this.currentSessionNotePath = path;
+    this.notifySessionNoteUpdated(path, { content: fullContent, select: true });
+  }
+
+  private async refreshBroadcastNotesVaultState() {
+    if (!this.currentServerId) {
+      return;
+    }
+
+    try {
+      const handle = await this.obsidianVaultService.getVaultHandle(this.currentServerId);
+      this.notesVaultName = handle?.name || null;
+      this.notesPermissionGranted = !!handle && await this.obsidianVaultService.hasPermission(this.currentServerId);
+    } catch {
+      this.notesVaultName = null;
+      this.notesPermissionGranted = false;
+    }
+  }
+
+  private async ensureBroadcastNotesVault(forceAttach: boolean = false): Promise<boolean> {
+    if (!this.currentServerId) {
+      this.notesError = 'Open a server before adding broadcasts to notes.';
+      return false;
+    }
+
+    this.notesLoading = true;
+    this.notesError = '';
+
+    try {
+      let handle = await this.obsidianVaultService.getVaultHandle(this.currentServerId);
+      if (!handle || forceAttach) {
+        if (!this.obsidianVaultService.isFileSystemApiSupported()) {
+          this.notesError = 'Local vault access needs a Chromium browser.';
+          return false;
+        }
+
+        this.notesVaultName = await this.obsidianVaultService.attachVaultToServer(this.currentServerId);
+        handle = await this.obsidianVaultService.getVaultHandle(this.currentServerId);
+      }
+
+      if (!handle) {
+        this.notesError = 'Attach a vault folder to add broadcasts to notes.';
+        return false;
+      }
+
+      this.notesVaultName = handle.name;
+      this.notesPermissionGranted = await this.obsidianVaultService.hasPermission(this.currentServerId);
+      if (!this.notesPermissionGranted) {
+        this.notesPermissionGranted = await this.obsidianVaultService.requestPermission(handle);
+      }
+
+      if (!this.notesPermissionGranted) {
+        this.notesError = 'Vault access is required for notes.';
+      }
+
+      return this.notesPermissionGranted;
+    } catch (error) {
+      this.notesError = 'Unable to set vault folder.';
+      console.error('[BroadcastDialog] Failed to prepare notes vault', error);
+      return false;
+    } finally {
+      this.notesLoading = false;
+    }
+  }
+
+  private buildBroadcastNoteContent(content: string): string {
+    const title = this.getBroadcastNoteTitle(this.data.filename || this.newBroadcastNotePath);
+    const lines = [
+      `## Broadcast - ${this.getBroadcastNoteDateTime()}`,
+      '',
+      `**Title:** ${title}`
+    ];
+
+    if (this.data.source) {
+      lines.push(`**Source:** ${this.data.source}`);
+    }
+
+    lines.push('', content || '_No text content._', '');
+    return lines.join('\n');
+  }
+
+  private appendMarkdownSection(current: string, section: string): string {
+    return `${current.trimEnd()}\n\n${section.trim()}\n`;
+  }
+
+  private buildBroadcastNotePath(value: string): string | null {
+    const normalized = value
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/[<>:"|?*\x00-\x1F]/g, '-');
+
+    if (!normalized) {
+      return null;
+    }
+
+    return /\.(md|markdown)$/i.test(normalized) ? normalized : `${normalized}.md`;
+  }
+
+  private getDefaultBroadcastNotePath(): string {
+    const base = this.safeNotePathPart(this.data.filename || this.firstContentLine() || 'Broadcast');
+    return `Broadcasts/${base} ${this.getBroadcastNoteDateTimeForPath()}.md`;
+  }
+
+  private getBroadcastNoteTitle(pathOrTitle: string): string {
+    const name = pathOrTitle.split('/').pop() || pathOrTitle || 'Broadcast';
+    return name.replace(/\.(md|markdown)$/i, '').trim() || 'Broadcast';
+  }
+
+  private firstContentLine(): string {
+    return (this.data.text || this.draftText || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean) || '';
+  }
+
+  private safeNotePathPart(value: string): string {
+    return value
+      .replace(/\.(md|markdown)$/i, '')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80) || 'Broadcast';
+  }
+
+  private getBroadcastSessionChannelId(): string {
+    return this.data.channelId || this.videoService.currentChannelId || '';
+  }
+
+  private getSessionNoteStorageKey(): string | null {
+    const channelId = this.getBroadcastSessionChannelId();
+    if (!this.currentServerId || !channelId) {
+      return null;
+    }
+
+    return `call-session-note:${this.currentServerId}:${channelId}`;
+  }
+
+  private getRememberedSessionNotePath(): string {
+    const key = this.getSessionNoteStorageKey();
+    if (!key) {
+      return '';
+    }
+
+    try {
+      return localStorage.getItem(key) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private rememberSessionNotePath(path: string) {
+    const key = this.getSessionNoteStorageKey();
+    if (!key) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(key, path);
+    } catch {
+      // Non-critical preference.
+    }
+  }
+
+  private notifySessionNoteUpdated(
+    path: string,
+    options: { appendedContent?: string; content?: string; select?: boolean } = {}
+  ) {
+    window.dispatchEvent(new CustomEvent('call-session-note-updated', {
+      detail: {
+        serverId: this.currentServerId,
+        channelId: this.getBroadcastSessionChannelId(),
+        path,
+        ...options
+      }
+    }));
+  }
+
+  private getBroadcastNoteDate(): string {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, '0');
+    const day = `${date.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private getBroadcastNoteDateTime(): string {
+    const date = new Date();
+    const hours = `${date.getHours()}`.padStart(2, '0');
+    const minutes = `${date.getMinutes()}`.padStart(2, '0');
+    return `${this.getBroadcastNoteDate()} ${hours}:${minutes}`;
+  }
+
+  private getBroadcastNoteDateTimeForPath(): string {
+    return this.getBroadcastNoteDateTime().replace(':', '-');
+  }
+
   private setFilePreview(file: File) {
     this.hasFile = true;
     this.selectedFilename = file.name;
@@ -474,8 +782,30 @@ export class BroadcastDialog implements OnInit {
 
   private formatUploadedAssetForMessage(asset: UploadedBroadcastAsset): string {
     return this.isImageContentType(asset.contentType)
-      ? `![${asset.filename}](${asset.url})`
+      ? this.formatMarkdownImage(asset.filename, asset.url)
       : `[${asset.filename}](${asset.url})`;
+  }
+
+  private formatMarkdownImage(alt: string, url: string): string {
+    const safeAlt = alt.replace(/[\[\]\r\n]/g, ' ').trim() || 'Image';
+    return `![${safeAlt}](${this.encodeMarkdownUrl(url)})`;
+  }
+
+  private encodeMarkdownUrl(url: string): string {
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    try {
+      return this.escapeMarkdownUrlDelimiters(new URL(trimmed, window.location.origin).toString());
+    } catch {
+      return this.escapeMarkdownUrlDelimiters(encodeURI(trimmed));
+    }
+  }
+
+  private escapeMarkdownUrlDelimiters(url: string): string {
+    return url.replace(/[()]/g, value => `%${value.charCodeAt(0).toString(16).toUpperCase()}`);
   }
 
   private isImageContentType(contentType: string | null | undefined): boolean {

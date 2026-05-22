@@ -60,7 +60,7 @@ export interface VttCharacterTokenPayload {
   ownerId: string | null;
 }
 
-export interface VttWindowCommand {
+export interface VttAddCharacterTokenCommand {
   type: 'add-character-token';
   requestId: string;
   sourceId: string;
@@ -71,8 +71,18 @@ export interface VttWindowCommand {
   y?: number;
 }
 
+export interface VttEndSessionCommand {
+  type: 'end-session';
+  requestId: string;
+  sourceId: string;
+  targetWindowLabel?: string | null;
+  roomId?: string | null;
+}
+
+export type VttWindowCommand = VttAddCharacterTokenCommand | VttEndSessionCommand;
+
 export interface VttWindowCommandResult {
-  type: 'add-character-token-result';
+  type: 'add-character-token-result' | 'end-session-result';
   requestId: string;
   sourceId: string;
   handled: boolean;
@@ -87,5 +97,6 @@ export interface VttWindowTarget {
   attachmentId: string;
   roomId: string;
   windowLabel: string;
+  isHosting: boolean;
   updatedAt: number;
 }
