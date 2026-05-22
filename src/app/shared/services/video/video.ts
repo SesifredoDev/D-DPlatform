@@ -655,11 +655,12 @@ export class Video {
 
   sendSoundCloudCommand(command: string, data: any, source: string = 'manual') {
     if (this.room.state !== 'connected') return;
+    const hostId = data?.hostId ?? this.currentParticipantMetadata?.userId;
     const payload = new TextEncoder().encode(JSON.stringify({
       type: 'soundcloud-sync',
       command,
       source,
-      data: { ...data, timestamp: Date.now() }
+      data: { ...data, hostId, timestamp: Date.now() }
     }));
     this.room.localParticipant.publishData(payload, { reliable: true });
   }

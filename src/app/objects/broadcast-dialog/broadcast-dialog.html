@@ -31,7 +31,7 @@
         type="file"
         hidden
         (change)="onComposerFileSelected($event)">
-      <mat-icon>{{ hasFile ? (selectedFileIsImage ? 'image' : 'attach_file') : 'upload_file' }}</mat-icon>
+      <mat-icon>{{ hasFile ? (selectedFileIsImage ? 'image' : (selectedFileIsAudio ? 'audiotrack' : 'attach_file')) : 'upload_file' }}</mat-icon>
       <div class="file-drop-copy">
         <strong>{{ selectedFilename || 'Add an attachment' }}</strong>
         <span>{{ selectedFilename ? selectedFileContentType : 'Optional image or document' }}</span>
@@ -57,7 +57,7 @@
     <ng-container *ngIf="hasFile || hasImageUrl">
       <img *ngIf="imagePreview && selectedFileIsImage" [src]="imagePreview" alt="Preview" class="image-preview">
       <div class="file-preview" *ngIf="hasFile && !selectedFileIsImage">
-        <mat-icon>description</mat-icon>
+        <mat-icon>{{ selectedFileIsAudio ? 'audiotrack' : 'description' }}</mat-icon>
         <div>
           <strong>{{ selectedFilename }}</strong>
           <span>{{ selectedFileContentType }}</span>
@@ -115,10 +115,10 @@
 
       <mat-tab label="Active Overlays" *ngIf="isCallActive || isVttActive">
         <div class="section">
-           <div class="overlay-option" *ngIf="isCallActive && hasCallOverlayContent">
+           <div class="overlay-option" *ngIf="isCallActive && hasCallBroadcastContent">
               <mat-checkbox [(ngModel)]="broadcastToCall">
-                <strong>Broadcast to Call Overlay</strong>
-                <p>Display this content on everyone's screen in the active video call.</p>
+                <strong>{{ callBroadcastTitle }}</strong>
+                <p>{{ callBroadcastDescription }}</p>
               </mat-checkbox>
            </div>
 

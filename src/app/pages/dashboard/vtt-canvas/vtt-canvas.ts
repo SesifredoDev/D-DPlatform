@@ -1,5 +1,5 @@
 import { Component, ElementRef, ViewChild, AfterViewInit, OnDestroy, Input, OnChanges, SimpleChanges, Output, EventEmitter, OnInit, Inject } from '@angular/core';
-import { DatePipe, NgForOf, NgIf, NgStyle, AsyncPipe, NgClass } from '@angular/common';
+import { DatePipe, NgForOf, NgIf, AsyncPipe } from '@angular/common';
 import { MAT_DIALOG_DATA, MatDialog, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { SaveMapDialog } from '../../../objects/save-map/save-map';
 import {VttSync, TurnOrderState, TurnOrderEntry, MapLibraryEntry, StartHostingOptions, GridSettings, SessionStatus} from '../../../shared/services/vttsync/vttsync';
@@ -80,7 +80,7 @@ export class VttHostTakeoverDialog {
   standalone: true,
   imports: [
     DatePipe,
-    NgForOf, NgIf, NgStyle, NgClass, AsyncPipe,
+    NgForOf, NgIf, AsyncPipe,
     MatIconButton, MatButton, MatIcon, MatMenuModule,
     FormsModule, MatFormFieldModule, MatInputModule,
     MatCheckboxModule, MatSelectModule, MatTooltipModule, MatSnackBarModule

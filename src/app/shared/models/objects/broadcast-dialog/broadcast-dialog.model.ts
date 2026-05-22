@@ -27,6 +27,7 @@ export interface UploadedBroadcastAsset {
 export interface BroadcastProcessingContext {
   standaloneImageForCallVtt?: string;
   embeddedImageForVtt?: string;
+  audioForCall?: UploadedBroadcastAsset;
   textForCall?: string;
   attachments: Attachment[];
   embeddedFileMap: Map<string, File>;

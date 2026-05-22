@@ -32,6 +32,9 @@ export class SoundCloudService {
   private widget: any = null;
   private widgetScriptPromise: Promise<void> | null = null;
   private currentWidgetUrl: string | null = null;
+  private nativeAudioElement: HTMLAudioElement | null = null;
+  private currentNativeAudioUrl: string | null = null;
+  private nativeAudioTrack: SoundCloudSearchResult | null = null;
   private volumePercent = SoundCloudService.defaultVolumePercent;
   private currentPositionMs = 0;
   private currentDurationMs = 0;
@@ -243,7 +246,13 @@ export class SoundCloudService {
     return this.pinnedItems$.value.some(p => p.uri === uri);
   }
 
-  async play(uri?: string, positionMs: number = 0, skipSync: boolean = false, contextUri?: string): Promise<any> {
+  async play(
+    uri?: string,
+    positionMs: number = 0,
+    skipSync: boolean = false,
+    contextUri?: string,
+    metadata?: Partial<SoundCloudSearchResult>
+  ): Promise<any> {
     const resolvedContextUri = this.resolvePlayableUrl(contextUri);
     const targetUrl = resolvedContextUri
       ?? this.resolvePlayableUrl(uri)
@@ -255,14 +264,12 @@ export class SoundCloudService {
       this.lastActionTime = Date.now();
     }
 
-    await this.loadWidgetSource(targetUrl, true);
-    if (positionMs > 0) {
-      await this.seek(positionMs, true);
-    }
+    const track = this.shouldUseNativeAudio(targetUrl)
+      ? await this.playNativeAudio(targetUrl, positionMs, metadata)
+      : await this.playWidgetAudio(targetUrl, positionMs);
 
     this.isPaused$.next(false);
     this.lastContextUri = resolvedContextUri ?? null;
-    const track = await this.syncCurrentSound(targetUrl);
 
     if (!skipSync) {
       this.syncAction$.next({
@@ -294,10 +301,15 @@ export class SoundCloudService {
   }
 
   async pause(skipSync: boolean = false) {
-    if (!this.widget) return null;
+    if (!this.widget && !this.nativeAudioElement) return null;
     if (!skipSync) this.lastActionTime = Date.now();
 
-    this.widget.pause();
+    if (this.isCurrentNativeAudio()) {
+      this.nativeAudioElement?.pause();
+    } else {
+      this.widget?.pause();
+    }
+
     this.isPaused$.next(true);
     const state = await this.getPlaybackState();
 
@@ -313,11 +325,15 @@ export class SoundCloudService {
   }
 
   async seek(positionMs: number, skipSync: boolean = false) {
-    if (!this.widget) return;
+    if (!this.widget && !this.nativeAudioElement) return;
     if (!skipSync) this.lastActionTime = Date.now();
 
     const nextPositionMs = this.normalizePlaybackPosition(positionMs);
-    this.widget.seekTo(nextPositionMs);
+    if (this.isCurrentNativeAudio()) {
+      this.seekNativeAudio(nextPositionMs);
+    } else {
+      this.widget?.seekTo(nextPositionMs);
+    }
     this.updatePlaybackPosition(nextPositionMs);
 
     if (!skipSync) {
@@ -339,7 +355,7 @@ export class SoundCloudService {
       const item = this.localQueue[this.queueIndex];
       await this.loadQueue();
       await this.play(item.uri, 0, true);
-    } else if (this.widget) {
+    } else if (!this.isCurrentNativeAudio() && this.widget) {
       this.widget.next();
       await this.delay(300);
       this.applyWidgetVolume();
@@ -364,7 +380,7 @@ export class SoundCloudService {
       const item = this.localQueue[this.queueIndex];
       await this.loadQueue();
       await this.play(item.uri, 0, true);
-    } else if (this.widget) {
+    } else if (!this.isCurrentNativeAudio() && this.widget) {
       this.widget.prev();
       await this.delay(300);
       this.applyWidgetVolume();
@@ -410,6 +426,7 @@ export class SoundCloudService {
     this.volumePercent$.next(this.volumePercent);
     this.devices$.next([this.getBrowserDevice()]);
     this.applyWidgetVolume();
+    this.applyNativeAudioVolume();
 
     if (!skipSync) {
       this.lastActionTime = Date.now();
@@ -438,8 +455,12 @@ export class SoundCloudService {
 
   async getPlaybackState() {
     const currentTrack = await this.syncCurrentSound().catch(() => this.currentTrack$.value);
-    const position = await this.getWidgetValue<number>('getPosition').catch(() => this.currentPositionMs);
-    const duration = await this.getWidgetValue<number>('getDuration').catch(() => currentTrack?.duration ?? this.currentDurationMs);
+    const position = this.isCurrentNativeAudio()
+      ? this.getNativeAudioPositionMs()
+      : await this.getWidgetValue<number>('getPosition').catch(() => this.currentPositionMs);
+    const duration = this.isCurrentNativeAudio()
+      ? this.getNativeAudioDurationMs()
+      : await this.getWidgetValue<number>('getDuration').catch(() => currentTrack?.duration ?? this.currentDurationMs);
     this.updatePlaybackPosition(position ?? this.currentPositionMs);
     this.updatePlaybackDuration(duration ?? currentTrack?.duration ?? this.currentDurationMs);
 
@@ -1045,8 +1066,149 @@ export class SoundCloudService {
 
   private resolvePlayableUrl(uri?: string | null): string | null {
     if (!uri) return null;
-    if (this.isWidgetPlayableUrl(uri)) return this.normalizeSoundCloudUrl(uri);
+    if (this.isWidgetPlayableUrl(uri)) {
+      return this.isSoundCloudUrl(uri)
+        ? this.normalizeSoundCloudUrl(uri)
+        : this.normalizeExternalUrl(uri);
+    }
     return this.findSavedItem(uri)?.uri ?? null;
+  }
+
+  private async playWidgetAudio(url: string, positionMs: number): Promise<any> {
+    this.pauseNativeAudioForSourceSwitch();
+    await this.loadWidgetSource(url, true);
+    if (positionMs > 0) {
+      await this.seek(positionMs, true);
+    }
+
+    return this.syncCurrentSound(url);
+  }
+
+  private async playNativeAudio(
+    url: string,
+    positionMs: number,
+    metadata?: Partial<SoundCloudSearchResult>
+  ): Promise<SoundCloudSearchResult> {
+    const audio = this.ensureNativeAudioElement();
+    this.pauseWidgetForSourceSwitch();
+
+    if (this.currentNativeAudioUrl !== url) {
+      audio.pause();
+      audio.src = url;
+      audio.preload = 'auto';
+      audio.load();
+      this.currentNativeAudioUrl = url;
+      this.currentWidgetUrl = url;
+      this.updatePlaybackPosition(0);
+      this.updatePlaybackDuration(0);
+    }
+
+    this.nativeAudioTrack = this.createNativeAudioTrack(url, metadata);
+    this.currentTrack$.next(this.nativeAudioTrack);
+    this.applyNativeAudioVolume();
+
+    if (positionMs > 0) {
+      this.seekNativeAudioWhenReady(positionMs);
+    }
+
+    await audio.play();
+    this.isPaused$.next(false);
+    return this.nativeAudioTrack;
+  }
+
+  private ensureNativeAudioElement(): HTMLAudioElement {
+    if (this.nativeAudioElement) {
+      return this.nativeAudioElement;
+    }
+
+    const audio = document.createElement('audio');
+    audio.id = 'soundcloud-native-audio';
+    audio.preload = 'auto';
+    audio.style.position = 'fixed';
+    audio.style.left = '-9999px';
+    audio.style.top = '-9999px';
+    audio.style.width = '1px';
+    audio.style.height = '1px';
+
+    audio.addEventListener('loadedmetadata', () => {
+      this.updatePlaybackDuration(this.getNativeAudioDurationMs());
+    });
+    audio.addEventListener('timeupdate', () => {
+      this.updatePlaybackPosition(this.getNativeAudioPositionMs());
+    });
+    audio.addEventListener('play', () => {
+      this.isPaused$.next(false);
+      this.error$.next(null);
+    });
+    audio.addEventListener('pause', () => {
+      this.isPaused$.next(true);
+    });
+    audio.addEventListener('ended', () => {
+      this.isPaused$.next(true);
+      this.updatePlaybackPosition(this.currentDurationMs);
+      void this.nextTrack(true);
+    });
+    audio.addEventListener('error', () => {
+      this.isPaused$.next(true);
+      this.error$.next('Unable to play that audio file.');
+    });
+
+    document.body.appendChild(audio);
+    this.nativeAudioElement = audio;
+    this.applyNativeAudioVolume();
+    return audio;
+  }
+
+  private pauseNativeAudioForSourceSwitch() {
+    if (this.nativeAudioElement) {
+      this.nativeAudioElement.pause();
+    }
+    this.currentNativeAudioUrl = null;
+    this.nativeAudioTrack = null;
+  }
+
+  private pauseWidgetForSourceSwitch() {
+    if (this.widget && !this.isCurrentNativeAudio()) {
+      this.widget.pause();
+    }
+  }
+
+  private isCurrentNativeAudio(): boolean {
+    return !!this.currentNativeAudioUrl && this.currentWidgetUrl === this.currentNativeAudioUrl;
+  }
+
+  private seekNativeAudio(positionMs: number) {
+    const audio = this.nativeAudioElement;
+    if (!audio) return;
+
+    try {
+      audio.currentTime = positionMs / 1000;
+      this.updatePlaybackPosition(positionMs);
+    } catch {
+      // Some browsers reject seeking before metadata is ready.
+    }
+  }
+
+  private seekNativeAudioWhenReady(positionMs: number) {
+    const audio = this.nativeAudioElement;
+    if (!audio) return;
+
+    if (audio.readyState >= 1) {
+      this.seekNativeAudio(positionMs);
+      return;
+    }
+
+    audio.addEventListener('loadedmetadata', () => this.seekNativeAudio(positionMs), { once: true });
+  }
+
+  private getNativeAudioPositionMs(): number {
+    const position = this.nativeAudioElement?.currentTime ?? NaN;
+    return Number.isFinite(position) ? Math.max(0, Math.round(position * 1000)) : this.currentPositionMs;
+  }
+
+  private getNativeAudioDurationMs(): number {
+    const duration = this.nativeAudioElement?.duration ?? NaN;
+    return Number.isFinite(duration) ? Math.max(0, Math.round(duration * 1000)) : this.currentDurationMs;
   }
 
   private async loadWidgetScript(): Promise<void> {
@@ -1173,6 +1335,18 @@ export class SoundCloudService {
   }
 
   private async syncCurrentSound(fallbackUrl?: string | null): Promise<any> {
+    if (this.isCurrentNativeAudio()) {
+      const track = this.nativeAudioTrack ?? this.createNativeAudioTrack(
+        this.currentNativeAudioUrl || fallbackUrl || this.currentWidgetUrl || ''
+      );
+      this.nativeAudioTrack = {
+        ...track,
+        duration: this.getNativeAudioDurationMs() || track.duration
+      };
+      this.currentTrack$.next(this.nativeAudioTrack);
+      return this.nativeAudioTrack;
+    }
+
     if (!this.widget) {
       return this.currentTrack$.value;
     }
@@ -1242,6 +1416,7 @@ export class SoundCloudService {
       name: track?.name ?? track?.title,
       artist: this.getTrackArtist(track),
       image: this.getTrackImage(track),
+      duration: track?.duration ?? this.currentDurationMs,
       position,
       paused,
       playing: !paused,
@@ -1275,6 +1450,14 @@ export class SoundCloudService {
         widget.setVolume(this.volumePercent);
       }
     }, 250);
+  }
+
+  private applyNativeAudioVolume() {
+    if (!this.nativeAudioElement) {
+      return;
+    }
+
+    this.nativeAudioElement.volume = this.volumePercent / 100;
   }
 
   private normalizeVolumePercent(value: number | string): number {
@@ -1335,6 +1518,31 @@ export class SoundCloudService {
       album: { images: [{ url: image }] },
       artists: owner ? [{ name: owner }] : [],
       images: [{ url: image }]
+    };
+  }
+
+  private createNativeAudioTrack(
+    url: string,
+    metadata: Partial<SoundCloudSearchResult> = {}
+  ): SoundCloudSearchResult {
+    const uri = this.normalizeExternalUrl(metadata.uri || url);
+    const savedItem = this.findSavedItem(uri);
+    const image = metadata.image || savedItem?.image || 'assets/spotify-placeholder.png';
+    const artist = metadata.artist || metadata.owner || savedItem?.artist || savedItem?.owner || 'Broadcast audio';
+    const name = metadata.name || savedItem?.name || this.getFileNameFromUrl(uri) || 'Broadcast audio';
+
+    return {
+      id: metadata.id || savedItem?.id || uri,
+      name,
+      uri,
+      type: 'track',
+      image,
+      artist,
+      owner: artist,
+      album: { images: [{ url: image }] },
+      artists: artist ? [{ name: artist }] : [],
+      images: [{ url: image }],
+      duration: metadata.duration ?? savedItem?.duration ?? this.getNativeAudioDurationMs()
     };
   }
 
@@ -1440,6 +1648,19 @@ export class SoundCloudService {
     }
   }
 
+  private normalizeExternalUrl(value: string): string {
+    const trimmedValue = value.trim();
+    if (!/^https?:\/\//i.test(trimmedValue)) {
+      return trimmedValue;
+    }
+
+    try {
+      return new URL(trimmedValue).toString();
+    } catch {
+      return trimmedValue;
+    }
+  }
+
   private getPlayableSoundUrl(...candidates: Array<string | null | undefined>): string | null {
     for (const candidate of candidates) {
       const playableUrl = this.resolvePlayableUrl(candidate);
@@ -1453,6 +1674,33 @@ export class SoundCloudService {
 
   private isWidgetPlayableUrl(value: string): boolean {
     return /^https?:\/\//i.test(value.trim());
+  }
+
+  private shouldUseNativeAudio(url: string): boolean {
+    return !this.isSoundCloudUrl(url);
+  }
+
+  private isSoundCloudUrl(value: string): boolean {
+    try {
+      const hostname = new URL(this.normalizeExternalUrl(value)).hostname.toLowerCase();
+      return hostname === 'soundcloud.com'
+        || hostname.endsWith('.soundcloud.com')
+        || hostname === 'snd.sc'
+        || hostname.endsWith('.snd.sc');
+    } catch {
+      return false;
+    }
+  }
+
+  private getFileNameFromUrl(value: string): string {
+    try {
+      const pathname = new URL(value).pathname;
+      const lastSegment = pathname.split('/').filter(Boolean).pop() || '';
+      return decodeURIComponent(lastSegment).replace(/\.[a-z0-9]+$/i, '').trim();
+    } catch {
+      const lastSegment = value.split('/').filter(Boolean).pop() || '';
+      return decodeURIComponent(lastSegment.split('?')[0] || '').replace(/\.[a-z0-9]+$/i, '').trim();
+    }
   }
 
   private normalizeUserProfileUrl(value: string): string | null {

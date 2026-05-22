@@ -534,11 +534,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const isVolumeOnlyCommand = state.command === 'volume';
     if (!state.uri && !isVolumeOnlyCommand) return;
 
+    const hasAuthorizedHost = !!state.hostId && this.isAuthorizedDmUserId(state.hostId);
     if (this.isServerOwner) {
+      if (!hasAuthorizedHost) return;
       if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
-      if (state.source === 'manual' && state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
     } else {
-      if (state.hostId && !this.isAuthorizedDmUserId(state.hostId)) return;
+      if (!hasAuthorizedHost) return;
       if (this.isSyncing) return;
       this.isSyncing = true;
     }
@@ -590,14 +591,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     isDifferentTrack: boolean,
     isDifferentPosition: boolean
   ) {
+    const metadata = {
+      name: state.name,
+      artist: state.artist,
+      image: state.image,
+      duration: state.duration
+    };
+
     if (!state.paused) {
       if (isDifferentTrack || isDifferentPosition) {
-        await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri);
+        await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri, metadata);
       } else {
         await this.spotify.togglePlay(true);
       }
     } else if (isDifferentTrack) {
-      await this.spotify.play(state.uri, state.position, true, state.contextUri);
+      await this.spotify.play(state.uri, state.position, true, state.contextUri, metadata);
       setTimeout(() => this.spotify.pause(true), 1000);
     } else {
       await this.spotify.pause(true);
@@ -644,6 +652,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (state && state.track_window?.current_track) {
       const payload = {
         uri: state.track_window.current_track.uri,
+        name: state.track_window.current_track.name,
+        artist: state.track_window.current_track.artist || state.track_window.current_track.artists?.[0]?.name,
+        image: state.track_window.current_track.image || state.track_window.current_track.album?.images?.[0]?.url,
         position: state.position,
         paused: state.paused,
         playing: !state.paused,
@@ -1873,12 +1884,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.lastAppliedPlaybackSpotifySignature = signature;
     void this.spotify.setVolumePercent(state.volumePercent, true);
+    const metadata = {
+      name: state.name,
+      artist: state.artist,
+      image: state.image
+    };
     if (shouldPlay) {
-      void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined);
+      void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined, metadata);
       return;
     }
 
-    void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined)
+    void this.spotify.play(state.uri, state.position, true, state.contextUri ?? undefined, metadata)
       .then(() => this.spotify.pause(true))
       .catch(() => undefined);
   }
@@ -4566,7 +4582,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   handleSongRequest(request: any) {
-      this.spotify.play(request.uri);
+      this.spotify.play(request.uri, 0, false, undefined, {
+        name: request.name,
+        artist: request.artist,
+        image: request.image
+      });
       this.removeRequest(request);
   }
 

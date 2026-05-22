@@ -19,6 +19,8 @@ import { Video } from '../../shared/services/video/video';
 import { VttSync } from '../../shared/services/vttsync/vttsync';
 import { FileService } from '../../shared/services/file/file';
 import { UserService } from '../../shared/services/user/user';
+import { AuthService } from '../../shared/services/auth/auth';
+import { SoundCloudService } from '../../shared/services/playlist/soundcloud.service';
 import { ObsidianVaultService } from '../../shared/services/ObsidianVault/obsidian-vault-service';
 import { DomSanitizer, SafeHtml, SafeUrl } from '@angular/platform-browser';
 import type { BroadcastData, BroadcastEmbeddedFile, UploadedBroadcastAsset, BroadcastProcessingContext } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
@@ -54,6 +56,7 @@ export class BroadcastDialog implements OnInit {
   selectedFilename: string | null = null;
   selectedFileContentType: string | null = null;
   selectedFileIsImage: boolean = false;
+  selectedFileIsAudio: boolean = false;
 
   textChannels: IChannel[] = [];
   selectedChannels: string[] = [];
@@ -77,6 +80,8 @@ export class BroadcastDialog implements OnInit {
   hasImageUrl: boolean = false;
 
   currentServerId: string | null = null;
+  currentUserId: string | null = null;
+  currentUserName: string = 'Unknown Player';
   readonly isComposerMode: boolean;
   notesAction: BroadcastNoteAction = 'none';
   notesVaultName: string | null = null;
@@ -95,10 +100,13 @@ export class BroadcastDialog implements OnInit {
     private vttSync: VttSync,
     private fileService: FileService,
     private userService: UserService,
+    private authService: AuthService,
+    private soundCloudService: SoundCloudService,
     private obsidianVaultService: ObsidianVaultService,
     private sanitizer: DomSanitizer
   ) {
     this.isComposerMode = !!data.composeMode;
+    this.currentUserId = this.authService.getCurrentUserId();
 
     if (data.file) {
       this.setFilePreview(data.file);
@@ -134,6 +142,42 @@ export class BroadcastDialog implements OnInit {
     return this.hasText || this.hasHtml || this.hasImageContentForVtt;
   }
 
+  get hasAudioContentForCall(): boolean {
+    return this.hasFile && this.selectedFileIsAudio;
+  }
+
+  get hasCallBroadcastContent(): boolean {
+    return this.hasCallOverlayContent || this.hasAudioContentForCall;
+  }
+
+  get canControlCallAudioPlayback(): boolean {
+    return this.serverService.canUserDm(this.serverService.getCurrentServer(), this.currentUserId);
+  }
+
+  get callBroadcastTitle(): string {
+    if (this.hasAudioContentForCall && !this.hasCallOverlayContent) {
+      return this.canControlCallAudioPlayback ? 'Play Audio in Call' : 'Request Audio in Call';
+    }
+
+    return 'Broadcast to Call';
+  }
+
+  get callBroadcastDescription(): string {
+    if (this.hasAudioContentForCall && !this.hasCallOverlayContent) {
+      return this.canControlCallAudioPlayback
+        ? 'Play this audio through the shared player for everyone in the active video call.'
+        : 'Send this audio to the DM requests queue instead of taking over playback.';
+    }
+
+    if (this.hasAudioContentForCall) {
+      return this.canControlCallAudioPlayback
+        ? 'Display call content and play the audio through the shared player.'
+        : 'Display call content and send the audio to the DM requests queue.';
+    }
+
+    return 'Display this content on everyone\'s screen in the active video call.';
+  }
+
   get canSetVttBackground(): boolean {
     return this.hasImageContentForVtt && this.vttSync.canSetBroadcastBackground();
   }
@@ -165,6 +209,8 @@ export class BroadcastDialog implements OnInit {
       this.textChannels = currentServer.channels.filter(c => c.type === 'text');
 
       this.userService.getMe().subscribe(me => {
+        this.currentUserId = me._id;
+        this.currentUserName = me.username || this.currentUserName;
         this.serverMembers = (currentServer.members || []).filter((m: any) => m.user._id !== me._id);
       });
     }
@@ -177,7 +223,7 @@ export class BroadcastDialog implements OnInit {
   }
 
   canBroadcast() {
-    const canBroadcastToCall = this.hasCallOverlayContent && this.isCallActive && this.broadcastToCall;
+    const canBroadcastToCall = this.hasCallBroadcastContent && this.isCallActive && this.broadcastToCall;
     const canBroadcastToVtt = this.hasImageContentForVtt && this.isVttActive && this.broadcastToVtt;
     const canSetTemporaryAtmosphere = this.hasImageContentForVtt && this.isCallActive && this.setTemporaryAtmosphereBackground;
     const canSetVttBackground = this.canSetVttBackground && this.setVttBackground;
@@ -239,6 +285,7 @@ export class BroadcastDialog implements OnInit {
     this.selectedFilename = null;
     this.selectedFileContentType = null;
     this.selectedFileIsImage = false;
+    this.selectedFileIsAudio = false;
     this.imagePreview = null;
     const hasRemainingImageContent = this.hasImageContentForVtt;
     this.broadcastToVtt = hasRemainingImageContent && this.broadcastToVtt;
@@ -263,6 +310,9 @@ export class BroadcastDialog implements OnInit {
         const uploaded = await this.uploadFile(this.data.file);
         if (this.isImageContentType(uploaded.contentType)) {
           context.standaloneImageForCallVtt = uploaded.url;
+        }
+        if (this.isAudioAsset(uploaded)) {
+          context.audioForCall = uploaded;
         }
         this.addAttachment(context, uploaded);
         const uploadedMarkdown = this.formatUploadedAssetForMessage(uploaded);
@@ -321,8 +371,13 @@ export class BroadcastDialog implements OnInit {
         }
       }
 
-      // 5. Call Overlay Broadcast
+      // 5. Call Broadcast
       if (this.broadcastToCall && this.isCallActive) {
+        if (context.audioForCall) {
+          console.log('[BroadcastDialog] Broadcasting call audio');
+          await this.broadcastCallAudio(context.audioForCall);
+        }
+
         if (context.textForCall) {
           console.log('[BroadcastDialog] Broadcasting overlay text');
           await this.videoService.broadcastOverlayText(context.textForCall);
@@ -765,6 +820,7 @@ export class BroadcastDialog implements OnInit {
     this.selectedFilename = file.name;
     this.selectedFileContentType = file.type || 'unknown file type';
     this.selectedFileIsImage = file.type.startsWith('image/');
+    this.selectedFileIsAudio = this.isAudioFile(file);
 
     if (!this.selectedFileIsImage) {
       this.imagePreview = null;
@@ -810,6 +866,44 @@ export class BroadcastDialog implements OnInit {
 
   private isImageContentType(contentType: string | null | undefined): boolean {
     return !!contentType && contentType.startsWith('image/');
+  }
+
+  private isAudioContentType(contentType: string | null | undefined): boolean {
+    return !!contentType && contentType.startsWith('audio/');
+  }
+
+  private isAudioFile(file: File): boolean {
+    return this.isAudioContentType(file.type) || this.isAudioFilename(file.name);
+  }
+
+  private isAudioAsset(asset: UploadedBroadcastAsset): boolean {
+    return this.isAudioContentType(asset.contentType) || this.isAudioFilename(asset.filename);
+  }
+
+  private isAudioFilename(filename: string | null | undefined): boolean {
+    return !!filename && /\.(aac|aiff?|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(filename);
+  }
+
+  private async broadcastCallAudio(asset: UploadedBroadcastAsset) {
+    const metadata = this.createBroadcastAudioMetadata(asset);
+    if (this.canControlCallAudioPlayback) {
+      await this.soundCloudService.play(asset.url, 0, false, undefined, metadata);
+      return;
+    }
+
+    this.videoService.sendSoundCloudRequest(metadata, this.currentUserName);
+  }
+
+  private createBroadcastAudioMetadata(asset: UploadedBroadcastAsset) {
+    return {
+      id: asset.url,
+      uri: asset.url,
+      name: asset.filename || this.data.filename || 'Broadcast audio',
+      artist: 'Broadcast audio',
+      owner: 'Broadcast audio',
+      image: '',
+      type: 'track' as const
+    };
   }
 
   private hasEmbeddedImageContent(): boolean {

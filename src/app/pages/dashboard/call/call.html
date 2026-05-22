@@ -328,7 +328,7 @@
                     <img [src]="remote.userData.icon || 'https://www.gravatar.com/avatar/'+remote.userData._id+'?d=identicon'" class="char-portrait">
                   </ng-container>
                 </div>
-                <div class="level-badge" *ngIf="remote.userData.classes?.length">
+                <div class="level-badge" *ngIf="remote.userData.classes.length">
                   {{ remote.userData.classes[0].level }}
                 </div>
               </div>
