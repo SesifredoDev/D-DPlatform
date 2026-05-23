@@ -276,7 +276,7 @@
         (click)="openCharacter(remote.userData)"
         (contextmenu)="openRemoteContextMenu($event, remote)"
       >
-        <video #remoteVideo autoplay playsinline [muted]="supportsRemoteAudioGain"></video>
+        <video #remoteVideo autoplay playsinline muted></video>
         <img
           *ngIf="isCallPlaybackMode && remote.stillFrameUrl"
           class="playback-still-frame"

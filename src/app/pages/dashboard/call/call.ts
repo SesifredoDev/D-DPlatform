@@ -2457,9 +2457,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           return;
         }
       }
-      if (video && remote?.remoteVideoTrack && this.shouldAttachLiveRemoteVideoTrack(remote, stream)) {
-        this.bindLiveRemoteVideoTrack(video, remote.remoteVideoTrack);
-      } else if (video && stream) {
+      if (video && stream) {
         this.clearLiveRemoteVideoTrackAttachment(video);
         if (video.srcObject !== stream) {
           this.clearVisiblePlaybackMediaElement(video);
@@ -4627,15 +4625,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return false;
     }
 
-    // Hide transient companion connections before metadata arrives, otherwise they flash as blank users.
+    // Hide trackless placeholders before metadata arrives, but keep subscribed media visible.
     const hasTracks = !!participant?.stream?.getTracks?.().length;
     const hasCharacterName = !!participant?.userData?.name;
-    if (!metadata && !hasCharacterName) {
-      return false;
-    }
-
-    // Companion phone participants should never be shown as normal call tiles.
-    if (!metadata && hasTracks && this.videoService.getCurrentDeviceInfo().deviceType !== 'mobile') {
+    if (!metadata && !hasCharacterName && !hasTracks) {
       return false;
     }
 

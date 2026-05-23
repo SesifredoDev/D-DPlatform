@@ -28,13 +28,17 @@ export class CallRemoteAudioRouter {
       return;
     }
 
-    if (!this.supportsRemoteAudioGain || !stream) {
+    if (stream && (!this.supportsRemoteAudioGain || volumePercent <= 100)) {
+      this.useNativeVideoAudio(participantId, video, volumePercent);
+      return;
+    }
+
+    if (!stream) {
       if (this.configureLiveKitRemoteAudioOutput(participantId, stream ?? undefined, audioTrack.id, volumePercent, video, remoteAudioTrack)) {
         video.muted = true;
         return;
       }
 
-      this.applyNativeVideoVolume(video, volumePercent, false);
       this.teardownRemoteAudioOutput(participantId);
       return;
     }
@@ -69,7 +73,7 @@ export class CallRemoteAudioRouter {
 
     const audioContext = this.getRemoteAudioContext();
     if (!audioContext) {
-      this.applyNativeVideoVolume(video, volumePercent, false);
+      this.useNativeVideoAudio(participantId, video, volumePercent);
       return;
     }
 
@@ -118,23 +122,34 @@ export class CallRemoteAudioRouter {
         return;
       }
 
-      this.applyNativeVideoVolume(video, volumePercent, false);
+      this.useNativeVideoAudio(participantId, video, volumePercent);
     }
   }
 
   applyRemoteVolume(participantId: string, volumePercent: number, video: HTMLVideoElement | null) {
     const output = this.remoteAudioOutputs.get(participantId);
     if (output) {
+      if (video && output.stream && volumePercent <= 100) {
+        this.useNativeVideoAudio(participantId, video, volumePercent);
+        return;
+      }
+
       this.applyRemoteAudioOutputVolume(output, volumePercent);
       void this.playRemoteAudioElement(output.audioElement).then(played => {
-        if (!played && video) {
-          this.applyNativeVideoVolume(video, volumePercent, false);
+        if (!played && video && output.stream) {
+          this.useNativeVideoAudio(participantId, video, volumePercent);
         }
       });
+
+      if (video) {
+        this.applyNativeVideoVolume(video, volumePercent, true);
+      }
+
+      return;
     }
 
     if (video) {
-      this.applyNativeVideoVolume(video, volumePercent, this.supportsRemoteAudioGain || !!output);
+      this.applyNativeVideoVolume(video, volumePercent, false);
     }
   }
 
@@ -321,7 +336,9 @@ export class CallRemoteAudioRouter {
     void this.playRemoteAudioElement(audioElement).then(played => {
       const currentOutput = this.remoteAudioOutputs.get(participantId);
       if (!played && currentOutput?.audioElement === audioElement) {
-        this.applyNativeVideoVolume(video, volumePercent, false);
+        if (stream) {
+          this.useNativeVideoAudio(participantId, video, volumePercent);
+        }
       }
     });
 
@@ -353,7 +370,7 @@ export class CallRemoteAudioRouter {
       return;
     }
 
-    this.applyNativeVideoVolume(video, volumePercent, false);
+    this.useNativeVideoAudio(participantId, video, volumePercent);
   }
 
   private applyRemoteAudioOutputVolume(output: RemoteAudioOutput, volumePercent: number) {
@@ -390,6 +407,16 @@ export class CallRemoteAudioRouter {
   ) {
     video.muted = muted;
     video.volume = Math.min(1, volumePercent / 100);
+  }
+
+  private useNativeVideoAudio(
+    participantId: string,
+    video: HTMLVideoElement,
+    volumePercent: number
+  ) {
+    this.teardownRemoteAudioOutput(participantId);
+    this.applyNativeVideoVolume(video, volumePercent, false);
+    void video.play?.().catch(() => undefined);
   }
 
   private getAudioContextConstructor(): typeof AudioContext | null {
