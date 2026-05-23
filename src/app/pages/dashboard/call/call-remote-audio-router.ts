@@ -9,6 +9,9 @@ export class CallRemoteAudioRouter {
 
   private remoteAudioContext: AudioContext | null = null;
   private readonly remoteAudioOutputs = new Map<string, RemoteAudioOutput>();
+  private readonly audioOutputRequestTokens = new WeakMap<HTMLMediaElement, number>();
+  private nextAudioOutputRequestToken = 0;
+  private readonly audioOutputRetryDelayMs = 75;
 
   constructor(private readonly getSelectedOutputId: () => string) {}
 
@@ -170,15 +173,82 @@ export class CallRemoteAudioRouter {
   }
 
   async applyAudioOutputToMediaElement(element: HTMLMediaElement) {
-    if (!this.supportsAudioOutputSelection || !this.getSelectedOutputId()) {
+    const outputId = this.getSelectedOutputId();
+    if (!this.supportsAudioOutputSelection || !outputId) {
+      return;
+    }
+
+    if (this.getElementSinkId(element) === outputId) {
+      return;
+    }
+
+    const requestToken = ++this.nextAudioOutputRequestToken;
+    this.audioOutputRequestTokens.set(element, requestToken);
+
+    try {
+      await element.setSinkId(outputId);
+    } catch (error) {
+      if (!this.isCurrentAudioOutputRequest(element, requestToken, outputId)) {
+        return;
+      }
+
+      if (this.isDomExceptionName(error, 'AbortError')) {
+        await this.retryAbortedAudioOutputChange(element, requestToken, outputId);
+        return;
+      }
+
+      console.warn('Failed to switch audio output device', error);
+    }
+  }
+
+  private async retryAbortedAudioOutputChange(
+    element: HTMLMediaElement,
+    requestToken: number,
+    outputId: string
+  ) {
+    await new Promise(resolve => setTimeout(resolve, this.audioOutputRetryDelayMs));
+
+    if (!this.isCurrentAudioOutputRequest(element, requestToken, outputId)) {
+      return;
+    }
+
+    if (this.getElementSinkId(element) === outputId) {
       return;
     }
 
     try {
-      await element.setSinkId(this.getSelectedOutputId());
+      await element.setSinkId(outputId);
     } catch (error) {
+      if (!this.isCurrentAudioOutputRequest(element, requestToken, outputId)) {
+        return;
+      }
+
+      if (this.isDomExceptionName(error, 'AbortError')) {
+        console.debug('Audio output switch was aborted by the browser', error);
+        return;
+      }
+
       console.warn('Failed to switch audio output device', error);
     }
+  }
+
+  private isCurrentAudioOutputRequest(
+    element: HTMLMediaElement,
+    requestToken: number,
+    outputId: string
+  ): boolean {
+    return (
+      this.audioOutputRequestTokens.get(element) === requestToken &&
+      this.getSelectedOutputId() === outputId
+    );
+  }
+
+  private getElementSinkId(element: HTMLMediaElement): string {
+    return (element as HTMLMediaElement & { sinkId?: string }).sinkId ?? '';
+  }
+
+  private isDomExceptionName(error: unknown, name: string): boolean {
+    return typeof error === 'object' && error !== null && 'name' in error && error.name === name;
   }
 
   private getRemoteAudioContext(): AudioContext | null {
