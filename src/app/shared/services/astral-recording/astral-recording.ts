@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import type { TauriCoreApi, AstralRecordingBeginResponse, AstralRecordingChunkResponse, AstralRecordingFinalizeResponse, AstralRecordingExportResponse, AstralRecordingImportBeginResponse, AstralRecordingImportResponse, AstralRecordingOptimizeOptions, AstralRecordingOptimizeResponse, AstralImportedBrowserFile, AstralRecordingWriteChunkInput } from '../../models/astral-recording/astral-recording.model';
-export type { AstralRecordingBeginResponse, AstralRecordingChunkResponse, AstralRecordingFinalizeResponse, AstralRecordingExportResponse, AstralRecordingImportBeginResponse, AstralRecordingImportResponse, AstralRecordingOptimizeOptions, AstralRecordingOptimizeResponse, AstralImportedBrowserFile, AstralRecordingWriteChunkInput } from '../../models/astral-recording/astral-recording.model';
+import type { TauriCoreApi, AstralRecordingBeginResponse, AstralRecordingChunkResponse, AstralRecordingFinalizeResponse, AstralRecordingExportResponse, AstralRecordingImportBeginResponse, AstralRecordingImportResponse, AstralRecordingOptimizeOptions, AstralRecordingOptimizeResponse, AstralImportedBrowserFile, AstralRecordingWriteChunkInput, AstralLocalRecordingEntry, AstralUnpackedRecordingEntry } from '../../models/astral-recording/astral-recording.model';
+export type { AstralRecordingBeginResponse, AstralRecordingChunkResponse, AstralRecordingFinalizeResponse, AstralRecordingExportResponse, AstralRecordingImportBeginResponse, AstralRecordingImportResponse, AstralRecordingOptimizeOptions, AstralRecordingOptimizeResponse, AstralImportedBrowserFile, AstralRecordingWriteChunkInput, AstralLocalRecordingEntry, AstralUnpackedRecordingEntry } from '../../models/astral-recording/astral-recording.model';
 const ASTRAL_MAGIC_BYTES = new Uint8Array([65, 83, 84, 82, 65, 76, 49, 0]);
 
 @Injectable({ providedIn: 'root' })
@@ -27,6 +27,10 @@ export class AstralRecordingService {
       mimeType: input.mimeType,
       startedAtMs: input.startedAtMs,
       chunkStartedAtMs: input.chunkStartedAtMs,
+      isLocal: input.isLocal ?? null,
+      userData: input.userData ?? null,
+      participantMeta: input.participantMeta ?? null,
+      volumePercent: input.volumePercent ?? null,
       dataBase64
     });
 
@@ -52,6 +56,22 @@ export class AstralRecordingService {
     });
   }
 
+  async recoverPackageFromMediaPaths(
+    manifest: unknown,
+    mediaPaths: Array<string | null | undefined>
+  ): Promise<AstralRecordingFinalizeResponse> {
+    const core = await this.requireCore();
+    const sessionDir = this.resolveCommonManagedSessionDir(mediaPaths);
+    if (!sessionDir) {
+      throw new Error('No recoverable Astral recording media paths were found.');
+    }
+
+    return core.invoke<AstralRecordingFinalizeResponse>('astral_recording_recover_package', {
+      sessionDir,
+      manifestJson: JSON.stringify(manifest)
+    });
+  }
+
   async abort(sessionId: string): Promise<void> {
     const core = await this.requireCore();
     await core.invoke<void>('astral_recording_abort', { sessionId });
@@ -69,6 +89,33 @@ export class AstralRecordingService {
     return core.invoke<AstralRecordingImportResponse>('astral_recording_import_package', {
       packagePath
     });
+  }
+
+  async importUnpackedSessionFromPath(sessionDir: string): Promise<AstralRecordingImportResponse> {
+    const core = await this.requireCore();
+    return core.invoke<AstralRecordingImportResponse>('astral_recording_import_unpacked_session', {
+      sessionDir
+    });
+  }
+
+  async listLocalPackages(): Promise<AstralLocalRecordingEntry[]> {
+    const core = await this.requireCore();
+    return core.invoke<AstralLocalRecordingEntry[]>('astral_recording_list_local_packages');
+  }
+
+  async listUnpackedSessions(): Promise<AstralUnpackedRecordingEntry[]> {
+    const core = await this.requireCore();
+    return core.invoke<AstralUnpackedRecordingEntry[]>('astral_recording_list_unpacked_sessions');
+  }
+
+  async packageUnpackedSession(sessionDir: string, jobId?: string): Promise<AstralRecordingFinalizeResponse> {
+    const core = await this.requireCore();
+    const args: Record<string, unknown> = { sessionDir };
+    if (jobId) {
+      args['jobId'] = jobId;
+    }
+
+    return core.invoke<AstralRecordingFinalizeResponse>('astral_recording_package_unpacked_session', args);
   }
 
   async optimizePackage(
@@ -186,6 +233,30 @@ export class AstralRecordingService {
     });
   }
 
+  async importRemoteManifestPackage(
+    manifestUrl: string,
+    mediaUrlTemplate: string,
+    packageUrl = 'recording.astral',
+    filename = 'recording.astral',
+    packageSize = 0
+  ): Promise<AstralRecordingImportResponse> {
+    const response = await fetch(manifestUrl, { credentials: 'include' });
+    if (!response.ok) {
+      throw new Error(`Could not load Astral recording manifest (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const manifest = payload?.manifest ?? payload;
+    return {
+      sessionId: String(payload?.sessionId || this.createRemoteImportSessionId(filename || packageUrl)),
+      sessionDir: String(payload?.sessionDir || `remote:${filename || packageUrl}`),
+      packagePath: String(payload?.packagePath || packageUrl || this.ensureAstralFilename(filename)),
+      packageSize: Number(payload?.packageSize ?? packageSize) || 0,
+      manifest,
+      remoteMediaUrlTemplate: String(payload?.remoteMediaUrlTemplate || mediaUrlTemplate)
+    };
+  }
+
   private async importPackageFromChunks(
     fileName: string,
     writeChunks: (writeChunk: (dataBase64: string) => Promise<void>) => Promise<void>
@@ -232,6 +303,10 @@ export class AstralRecordingService {
       return this.resolveBrowserImportedMediaPath(imported, sourcePath);
     }
 
+    if (imported.remoteMediaUrlTemplate) {
+      return this.resolveRemoteImportedMediaPath(imported, sourcePath);
+    }
+
     return this.resolveDesktopImportedMediaPath(imported.sessionDir, sourcePath);
   }
 
@@ -250,6 +325,10 @@ export class AstralRecordingService {
       }
 
       return browserFile.url;
+    }
+
+    if (imported.remoteMediaUrlTemplate) {
+      return this.getRemoteImportedFileUrl(imported.remoteMediaUrlTemplate, filePath);
     }
 
     return this.getFileUrl(filePath);
@@ -431,6 +510,32 @@ export class AstralRecordingService {
     return null;
   }
 
+  private resolveRemoteImportedMediaPath(imported: AstralRecordingImportResponse, sourcePath: string): string | null {
+    const candidates = this.getImportedPathCandidates(imported.sessionDir, sourcePath);
+    if (candidates.length) {
+      return candidates[0];
+    }
+
+    try {
+      return this.normalizeArchiveRelativePath(sourcePath);
+    } catch {
+      return null;
+    }
+  }
+
+  private getRemoteImportedFileUrl(mediaUrlTemplate: string, filePath: string): string {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const encodedPath = encodeURIComponent(normalizedPath);
+    if (mediaUrlTemplate.includes('{path}')) {
+      return mediaUrlTemplate.replace('{path}', encodedPath);
+    }
+
+    const baseUrl = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+    const url = new URL(mediaUrlTemplate, baseUrl);
+    url.searchParams.set('path', normalizedPath);
+    return url.toString();
+  }
+
   private getImportedPathCandidates(sessionDir: string, sourcePath: string): string[] {
     const normalizedPath = sourcePath.replace(/\\/g, '/');
     const lowerPath = normalizedPath.toLowerCase();
@@ -569,6 +674,43 @@ export class AstralRecordingService {
       : null;
   }
 
+  private resolveCommonManagedSessionDir(mediaPaths: Array<string | null | undefined>): string | null {
+    const sessionDirs = mediaPaths
+      .map(mediaPath => this.resolveManagedSessionDirFromMediaPath(mediaPath))
+      .filter((sessionDir): sessionDir is string => !!sessionDir);
+
+    if (!sessionDirs.length) {
+      return null;
+    }
+
+    const [firstSessionDir] = sessionDirs;
+    const normalizedFirstSessionDir = firstSessionDir.toLowerCase();
+    return sessionDirs.every(sessionDir => sessionDir.toLowerCase() === normalizedFirstSessionDir)
+      ? firstSessionDir
+      : null;
+  }
+
+  private resolveManagedSessionDirFromMediaPath(mediaPath: string | null | undefined): string | null {
+    if (typeof mediaPath !== 'string' || !mediaPath.trim()) {
+      return null;
+    }
+
+    const normalizedPath = mediaPath.replace(/\\/g, '/');
+    const marker = '/participants/';
+    const markerIndex = normalizedPath.toLowerCase().lastIndexOf(marker);
+    if (markerIndex < 0) {
+      return null;
+    }
+
+    const sessionDir = normalizedPath.slice(0, markerIndex);
+    const sessionId = sessionDir.split('/').filter(Boolean).pop() ?? '';
+    if (!/^astral-[a-zA-Z0-9_-]+$/.test(sessionId) || sessionId.startsWith('astral-import-')) {
+      return null;
+    }
+
+    return sessionDir;
+  }
+
   private ensureAstralFilename(fileName: string): string {
     return fileName.toLowerCase().endsWith('.astral') ? fileName : `${fileName}.astral`;
   }
@@ -584,6 +726,19 @@ export class AstralRecordingService {
       : Math.random().toString(36).slice(2);
 
     return `astral-browser-${Date.now()}-${randomPart}-${stem}`;
+  }
+
+  private createRemoteImportSessionId(fileName: string): string {
+    const stem = this.ensureAstralFilename(fileName)
+      .replace(/\.astral$/i, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'recording';
+    const randomPart = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+
+    return `astral-remote-${Date.now()}-${randomPart}-${stem}`;
   }
 
   private async blobToBase64(blob: Blob): Promise<string> {

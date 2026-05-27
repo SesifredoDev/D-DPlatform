@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import type { VttRecordingActionSource, RecordedCallEnvironmentAction, RecordedVttAction, RecordedVttTimeline, RecordedCallEnvironmentEvent, RecordedCallEnvironmentTimeline, SessionRecordingMedia, SessionRecordingParticipantMedia, SessionRecordingParticipantMediaInput, SessionRecording, SessionRecordingPackage, SessionRecordingState, SessionPlaybackState } from '../../models/session-recording/session-recording.model';
 export type { VttRecordingActionSource, RecordedCallEnvironmentAction, RecordedVttAction, RecordedVttTimeline, RecordedCallEnvironmentEvent, RecordedCallEnvironmentTimeline, SessionRecordingMedia, SessionRecordingParticipantMedia, SessionRecordingParticipantMediaInput, SessionRecording, SessionRecordingPackage, SessionRecordingState, SessionPlaybackState } from '../../models/session-recording/session-recording.model';
 @Injectable({ providedIn: 'root' })
@@ -20,10 +20,12 @@ export class SessionRecordingService implements OnDestroy {
     currentTimeMs: 0,
     durationMs: 0
   });
+  private recordingManifestChangedSubject = new Subject<SessionRecording>();
 
   readonly lastRecording$ = this.lastRecordingSubject.asObservable();
   readonly recordingState$ = this.recordingStateSubject.asObservable();
   readonly playbackState$ = this.playbackStateSubject.asObservable();
+  readonly recordingManifestChanged$ = this.recordingManifestChangedSubject.asObservable();
 
   ngOnDestroy() {
     this.stopRecordingElapsedTimer();
@@ -59,6 +61,7 @@ export class SessionRecordingService implements OnDestroy {
     this.recordingStartedAtMs = Date.now();
     this.startRecordingElapsedTimer();
     this.emitRecordingState();
+    this.emitRecordingManifestChanged(this.activeRecording);
     return true;
   }
 
@@ -71,6 +74,7 @@ export class SessionRecordingService implements OnDestroy {
     const durationMs = this.getActiveRecordingElapsedMs();
     finishedRecording.durationMs = durationMs;
     finishedRecording.endedAt = new Date().toISOString();
+    this.emitRecordingManifestChanged(finishedRecording);
     this.activeRecording = null;
     this.stopRecordingElapsedTimer();
     this.lastRecordingSubject.next(finishedRecording);
@@ -101,6 +105,7 @@ export class SessionRecordingService implements OnDestroy {
       size: blob.size
     };
     recording.durationMs = Math.max(recording.durationMs, durationMs);
+    this.emitRecordingManifestChanged(recording);
     this.lastRecordingSubject.next(recording);
     return recording;
   }
@@ -138,6 +143,7 @@ export class SessionRecordingService implements OnDestroy {
 
     recording.participantMedia.push(participantMedia);
     recording.durationMs = Math.max(recording.durationMs, participantMedia.endedAtMs);
+    this.emitRecordingManifestChanged(recording);
     if (recording === this.activeRecording) {
       this.emitRecordingState();
     } else {
@@ -183,6 +189,7 @@ export class SessionRecordingService implements OnDestroy {
 
     recording.participantMedia.push(participantMedia);
     recording.durationMs = Math.max(recording.durationMs, participantMedia.endedAtMs);
+    this.emitRecordingManifestChanged(recording);
     if (recording === this.activeRecording) {
       this.emitRecordingState();
     } else {
@@ -204,6 +211,7 @@ export class SessionRecordingService implements OnDestroy {
     }
 
     recording.package = this.cloneForRecording(recordingPackage);
+    this.emitRecordingManifestChanged(recording);
     if (recording === this.activeRecording) {
       this.emitRecordingState();
     } else {
@@ -232,6 +240,7 @@ export class SessionRecordingService implements OnDestroy {
 
     if (!recording.vtt.initialState) {
       recording.vtt.initialState = this.cloneForRecording(state);
+      this.emitRecordingManifestChanged(recording);
       this.emitRecordingState();
     }
   }
@@ -249,6 +258,7 @@ export class SessionRecordingService implements OnDestroy {
     const timeMs = this.getActiveRecordingElapsedMs();
     if (!recording.vtt.initialState && recording.vtt.actions.length === 0 && timeMs < 1000) {
       recording.vtt.initialState = this.cloneForRecording(state);
+      this.emitRecordingManifestChanged(recording);
       this.emitRecordingState();
       return;
     }
@@ -259,6 +269,7 @@ export class SessionRecordingService implements OnDestroy {
       data: this.cloneForRecording(state),
       source: 'snapshot'
     });
+    this.emitRecordingManifestChanged(recording);
     this.emitRecordingState();
   }
 
@@ -283,6 +294,7 @@ export class SessionRecordingService implements OnDestroy {
       data: this.cloneForRecording(data),
       source
     });
+    this.emitRecordingManifestChanged(recording);
     this.emitRecordingState();
   }
 
@@ -293,6 +305,7 @@ export class SessionRecordingService implements OnDestroy {
     }
 
     recording.callEnvironment.initialState = this.cloneForRecording(state);
+    this.emitRecordingManifestChanged(recording);
     this.emitRecordingState();
   }
 
@@ -307,6 +320,7 @@ export class SessionRecordingService implements OnDestroy {
       action,
       data: this.cloneForRecording(data)
     });
+    this.emitRecordingManifestChanged(recording);
     this.emitRecordingState();
   }
 
@@ -367,6 +381,10 @@ export class SessionRecordingService implements OnDestroy {
     return this.lastRecordingSubject.value;
   }
 
+  getCurrentRecording(): SessionRecording | null {
+    return this.activeRecording ?? this.lastRecordingSubject.value;
+  }
+
   isRecording(): boolean {
     return !!this.activeRecording;
   }
@@ -396,6 +414,12 @@ export class SessionRecordingService implements OnDestroy {
       session: this.activeRecording,
       elapsedMs: this.getActiveRecordingElapsedMs()
     });
+  }
+
+  private emitRecordingManifestChanged(recording: SessionRecording | null) {
+    if (recording) {
+      this.recordingManifestChangedSubject.next(recording);
+    }
   }
 
   private startRecordingElapsedTimer() {

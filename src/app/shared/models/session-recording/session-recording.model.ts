@@ -9,6 +9,7 @@ export type RecordedCallEnvironmentAction =
   | 'participants'
   | 'dm-mode'
   | 'vtt-session'
+  | 'music-action'
   | 'spotify-state'
   | 'spotify-requests';
 

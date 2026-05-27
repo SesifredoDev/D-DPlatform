@@ -510,12 +510,53 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
     this.tabService.selectTab(targetCallTab.id);
     window.setTimeout(() => {
+      const remotePlayback = this.getAstralAttachmentRemotePlayback(attachment);
       this.astralPlaybackDrop.requestPlayback({
         channelId: targetCallTab.id,
         url: attachment.url,
+        remoteManifestUrl: remotePlayback?.manifestUrl,
+        remoteMediaUrlTemplate: remotePlayback?.mediaUrlTemplate,
+        packageSize: attachment.size,
         filename: attachment.filename || attachment.name || 'recording.astral'
       });
     });
+  }
+
+  private getAstralAttachmentRemotePlayback(attachment: Attachment): {
+    manifestUrl: string;
+    mediaUrlTemplate: string;
+  } | null {
+    if (attachment.astral?.manifestUrl && attachment.astral?.mediaUrlTemplate) {
+      return {
+        manifestUrl: attachment.astral.manifestUrl,
+        mediaUrlTemplate: attachment.astral.mediaUrlTemplate
+      };
+    }
+
+    if (!attachment.key || !attachment.url) {
+      return null;
+    }
+
+    try {
+      const url = new URL(attachment.url);
+      const filesMarker = '/files/';
+      const markerIndex = url.pathname.lastIndexOf(filesMarker);
+      if (markerIndex < 0) {
+        return null;
+      }
+
+      const fileApiPath = url.pathname.slice(0, markerIndex + filesMarker.length);
+      const encodedKey = encodeURIComponent(attachment.key);
+      const manifestUrl = new URL(`${fileApiPath}${encodedKey}/astral-manifest`, url.origin);
+      const mediaUrl = new URL(`${fileApiPath}${encodedKey}/astral-file`, url.origin);
+      mediaUrl.searchParams.set('path', '{path}');
+      return {
+        manifestUrl: manifestUrl.toString(),
+        mediaUrlTemplate: mediaUrl.toString().replace('%7Bpath%7D', '{path}')
+      };
+    } catch {
+      return null;
+    }
   }
 
   private extractPreviewUrls(content: string): string[] {

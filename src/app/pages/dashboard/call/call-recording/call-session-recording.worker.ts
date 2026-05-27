@@ -35,8 +35,15 @@ export class CallSessionRecordingWorker {
   private finalizingRecording = false;
   private astralRecordingSessionId: string | null = null;
   private astralParticipantSegmentCounters = new Map<string, number>();
+  private astralManifestCheckpointInterval: any;
+  private astralManifestCheckpointTimeout: any;
+  private astralManifestCheckpointPendingRecording: SessionRecording | null = null;
+  private astralManifestChangeSubscription: { unsubscribe: () => void } | null = null;
+  private astralManifestWriteChain: Promise<void> = Promise.resolve();
   private readonly participantIdleThresholdMs = 60000;
   private readonly participantIdleCheckIntervalMs = 250;
+  private readonly astralManifestCheckpointIntervalMs = 5000;
+  private readonly astralManifestActionCheckpointDelayMs = 250;
   private readonly participantActivityMonitorOptions = {
     audioRmsThreshold: 0.012,
     videoMotionThreshold: 7
@@ -281,6 +288,10 @@ export class CallSessionRecordingWorker {
             mimeType: participantRecorder.mimeType,
             startedAtMs: participantRecorder.startedAtMs,
             chunkStartedAtMs,
+            isLocal: participantRecorder.isLocal,
+            userData: participantRecorder.userData,
+            participantMeta: participantRecorder.participantMeta,
+            volumePercent: participantRecorder.volumePercent,
             blob: chunk
           });
           participantRecorder.astralFilePath = result.filePath;
@@ -401,6 +412,10 @@ export class CallSessionRecordingWorker {
           mimeType,
           startedAtMs,
           chunkStartedAtMs: 0,
+          isLocal: participantRecorder.isLocal,
+          userData: participantRecorder.userData,
+          participantMeta: participantRecorder.participantMeta,
+          volumePercent: participantRecorder.volumePercent,
           blob: stillFrame
         });
         mediaUrl = result.fileUrl;
@@ -663,6 +678,7 @@ export class CallSessionRecordingWorker {
 
       const session = await this.astralRecording.begin(this.options.getCallRoomId());
       this.astralRecordingSessionId = session.sessionId;
+      this.startAstralManifestCheckpointing();
     } catch (error) {
       console.warn('Astral local recording storage unavailable; falling back to in-memory recording.', error);
       this.astralRecordingSessionId = null;
@@ -684,6 +700,9 @@ export class CallSessionRecordingWorker {
 
   private async finalizeAstralRecordingSession(recording: SessionRecording): Promise<boolean> {
     const sessionId = this.astralRecordingSessionId;
+    this.stopAstralManifestCheckpointing();
+    this.flushAstralManifestCheckpoint(recording);
+    await this.astralManifestWriteChain.catch(() => undefined);
     this.cleanupAstralRecordingState();
     if (!sessionId) {
       return false;
@@ -711,8 +730,78 @@ export class CallSessionRecordingWorker {
   }
 
   private cleanupAstralRecordingState() {
+    this.stopAstralManifestCheckpointing();
+    if (this.astralManifestCheckpointTimeout) {
+      clearTimeout(this.astralManifestCheckpointTimeout);
+      this.astralManifestCheckpointTimeout = null;
+    }
+    this.astralManifestChangeSubscription?.unsubscribe();
+    this.astralManifestChangeSubscription = null;
     this.astralRecordingSessionId = null;
     this.astralParticipantSegmentCounters.clear();
+    this.astralManifestCheckpointPendingRecording = null;
+    this.astralManifestWriteChain = Promise.resolve();
+  }
+
+  private startAstralManifestCheckpointing() {
+    this.stopAstralManifestCheckpointing();
+    this.astralManifestChangeSubscription?.unsubscribe();
+    this.astralManifestChangeSubscription = this.sessionRecording.recordingManifestChanged$.subscribe(recording => {
+      this.queueAstralManifestCheckpoint(recording, this.astralManifestActionCheckpointDelayMs);
+    });
+    this.queueAstralManifestCheckpoint();
+    this.astralManifestCheckpointInterval = setInterval(() => {
+      this.queueAstralManifestCheckpoint();
+    }, this.astralManifestCheckpointIntervalMs);
+  }
+
+  private stopAstralManifestCheckpointing() {
+    if (this.astralManifestCheckpointInterval) {
+      clearInterval(this.astralManifestCheckpointInterval);
+      this.astralManifestCheckpointInterval = null;
+    }
+  }
+
+  private flushAstralManifestCheckpoint(recording: SessionRecording | null = this.astralManifestCheckpointPendingRecording ?? this.sessionRecording.getCurrentRecording()) {
+    if (this.astralManifestCheckpointTimeout) {
+      clearTimeout(this.astralManifestCheckpointTimeout);
+      this.astralManifestCheckpointTimeout = null;
+    }
+
+    this.astralManifestCheckpointPendingRecording = null;
+    this.queueAstralManifestCheckpoint(recording);
+  }
+
+  private queueAstralManifestCheckpoint(
+    recording: SessionRecording | null = this.sessionRecording.getCurrentRecording(),
+    delayMs: number = 0
+  ) {
+    const sessionId = this.astralRecordingSessionId;
+    if (!sessionId || !recording) {
+      return;
+    }
+
+    if (delayMs > 0) {
+      this.astralManifestCheckpointPendingRecording = recording;
+      if (this.astralManifestCheckpointTimeout) {
+        return;
+      }
+
+      this.astralManifestCheckpointTimeout = setTimeout(() => {
+        const pendingRecording = this.astralManifestCheckpointPendingRecording;
+        this.astralManifestCheckpointPendingRecording = null;
+        this.astralManifestCheckpointTimeout = null;
+        this.queueAstralManifestCheckpoint(pendingRecording);
+      }, delayMs);
+      return;
+    }
+
+    this.astralManifestWriteChain = this.astralManifestWriteChain
+      .catch(() => undefined)
+      .then(() => this.astralRecording.writeManifest(sessionId, createAstralRecordingManifest(recording)))
+      .catch(error => {
+        console.warn('Failed to checkpoint Astral recording manifest', error);
+      });
   }
 
   private clearRecordingTimer() {

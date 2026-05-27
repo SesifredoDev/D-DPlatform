@@ -54,6 +54,42 @@ export class AstralOptimizationRunner {
     return `${this.formatBytes(savedBytes)} saved (${savedPercent}%)`;
   }
 
+  segmentProgress(job: AstralOptimizationJob): string {
+    if (job.total <= 0) return '';
+    if (job.stage === 'packaging') return `${job.current}/${job.total} segments processed`;
+    if (job.stage === 'optimized' || job.stage === 'skipped') return `${job.current}/${job.total} segments processed`;
+    const segmentIndex = job.segmentIndex ?? Math.min(job.current + 1, job.total);
+    return `Segment ${segmentIndex}/${job.total}`;
+  }
+
+  segmentCounts(job: AstralOptimizationJob): string {
+    const optimized = job.optimizedSegmentCount ?? 0;
+    const skipped = job.skippedSegmentCount ?? 0;
+    if (optimized <= 0 && skipped <= 0) return '';
+    return `${optimized} optimized, ${skipped} skipped`;
+  }
+
+  currentSegmentLabel(job: AstralOptimizationJob): string {
+    if (!job.currentSegment) return '';
+    return job.currentSegment.split(/[\\/]/).filter(Boolean).slice(-3).join('/');
+  }
+
+  currentSegmentSize(job: AstralOptimizationJob): string {
+    if (!job.currentSegmentSize) return '';
+    if (!job.optimizedSegmentSize || job.optimizedSegmentSize >= job.currentSegmentSize) {
+      return this.formatBytes(job.currentSegmentSize);
+    }
+
+    const savedBytes = job.currentSegmentSize - job.optimizedSegmentSize;
+    const savedPercent = Math.round((savedBytes / job.currentSegmentSize) * 100);
+    return `${this.formatBytes(savedBytes)} saved on segment (${savedPercent}%)`;
+  }
+
+  packageProgress(job: AstralOptimizationJob): string {
+    if (!job.packageTotalBytes || job.packageTotalBytes <= 0) return '';
+    return `${this.formatBytes(job.packageCurrentBytes)} / ${this.formatBytes(job.packageTotalBytes)} packaged`;
+  }
+
   private isRecent(job: AstralOptimizationJob): boolean {
     return !!job.finishedAt && Date.now() - job.finishedAt < 15000;
   }

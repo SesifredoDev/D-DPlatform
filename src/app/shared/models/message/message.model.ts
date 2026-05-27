@@ -2,6 +2,12 @@ export interface Attachment {
   url: string;
   name: string;
   contentType: string;
+  astral?: {
+    manifestUrl: string;
+    mediaUrlTemplate: string;
+    packageUrl?: string;
+    packageSize?: number;
+  };
   id?: string;
   key?: string;
   filename?: string;

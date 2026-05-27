@@ -42,7 +42,7 @@ export function getDownloadableAstralPackagePath(
   recording: SessionRecording | null | undefined
 ): string | null {
   const recordingPackage = recording?.package;
-  if (!recordingPackage?.path || isAstralPackageAwaitingOptimization(recording)) {
+  if (!recordingPackage?.path) {
     return null;
   }
 

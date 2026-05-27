@@ -112,6 +112,16 @@
               <span>Playback</span>
             </button>
           </div>
+
+          <button
+            *ngIf="isTauriDesktop"
+            type="button"
+            class="btn-recordings-library call-overlay-trigger"
+            (click)="openLocalRecordingsLibrary()"
+          >
+            <mat-icon>folder_open</mat-icon>
+            <span>Local Recordings</span>
+          </button>
         </div>
       </div>
     </div>
@@ -121,6 +131,15 @@
   @if (localStream || isCallPlaybackMode) {
     <div class="dm-recording-toolbar glass" *ngIf="showDmRecordingToolbar">
       <span class="dm-recording-status">{{ sessionRecordingStatusText }}</span>
+      <button
+        *ngIf="!isSessionRecording"
+        (click)="openLocalRecordingsLibrary()"
+        class="btn-action call-overlay-trigger"
+        matTooltip="Local recordings"
+      >
+        <mat-icon>folder_open</mat-icon>
+      </button>
+
       <button
         *ngIf="!isCallPlaybackMode"
         (click)="isSessionRecording ? stopSessionRecording() : startSessionRecording()"
@@ -434,9 +453,10 @@
 
     <div class="call-playback-controls glass" *ngIf="isCallPlaybackMode">
       <button type="button" class="btn-action" (click)="setCallPlaybackPaused(!callPlaybackPaused)" [matTooltip]="callPlaybackPaused ? 'Play recording' : 'Pause recording'">
-        <mat-icon>{{ callPlaybackPaused ? 'play_arrow' : 'pause' }}</mat-icon>
+        <mat-icon>{{ isCallPlaybackBuffering ? 'hourglass_empty' : (callPlaybackPaused ? 'play_arrow' : 'pause') }}</mat-icon>
       </button>
       <span class="playback-time">{{ formatSessionRecordingDuration(callPlaybackCurrentTimeMs) }}</span>
+      <span class="playback-time" *ngIf="isCallPlaybackBuffering">Buffering feeds</span>
       <div class="call-playback-spotify" *ngIf="playbackSpotifyState" [class.paused]="playbackSpotifyState.paused">
         <img class="spotify-playback-art" [src]="playbackSpotifyState.image || 'assets/spotify-placeholder.png'" alt="">
         <div class="spotify-playback-meta">
@@ -1206,6 +1226,134 @@
           <mat-icon>{{ pendingAstralPlaybackRequiresDisconnect ? 'call_end' : 'play_circle' }}</mat-icon>
           <span>{{ pendingAstralPlaybackRequiresDisconnect ? 'Disconnect and Play' : 'Play Recording' }}</span>
         </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="astral-playback-overlay" *ngIf="showLocalRecordingsLibrary">
+    <div class="local-recordings-panel glass call-overlay-content" role="dialog" aria-modal="true" aria-labelledby="localRecordingsTitle">
+      <div class="local-recordings-header">
+        <div class="local-recordings-title">
+          <span class="astral-prompt-kicker">Astral Session Recording</span>
+          <h2 id="localRecordingsTitle">Local Recordings</h2>
+        </div>
+        <div class="local-recordings-actions">
+          <button
+            type="button"
+            class="local-recordings-icon-button"
+            (click)="refreshLocalRecordings()"
+            [disabled]="isLoadingLocalRecordings"
+            aria-label="Refresh local recordings"
+            matTooltip="Refresh"
+          >
+            <mat-icon>{{ isLoadingLocalRecordings ? 'hourglass_empty' : 'refresh' }}</mat-icon>
+          </button>
+          <button
+            type="button"
+            class="local-recordings-icon-button"
+            (click)="closeLocalRecordingsLibrary()"
+            aria-label="Close local recordings"
+            matTooltip="Close"
+          >
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="local-recordings-state" *ngIf="isLoadingLocalRecordings">
+        <mat-icon>hourglass_empty</mat-icon>
+        <span>Loading recordings...</span>
+      </div>
+
+      <div class="local-recordings-state error" *ngIf="!isLoadingLocalRecordings && localRecordingsError">
+        <mat-icon>error</mat-icon>
+        <span>{{ localRecordingsError }}</span>
+      </div>
+
+      <div class="local-recordings-state" *ngIf="!isLoadingLocalRecordings && !localRecordingsError && !localAstralRecordings.length && !localUnpackedRecordings.length">
+        <mat-icon>folder_open</mat-icon>
+        <span>No local recordings found.</span>
+      </div>
+
+      <div class="local-recordings-list" *ngIf="!isLoadingLocalRecordings && (localUnpackedRecordings.length || localAstralRecordings.length)">
+        <div class="local-recordings-section" *ngIf="localUnpackedRecordings.length">
+          <h3>Unpackaged</h3>
+          <div
+            class="local-recording-item local-recording-unpacked"
+            *ngFor="let recording of localUnpackedRecordings"
+            [class.error]="!!recording.readError"
+            [title]="recording.readError || recording.path"
+          >
+            <span class="local-recording-file-icon">
+              <mat-icon>{{ recording.readError ? 'warning' : 'folder' }}</mat-icon>
+            </span>
+            <span class="local-recording-meta">
+              <strong>{{ recording.name }}</strong>
+              <span>{{ recording.readError ? 'Cannot inspect raw recording' : getLocalRecordingSummary(recording) }}</span>
+              <small>{{ recording.hasManifest ? 'Manifest found' : 'Manifest will be generated' }} - {{ recording.path }}</small>
+            </span>
+            <span class="local-recording-actions">
+              <button
+                type="button"
+                class="local-recording-package-button"
+                (click)="playUnpackedRecording(recording, $event)"
+                [disabled]="isAstralPlaybackImporting || !!recording.readError"
+              >
+                <mat-icon>play_arrow</mat-icon>
+                <span>Play</span>
+              </button>
+              <button
+                type="button"
+                class="local-recording-package-button"
+                (click)="packageUnpackedRecording(recording, $event)"
+                [disabled]="!!recording.readError || isPackagingUnpackedRecording(recording)"
+              >
+                <mat-icon>{{ isPackagingUnpackedRecording(recording) ? 'hourglass_empty' : 'inventory_2' }}</mat-icon>
+                <span>{{ isPackagingUnpackedRecording(recording) ? 'Packaging' : 'Package' }}</span>
+              </button>
+            </span>
+          </div>
+        </div>
+
+        <div class="local-recordings-section" *ngIf="localAstralRecordings.length">
+          <h3>Packages</h3>
+          <div
+            class="local-recording-item local-recording-package"
+            *ngFor="let recording of localAstralRecordings"
+            [class.disabled]="isAstralPlaybackImporting || !!recording.readError"
+            [class.error]="!!recording.readError"
+            [title]="recording.readError || recording.path"
+          >
+            <span class="local-recording-file-icon">
+              <mat-icon>{{ recording.readError ? 'warning' : 'movie' }}</mat-icon>
+            </span>
+            <span class="local-recording-meta">
+              <strong>{{ recording.name }}</strong>
+              <span>{{ recording.readError ? 'Cannot inspect package' : getLocalRecordingSummary(recording) }}</span>
+              <small>{{ recording.path }}</small>
+            </span>
+            <span class="local-recording-actions">
+              <button
+                type="button"
+                class="local-recording-package-button"
+                (click)="playLocalRecording(recording)"
+                [disabled]="isAstralPlaybackImporting || !!recording.readError"
+              >
+                <mat-icon>play_arrow</mat-icon>
+                <span>Play</span>
+              </button>
+              <button
+                type="button"
+                class="local-recording-package-button local-recording-optimize-button"
+                (click)="optimizeLocalRecording(recording, $event)"
+                [disabled]="!!recording.readError || isOptimizingLocalRecording(recording)"
+              >
+                <mat-icon>{{ isOptimizingLocalRecording(recording) ? 'hourglass_empty' : 'speed' }}</mat-icon>
+                <span>{{ isOptimizingLocalRecording(recording) ? 'Optimizing' : 'Optimize' }}</span>
+              </button>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -290,6 +290,10 @@ export class VttSync implements OnDestroy {
     );
   }
 
+  captureRecordingState() {
+    this.captureCurrentVttRecordingState();
+  }
+
   startHosting(engine: VttEngine, roomId: string, options: StartHostingOptions = {}) {
     this.clearPendingEngineDetach();
     this.currentRoomId = roomId;

@@ -35,7 +35,36 @@ export interface AstralRecordingImportResponse {
   packagePath: string;
   packageSize: number;
   manifest: any;
+  streamingExtraction?: boolean;
+  remoteMediaUrlTemplate?: string;
   files?: Record<string, AstralImportedBrowserFile>;
+}
+
+export interface AstralLocalRecordingEntry {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  modifiedAtMs: number;
+  startedAt?: string | null;
+  durationMs?: number | null;
+  participantCount: number;
+  callRoomId?: string | null;
+  readError?: string | null;
+}
+
+export interface AstralUnpackedRecordingEntry {
+  id: string;
+  name: string;
+  path: string;
+  size: number;
+  modifiedAtMs: number;
+  startedAt?: string | null;
+  durationMs?: number | null;
+  participantCount: number;
+  segmentCount: number;
+  hasManifest: boolean;
+  readError?: string | null;
 }
 
 export interface AstralRecordingOptimizeOptions {
@@ -43,6 +72,11 @@ export interface AstralRecordingOptimizeOptions {
   targetAudioBitrateKbps?: number;
   maxHeight?: number;
   keepOriginal?: boolean;
+  cpuThreads?: number;
+  memoryLimitMb?: number;
+  preferHardwareEncoding?: boolean;
+  gpuVendor?: 'nvidia' | 'amd' | 'intel' | 'apple' | 'unknown';
+  gpuRenderer?: string;
 }
 
 export interface AstralRecordingOptimizeResponse {
@@ -71,5 +105,9 @@ export interface AstralRecordingWriteChunkInput {
   mimeType: string;
   startedAtMs: number;
   chunkStartedAtMs: number;
+  isLocal?: boolean;
+  userData?: unknown;
+  participantMeta?: unknown;
+  volumePercent?: number;
   blob: Blob;
 }

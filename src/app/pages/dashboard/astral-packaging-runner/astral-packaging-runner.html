@@ -1,0 +1,42 @@
+<ng-container *ngIf="visibleJobs(jobs$ | async) as jobs">
+  <div class="astral-runner-stack" *ngIf="jobs.length">
+    <section
+      class="astral-runner"
+      *ngFor="let job of jobs"
+      [class.completed]="job.status === 'completed'"
+      [class.failed]="job.status === 'failed'">
+      <div class="runner-icon" [class.spinning]="isActive(job)">
+        <mat-icon>{{ statusIcon(job) }}</mat-icon>
+      </div>
+
+      <div class="runner-body">
+        <div class="runner-header">
+          <div>
+            <div class="runner-title">Packaging Astral Recording</div>
+            <div class="runner-stage">{{ job.name }}</div>
+          </div>
+
+          <button
+            type="button"
+            class="runner-dismiss"
+            *ngIf="!isActive(job)"
+            (click)="astralPackagingQueue.dismissJob(job.id)"
+            aria-label="Dismiss Astral packaging status">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+
+        <div class="runner-progress">
+          <span [style.width.%]="job.progressPercent"></span>
+        </div>
+
+        <div class="runner-meta">
+          <span>{{ job.message }}</span>
+          <span *ngIf="progressBytes(job)">{{ progressBytes(job) }}</span>
+          <span *ngIf="job.status === 'completed'">{{ formatBytes(job.astralSize) }}</span>
+          <span *ngIf="job.status === 'failed'">{{ job.error }}</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</ng-container>

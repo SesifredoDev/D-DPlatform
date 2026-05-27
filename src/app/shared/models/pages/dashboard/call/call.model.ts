@@ -78,9 +78,12 @@ export interface CallPlaybackSource {
   participant: SessionRecordingParticipantMedia;
   video: HTMLVideoElement;
   stream: MediaStream | null;
+  streamCaptureBlocked: boolean;
   cleanup: Array<() => void>;
   active: boolean;
   ended: boolean;
+  sourceAttached: boolean;
+  sourceAttachFailedAt: number;
 }
 
 export interface RecordedCallParticipantSnapshot {

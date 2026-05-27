@@ -12,6 +12,12 @@ export interface AstralOptimizationJob {
   progressPercent: number;
   startedAt: number;
   finishedAt?: number;
+  segmentIndex?: number;
+  currentSegment?: string;
+  currentSegmentSize?: number;
+  optimizedSegmentSize?: number;
+  packageCurrentBytes?: number;
+  packageTotalBytes?: number;
   originalSize?: number;
   optimizedSize?: number;
   optimizedPath?: string;
@@ -26,4 +32,13 @@ export interface AstralOptimizationProgressEvent {
   message: string;
   current: number;
   total: number;
+  progressPercent?: number;
+  segmentIndex?: number;
+  currentSegment?: string | null;
+  currentSegmentSize?: number | null;
+  optimizedSegmentSize?: number | null;
+  optimizedSegmentCount?: number;
+  skippedSegmentCount?: number;
+  packageCurrentBytes?: number | null;
+  packageTotalBytes?: number | null;
 }

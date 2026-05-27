@@ -52,12 +52,16 @@ import type {
   SessionRecordingParticipantMedia
 } from '../../../shared/models/session-recording/session-recording.model';
 import { AstralRecordingService } from '../../../shared/services/astral-recording/astral-recording';
-import type { AstralRecordingImportResponse } from '../../../shared/models/astral-recording/astral-recording.model';
+import type { AstralLocalRecordingEntry, AstralRecordingImportResponse, AstralUnpackedRecordingEntry } from '../../../shared/models/astral-recording/astral-recording.model';
 import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
 import type { AstralPlaybackDropRequest } from '../../../shared/models/astral-recording/astral-playback-drop.model';
 import { AstralOptimizerService } from '../../../shared/services/astral-recording/astral-optimizer';
+import type { AstralOptimizationJob } from '../../../shared/services/astral-recording/astral-optimizer';
+import { AstralPackagingQueueService } from '../../../shared/services/astral-recording/astral-packaging-queue';
+import type { AstralPackagingJob } from '../../../shared/services/astral-recording/astral-packaging-queue';
 import { VttSync } from '../../../shared/services/vttsync/vttsync';
 import { CallSessionRecordingWorker, MicTestRecordingWorker } from './call-recording.workers';
+import { createAstralRecordingManifest } from './call-recording/call-recording-astral-manifest';
 import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
 import {
   CALL_DEFAULT_PC_SOURCE,
@@ -203,6 +207,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isCallPlaybackMode = false;
   isSavingAstralRecording = false;
   isTauriDesktop = false;
+  showLocalRecordingsLibrary = false;
+  isLoadingLocalRecordings = false;
+  packagingUnpackedRecordingIds = new Set<string>();
+  optimizingLocalRecordingPaths = new Set<string>();
+  localRecordingsError = '';
+  localAstralRecordings: AstralLocalRecordingEntry[] = [];
+  localUnpackedRecordings: AstralUnpackedRecordingEntry[] = [];
   pendingAstralPlaybackRequest: AstralPlaybackDropRequest | null = null;
   pendingAstralPlaybackFilename = '';
   pendingAstralPlaybackRequiresDisconnect = false;
@@ -320,6 +331,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   playbackLocalParticipantStream: ParticipantStream | null = null;
   playbackParticipantStreams: ParticipantStream[] = [];
   callPlaybackPaused = true;
+  isCallPlaybackBuffering = false;
   callPlaybackCurrentTimeMs = 0;
   callPlaybackDurationMs = 0;
   private callPlaybackSources: CallPlaybackSource[] = [];
@@ -332,13 +344,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private isSeekingCallPlaybackSources = false;
   private callPlaybackClockStartedAtMs = 0;
   private callPlaybackClockStartTimeMs = 0;
+  private callPlaybackBufferTimeMs = 0;
   private visiblePlaybackSyncToken = 0;
   private lastAppliedPlaybackSpotifySignature = '';
   private playbackSpotifyBaseState: RecordedSpotifyState | null = null;
   private playbackSpotifyRecordedAtMs = 0;
   private forceCallPlaybackEnvironmentReset = false;
   private readonly callPlaybackEnvironmentSeekResetThresholdMs = 1500;
+  private readonly callPlaybackPreloadWindowMs = 30000;
+  private readonly callPlaybackReleaseWindowMs = 120000;
+  private readonly callPlaybackAttachRetryMs = 1000;
+  private readonly callPlaybackBufferStartDriftMs = 750;
+  private readonly callPlaybackBufferResumeDriftMs = 250;
   private isImportingAstralPlayback = false;
+  private readonly astralOptimizationJobStatuses = new Map<string, AstralOptimizationJob['status']>();
+  private readonly astralPackagingJobStatuses = new Map<string, AstralPackagingJob['status']>();
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
   private readonly handleDeviceChangeBound = () => {
@@ -360,6 +380,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private sessionRecording: SessionRecordingService,
     private astralRecording: AstralRecordingService,
     private astralOptimizer: AstralOptimizerService,
+    private astralPackagingQueue: AstralPackagingQueueService,
     private astralPlaybackDrop: AstralPlaybackDropService,
     private vttSync: VttSync
   ) {
@@ -411,6 +432,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.bindAtmosphereState();
     this.bindDeviceRoutingState();
     this.bindSessionRecordingState();
+    this.bindAstralOptimizationState();
+    this.bindAstralPackagingState();
 
     this.checkServerOwner();
     this.cdr.detectChanges();
@@ -550,6 +573,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
+      this.recordMusicAction(state.command ?? 'sync', state, state.source ?? 'remote', recordedSpotifyState);
       if (recordedSpotifyState) {
         this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
       }
@@ -620,10 +644,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (!this.localStream) return;
 
     if (this.isServerOwner) {
+      const payload = { ...action.data, hostId: this.character.ownerId };
+      const recordedMusicState = this.createRecordedSpotifyStateFromSyncPayload(payload);
+      this.recordMusicAction(action.command, payload, action.source, recordedMusicState);
+
       if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
 
       this.syncDebounceTimer = setTimeout(() => {
-        const payload = { ...action.data, hostId: this.character.ownerId };
         const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
         if (recordedSpotifyState) {
           this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
@@ -634,6 +661,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (action.command === 'play' && action.data?.uri) {
+      this.recordMusicAction('request', action.data, action.source ?? 'manual', null);
       this.videoService.sendSpotifyRequest({
         uri: action.data.uri,
         name: action.data.name || 'Requested Song',
@@ -666,6 +694,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       this.videoService.sendSpotifyCommand('sync', payload, 'manual');
       const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
+      this.recordMusicAction('sync', payload, 'manual', recordedSpotifyState);
       if (recordedSpotifyState) {
         this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
       }
@@ -840,6 +869,74 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.handleAstralPlaybackRequest(request);
     }));
     this.handlePendingAstralPlaybackRequest();
+  }
+
+  private bindAstralPackagingState() {
+    this.subscriptions.add(this.astralPackagingQueue.jobs$.subscribe(jobs => {
+      this.packagingUnpackedRecordingIds = new Set(
+        jobs
+          .filter(job => this.isActiveAstralPackagingJob(job))
+          .map(job => job.recordingId)
+      );
+
+      const knownJobIds = new Set(jobs.map(job => job.id));
+      for (const jobId of Array.from(this.astralPackagingJobStatuses.keys())) {
+        if (!knownJobIds.has(jobId)) {
+          this.astralPackagingJobStatuses.delete(jobId);
+        }
+      }
+
+      const shouldRefreshLocalRecordings = jobs.some(job => {
+        const previousStatus = this.astralPackagingJobStatuses.get(job.id);
+        this.astralPackagingJobStatuses.set(job.id, job.status);
+        return previousStatus && previousStatus !== job.status && job.status === 'completed';
+      });
+
+      if (shouldRefreshLocalRecordings && this.showLocalRecordingsLibrary) {
+        void this.refreshLocalRecordings();
+        return;
+      }
+
+      this.cdr.detectChanges();
+    }));
+  }
+
+  private isActiveAstralPackagingJob(job: AstralPackagingJob): boolean {
+    return job.status === 'queued' || job.status === 'running';
+  }
+
+  private bindAstralOptimizationState() {
+    this.subscriptions.add(this.astralOptimizer.jobs$.subscribe(jobs => {
+      this.optimizingLocalRecordingPaths = new Set(
+        jobs
+          .filter(job => this.isActiveAstralOptimizationJob(job))
+          .map(job => job.packagePath)
+      );
+
+      const knownJobIds = new Set(jobs.map(job => job.id));
+      for (const jobId of Array.from(this.astralOptimizationJobStatuses.keys())) {
+        if (!knownJobIds.has(jobId)) {
+          this.astralOptimizationJobStatuses.delete(jobId);
+        }
+      }
+
+      const shouldRefreshLocalRecordings = jobs.some(job => {
+        const previousStatus = this.astralOptimizationJobStatuses.get(job.id);
+        this.astralOptimizationJobStatuses.set(job.id, job.status);
+        return previousStatus && previousStatus !== job.status && job.status === 'completed';
+      });
+
+      if (shouldRefreshLocalRecordings && this.showLocalRecordingsLibrary) {
+        void this.refreshLocalRecordings();
+        return;
+      }
+
+      this.cdr.detectChanges();
+    }));
+  }
+
+  private isActiveAstralOptimizationJob(job: AstralOptimizationJob): boolean {
+    return job.status === 'queued' || job.status === 'running';
   }
 
   checkServerOwner() {
@@ -1141,7 +1238,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get hasDownloadableAstralRecording(): boolean {
-    return !!getDownloadableAstralPackagePath(this.recordedSession);
+    return !!getDownloadableAstralPackagePath(this.recordedSession)
+      || this.hasRecoverableAstralMedia(this.recordedSession);
   }
 
   get hasOptimizedAstralRecording(): boolean {
@@ -1157,7 +1255,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get isPlaybackVttLive(): boolean {
-    return !!this.activePlaybackVttRoomId;
+    return !!this.activePlaybackVttRoomId ||
+      (this.isCallPlaybackMode && this.hasRecordedVttTimeline(this.recordedSession));
   }
 
   get recordedSessionDurationMs(): number {
@@ -1191,6 +1290,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.lastRecordedCallParticipantsSnapshot = '';
     this.recordCurrentCallEnvironmentInitialState();
+    this.vttSync.captureRecordingState();
     void this.recordCurrentSpotifyPlaybackState();
 
     const started = await this.callRecordingWorker.start();
@@ -1208,17 +1308,18 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const packagePath = getDownloadableAstralPackagePath(recording);
-    if (!packagePath) {
-      const message = recording?.package?.path
-        ? 'This .astral recording is still being optimized. The download will be available when optimization completes.'
-        : 'This recording does not have a saved .astral package. Record in the Tauri desktop app to create one.';
-      this.snackBar.open(message, 'Close', { duration: 5000 });
-      return;
-    }
-
     this.isSavingAstralRecording = true;
     try {
+      const packagePath = getDownloadableAstralPackagePath(recording)
+        ?? await this.recoverAstralPackageForRecording(recording);
+      if (!packagePath) {
+        const message = recording?.package?.path
+          ? 'This .astral recording package could not be found.'
+          : 'This recording does not have a saved or recoverable .astral package.';
+        this.snackBar.open(message, 'Close', { duration: 5000 });
+        return;
+      }
+
       const result = await this.astralRecording.exportPackage(packagePath);
       this.snackBar.open(`Saved .astral recording to ${result.savedPath}`, 'Close', { duration: 6000 });
     } catch (error) {
@@ -1230,9 +1331,212 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
+  private async recoverAstralPackageForRecording(recording: SessionRecording | null): Promise<string | null> {
+    if (!recording || !hasPlayableCallRecording(recording)) {
+      return null;
+    }
+
+    const mediaPaths = this.getAstralMediaPaths(recording);
+    if (!mediaPaths.length) {
+      return null;
+    }
+
+    const packageResult = await this.astralRecording.recoverPackageFromMediaPaths(
+      createAstralRecordingManifest(recording),
+      mediaPaths
+    );
+    const recoveredRecording = this.sessionRecording.attachRecordingPackage(recording.id, {
+      storage: 'astral',
+      path: packageResult.astralPath,
+      size: packageResult.astralSize,
+      formatVersion: 1,
+      createdAt: new Date().toISOString(),
+      originalPath: packageResult.astralPath,
+      originalSize: packageResult.astralSize
+    });
+
+    if (recoveredRecording) {
+      this.recordedSession = recoveredRecording;
+    }
+
+    return packageResult.astralPath;
+  }
+
+  private hasRecoverableAstralMedia(recording: SessionRecording | null): boolean {
+    return !!recording && this.getAstralMediaPaths(recording).length > 0;
+  }
+
+  private getAstralMediaPaths(recording: SessionRecording): string[] {
+    const paths = [
+      recording.media?.path,
+      ...(recording.participantMedia ?? []).map(participant => participant.media?.path)
+    ];
+
+    return paths.filter((path): path is string => typeof path === 'string' && !!path.trim());
+  }
+
+  async openLocalRecordingsLibrary() {
+    if (!this.isTauriDesktop) {
+      this.snackBar.open('Local recordings are only available in the Tauri desktop app.', 'Close', { duration: 4000 });
+      return;
+    }
+
+    this.closeClickOffOverlays(false);
+    this.showLocalRecordingsLibrary = true;
+    await this.refreshLocalRecordings();
+  }
+
+  closeLocalRecordingsLibrary() {
+    this.showLocalRecordingsLibrary = false;
+  }
+
+  async refreshLocalRecordings() {
+    if (this.isLoadingLocalRecordings) {
+      return;
+    }
+
+    this.isLoadingLocalRecordings = true;
+    this.localRecordingsError = '';
+    try {
+      const [packages, unpacked] = await Promise.all([
+        this.astralRecording.listLocalPackages(),
+        this.astralRecording.listUnpackedSessions()
+      ]);
+      this.localAstralRecordings = packages;
+      this.localUnpackedRecordings = unpacked;
+    } catch (error) {
+      console.error('Failed to list local Astral recordings', error);
+      this.localRecordingsError = 'Could not load local recordings.';
+    } finally {
+      this.isLoadingLocalRecordings = false;
+      this.cdr.detectChanges();
+    }
+  }
+
+  packageUnpackedRecording(recording: AstralUnpackedRecordingEntry, event?: Event) {
+    event?.stopPropagation();
+    if (recording.readError || this.isPackagingUnpackedRecording(recording)) {
+      return;
+    }
+
+    const job = this.astralPackagingQueue.enqueueUnpackedSession(recording);
+    if (!job) {
+      this.snackBar.open('Could not queue the unpacked recording for packaging.', 'Close', { duration: 4000 });
+      return;
+    }
+
+    this.packagingUnpackedRecordingIds = new Set(this.packagingUnpackedRecordingIds).add(recording.id);
+    this.snackBar.open('Packaging recording in the background.', 'Close', { duration: 3000 });
+    this.cdr.detectChanges();
+  }
+
+  isPackagingUnpackedRecording(recording: AstralUnpackedRecordingEntry): boolean {
+    return this.packagingUnpackedRecordingIds.has(recording.id);
+  }
+
+  optimizeLocalRecording(recording: AstralLocalRecordingEntry, event?: Event) {
+    event?.stopPropagation();
+    if (recording.readError || this.isOptimizingLocalRecording(recording)) {
+      return;
+    }
+
+    this.optimizingLocalRecordingPaths = new Set(this.optimizingLocalRecordingPaths).add(recording.path);
+    this.snackBar.open('Optimizing recording in the background.', 'Close', { duration: 3000 });
+    this.cdr.detectChanges();
+
+    void this.astralOptimizer.optimizeRecordingPackage(null, recording.path).then(result => {
+      if (!result) {
+        if (!this.isOptimizingLocalRecording(recording)) {
+          this.snackBar.open('Could not optimize the recording.', 'Close', { duration: 4000 });
+        }
+        return;
+      }
+
+      this.snackBar.open(`Optimized .astral recording: ${result.optimizedPath}`, 'Close', { duration: 6000 });
+      if (this.showLocalRecordingsLibrary) {
+        void this.refreshLocalRecordings();
+      }
+    }).catch(error => {
+      console.error('Failed to optimize local Astral recording', error);
+      this.snackBar.open('Could not optimize the recording.', 'Close', { duration: 4000 });
+    });
+  }
+
+  isOptimizingLocalRecording(recording: AstralLocalRecordingEntry): boolean {
+    return this.optimizingLocalRecordingPaths.has(recording.path);
+  }
+
+  playUnpackedRecording(recording: AstralUnpackedRecordingEntry, event?: Event) {
+    event?.stopPropagation();
+    if (recording.readError) {
+      this.snackBar.open('This unpackaged recording could not be inspected.', 'Close', { duration: 4000 });
+      return;
+    }
+
+    this.closeLocalRecordingsLibrary();
+    this.promptAstralPlaybackRequest({
+      channelId: this.channelId,
+      path: recording.path,
+      unpacked: true,
+      filename: recording.name
+    });
+  }
+
+  playLocalRecording(recording: AstralLocalRecordingEntry) {
+    if (recording.readError) {
+      this.snackBar.open('This local .astral package could not be inspected.', 'Close', { duration: 4000 });
+      return;
+    }
+
+    this.closeLocalRecordingsLibrary();
+    this.promptAstralPlaybackRequest({
+      channelId: this.channelId,
+      path: recording.path,
+      filename: recording.name
+    });
+  }
+
+  getLocalRecordingSummary(recording: AstralLocalRecordingEntry | AstralUnpackedRecordingEntry): string {
+    return [
+      this.formatLocalRecordingDate(recording),
+      recording.durationMs ? this.formatSessionRecordingDuration(recording.durationMs) : null,
+      this.formatFileSize(recording.size),
+      recording.participantCount ? `${recording.participantCount} participant${recording.participantCount === 1 ? '' : 's'}` : null,
+      'segmentCount' in recording && recording.segmentCount ? `${recording.segmentCount} segment${recording.segmentCount === 1 ? '' : 's'}` : null
+    ].filter(Boolean).join(' - ');
+  }
+
+  private formatLocalRecordingDate(recording: AstralLocalRecordingEntry | AstralUnpackedRecordingEntry): string {
+    const timestamp = recording.startedAt ? Date.parse(recording.startedAt) : recording.modifiedAtMs;
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+      return 'Unknown date';
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(new Date(timestamp));
+  }
+
+  private formatFileSize(size: number): string {
+    if (!Number.isFinite(size) || size <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = size;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+
+    return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+  }
+
   private promptAstralPlaybackRequest(request: AstralPlaybackDropRequest) {
     if (this.isSessionRecording) {
-      this.snackBar.open('Stop recording before playing an .astral file.', 'Close', {
+      this.snackBar.open('Stop recording before playing a recording.', 'Close', {
         duration: 4000
       });
       return;
@@ -1245,7 +1549,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const filename = request.filename || request.file?.name || 'dropped .astral recording';
+    const filename = request.filename || request.file?.name || (request.unpacked ? 'unpackaged recording' : 'dropped .astral recording');
     this.pendingAstralPlaybackRequest = request;
     this.pendingAstralPlaybackFilename = filename;
     this.pendingAstralPlaybackRequiresDisconnect = this.hasActiveLiveCallConnection();
@@ -1315,27 +1619,39 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     this.isImportingAstralPlayback = true;
     this.sessionRecordingError = '';
-    const loadingRef = this.snackBar.open('Loading .astral recording...', 'Close');
+    const loadingRef = this.snackBar.open('Loading recording...', 'Close');
 
     try {
       if (this.isCallPlaybackMode) {
         this.stopSessionPlayback();
       }
 
-      const imported = request.file
-        ? await this.astralRecording.importPackageFile(request.file)
-        : request.url
-          ? await this.astralRecording.importPackageFromUrl(request.url, request.filename)
-          : null;
+      const imported = request.path
+        ? request.unpacked
+          ? await this.astralRecording.importUnpackedSessionFromPath(request.path)
+          : await this.astralRecording.importPackageFromPath(request.path)
+        : request.file
+          ? await this.astralRecording.importPackageFile(request.file)
+          : request.remoteManifestUrl && request.remoteMediaUrlTemplate
+            ? await this.astralRecording.importRemoteManifestPackage(
+                request.remoteManifestUrl,
+                request.remoteMediaUrlTemplate,
+                request.url,
+                request.filename,
+                request.packageSize
+              )
+          : request.url
+            ? await this.astralRecording.importPackageFromUrl(request.url, request.filename)
+            : null;
       if (!imported) {
-        this.sessionRecordingError = 'No .astral recording source found';
+        this.sessionRecordingError = 'No recording source found';
         this.snackBar.open(this.sessionRecordingError, 'Close', { duration: 4000 });
         return;
       }
 
       const recording = await this.createSessionRecordingFromAstralImport(imported);
-    if (!hasPlayableCallRecording(recording)) {
-        this.sessionRecordingError = 'Imported .astral file has no playable media';
+      if (!hasPlayableCallRecording(recording)) {
+        this.sessionRecordingError = 'Imported recording has no playable media';
         this.snackBar.open(this.sessionRecordingError, 'Close', { duration: 5000 });
         return;
       }
@@ -1343,9 +1659,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const loadedRecording = this.sessionRecording.loadRecording(recording);
       this.recordedSession = loadedRecording;
       this.startSessionPlayback(loadedRecording);
+      if (imported.streamingExtraction) {
+        this.snackBar.open('Streaming .astral playback while media extracts in the background.', 'Close', { duration: 5000 });
+      }
     } catch (error) {
       console.error('Failed to import Astral recording', error);
-      this.sessionRecordingError = 'Could not load the .astral recording';
+      this.sessionRecordingError = 'Could not load the recording';
       this.snackBar.open(this.sessionRecordingError, 'Close', {
         duration: 5000
       });
@@ -1360,7 +1679,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const manifest = imported.manifest ?? {};
     const sourceRecording = manifest.recording ?? manifest;
     const participantMedia = await this.createImportedAstralParticipantMedia(imported, sourceRecording.participantMedia);
-      const durationMs = getImportedRecordingDurationMs(sourceRecording, participantMedia);
+    const durationMs = getImportedRecordingDurationMs(sourceRecording, participantMedia);
+    const packagePath = typeof imported.packagePath === 'string' ? imported.packagePath : '';
+    const recordingPackage = !imported.remoteMediaUrlTemplate && packagePath.toLowerCase().endsWith('.astral')
+      ? {
+          storage: 'astral' as const,
+          path: packagePath,
+          size: imported.packageSize,
+          formatVersion: Number(manifest.formatVersion) || 1,
+          createdAt: manifest.packagedAt ?? new Date().toISOString()
+        }
+      : null;
 
     return {
       id: `${sourceRecording.id || 'astral-recording'}:${imported.sessionId}`,
@@ -1370,13 +1699,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       durationMs,
       media: await this.createImportedAstralMedia(imported, sourceRecording.media),
       participantMedia,
-      package: {
-        storage: 'astral',
-        path: imported.packagePath,
-        size: imported.packageSize,
-        formatVersion: Number(manifest.formatVersion) || 1,
-        createdAt: manifest.packagedAt ?? new Date().toISOString()
-      },
+      package: recordingPackage,
       vtt: {
         roomId: sourceRecording.vtt?.roomId ?? sourceRecording.callRoomId ?? null,
         initialState: sourceRecording.vtt?.initialState ?? null,
@@ -1486,12 +1809,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   openSessionPlaybackVtt(recording: SessionRecording | null = this.recordedSession) {
     const roomId = this.activePlaybackVttRoomId || recording?.vtt.roomId || this.getVttRoomId();
-    if (!this.activePlaybackVttRoomId && this.isCallPlaybackMode) {
+    if (!this.activePlaybackVttRoomId && this.isCallPlaybackMode && !this.hasRecordedVttTimeline(recording)) {
       this.sessionRecordingError = 'VTT replay is not live at this point';
       return;
     }
 
     this.playbackVtt.emit(roomId);
+  }
+
+  private hasRecordedVttTimeline(recording: SessionRecording | null | undefined): boolean {
+    return !!recording?.vtt?.initialState || !!recording?.vtt?.actions?.length;
   }
 
   formatSessionRecordingDuration(durationMs: number | null | undefined): string {
@@ -1644,6 +1971,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         case 'vtt-session':
           this.applyRecordedVttSession(data);
           break;
+        case 'music-action':
+          this.applyRecordedMusicAction(data, event.timeMs, this.callPlaybackCurrentTimeMs);
+          break;
         case 'spotify-state':
           this.applyRecordedSpotifyState(data, event.timeMs, this.callPlaybackCurrentTimeMs);
           break;
@@ -1761,6 +2091,23 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     );
   }
 
+  private applyRecordedMusicAction(
+    actionEvent: any,
+    recordedAtMs: number = this.callPlaybackCurrentTimeMs,
+    playbackTimeMs: number = this.callPlaybackCurrentTimeMs
+  ) {
+    const recordedState = actionEvent?.state
+      ?? this.createRecordedSpotifyStateFromSyncPayload(actionEvent?.data ?? actionEvent);
+    if (recordedState) {
+      this.applyRecordedSpotifyState(recordedState, recordedAtMs, playbackTimeMs);
+      return;
+    }
+
+    if (actionEvent?.command === 'volume' && Number.isFinite(Number(actionEvent?.data?.volumePercent))) {
+      this.setPlaybackSpotifyVolume(actionEvent.data.volumePercent);
+    }
+  }
+
   private applyRecordedSpotifyState(
     state: Partial<RecordedSpotifyState> | null | undefined,
     recordedAtMs: number = this.callPlaybackCurrentTimeMs,
@@ -1870,7 +2217,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    const shouldPlay = state.playing && !this.callPlaybackPaused;
+    const shouldPlay = state.playing && !this.callPlaybackPaused && !this.isCallPlaybackBuffering;
     const signature = [
       state.uri,
       shouldPlay ? 'playing' : 'paused',
@@ -1901,6 +2248,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private recordSpotifyRequestsSnapshot() {
     this.recordCallEnvironmentEvent('spotify-requests', cloneSpotifyRequests(this.spotifyRequests));
+  }
+
+  private recordMusicAction(
+    command: string | null | undefined,
+    data: any,
+    source: string | null | undefined = 'manual',
+    state: RecordedSpotifyState | null = null
+  ) {
+    if (!command) {
+      return;
+    }
+
+    this.recordCallEnvironmentEvent('music-action', {
+      command,
+      source: source ?? 'manual',
+      data,
+      state
+    });
   }
 
   private async recordCurrentSpotifyPlaybackState() {
@@ -2079,10 +2444,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const isStillFrame = this.isStillFrameMedia(participant.media);
       const video = document.createElement('video');
       video.playsInline = true;
-      video.preload = 'auto';
+      video.preload = 'none';
       video.volume = Math.min(1, Math.max(0, participant.volumePercent / 100));
       if (!isStillFrame) {
-        video.src = participant.media.url;
         host.appendChild(video);
         void this.applyAudioOutputToMediaElement(video);
       }
@@ -2090,10 +2454,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const source: CallPlaybackSource = {
         participant,
         video,
-        stream: isStillFrame ? null : this.capturePlaybackVideoStream(video),
+        stream: null,
+        streamCaptureBlocked: false,
         cleanup: [],
         active: false,
-        ended: false
+        ended: false,
+        sourceAttached: isStillFrame,
+        sourceAttachFailedAt: 0
       };
       if (!isStillFrame) {
         this.bindPlaybackSourceVideoReadiness(source);
@@ -2105,12 +2472,28 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private capturePlaybackVideoStream(video: HTMLVideoElement): MediaStream | null {
-    return (video as HTMLVideoElement & {
+    if (video.dataset['playbackCaptureBlocked'] === '1') {
+      return null;
+    }
+
+    const captureVideo = video as HTMLVideoElement & {
       captureStream?: () => MediaStream;
       mozCaptureStream?: () => MediaStream;
-    }).captureStream?.() ?? (video as HTMLVideoElement & {
-      mozCaptureStream?: () => MediaStream;
-    }).mozCaptureStream?.() ?? null;
+    };
+    if (!captureVideo.captureStream && !captureVideo.mozCaptureStream) {
+      video.dataset['playbackCaptureBlocked'] = '1';
+      return null;
+    }
+
+    try {
+      return captureVideo.captureStream?.() ?? captureVideo.mozCaptureStream?.() ?? null;
+    } catch (error) {
+      video.dataset['playbackCaptureBlocked'] = '1';
+      if ((error as Error | DOMException)?.name !== 'SecurityError') {
+        console.warn('Could not capture playback media stream', error);
+      }
+      return null;
+    }
   }
 
   private bindPlaybackSourceVideoReadiness(source: CallPlaybackSource) {
@@ -2132,6 +2515,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     source.video.addEventListener('ended', markSourceEnded);
     source.cleanup.push(() => source.video.removeEventListener('ended', markSourceEnded));
 
+    const markSourceLoadFailed = () => {
+      if (!source.sourceAttached) {
+        return;
+      }
+
+      source.sourceAttachFailedAt = Date.now();
+      this.detachPlaybackSourceMedia(source);
+    };
+    source.video.addEventListener('error', markSourceLoadFailed);
+    source.cleanup.push(() => source.video.removeEventListener('error', markSourceLoadFailed));
+
     const refreshInterval = window.setInterval(refreshSourceStream, 250);
     const refreshTimeout = window.setTimeout(() => window.clearInterval(refreshInterval), 4000);
     source.cleanup.push(() => {
@@ -2141,7 +2535,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private updatePlaybackSourceStream(source: CallPlaybackSource): boolean {
+    if (source.streamCaptureBlocked) {
+      return false;
+    }
+
     const nextStream = this.capturePlaybackVideoStream(source.video);
+    if (source.video.dataset['playbackCaptureBlocked'] === '1') {
+      source.streamCaptureBlocked = true;
+    }
     if (!nextStream) {
       return false;
     }
@@ -2175,6 +2576,75 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return !this.hasVideoTrack(currentStream) && this.hasVideoTrack(nextStream);
   }
 
+  private ensurePlaybackSourceMediaAttached(source: CallPlaybackSource): boolean {
+    if (this.hasStillFrameMedia(source)) {
+      return true;
+    }
+
+    if (source.sourceAttached && source.video.src) {
+      return true;
+    }
+
+    if (Date.now() - source.sourceAttachFailedAt < this.callPlaybackAttachRetryMs) {
+      return false;
+    }
+
+    const sourceUrl = source.participant.media.url;
+    if (!sourceUrl) {
+      return false;
+    }
+
+    source.video.playsInline = true;
+    source.video.preload = 'metadata';
+    source.video.src = sourceUrl;
+    source.sourceAttached = true;
+    source.sourceAttachFailedAt = 0;
+    if (this.callPlaybackMediaHost && !source.video.parentElement) {
+      this.callPlaybackMediaHost.appendChild(source.video);
+    }
+    void this.applyAudioOutputToMediaElement(source.video);
+    source.video.load();
+
+    if (!source.streamCaptureBlocked) {
+      const nextStream = this.capturePlaybackVideoStream(source.video);
+      if (source.video.dataset['playbackCaptureBlocked'] === '1') {
+        source.streamCaptureBlocked = true;
+      }
+      if (nextStream) {
+        source.stream = nextStream;
+      }
+    }
+    return true;
+  }
+
+  private detachPlaybackSourceMedia(source: CallPlaybackSource) {
+    if (this.hasStillFrameMedia(source) || !source.sourceAttached) {
+      return;
+    }
+
+    source.video.pause();
+    source.video.removeAttribute('src');
+    source.video.load();
+    source.stream = null;
+    source.sourceAttached = false;
+  }
+
+  private shouldPreloadPlaybackSource(source: CallPlaybackSource, currentTimeMs: number): boolean {
+    return currentTimeMs >= source.participant.startedAtMs - this.callPlaybackPreloadWindowMs &&
+      currentTimeMs <= source.participant.endedAtMs + 1000;
+  }
+
+  private shouldReleasePlaybackSource(source: CallPlaybackSource, currentTimeMs: number): boolean {
+    return currentTimeMs < source.participant.startedAtMs - this.callPlaybackPreloadWindowMs ||
+      currentTimeMs > source.participant.endedAtMs + this.callPlaybackReleaseWindowMs;
+  }
+
+  private preloadUpcomingPlaybackSources(currentTimeMs: number) {
+    this.callPlaybackSources
+      .filter(source => !this.hasStillFrameMedia(source) && this.shouldPreloadPlaybackSource(source, currentTimeMs))
+      .forEach(source => this.ensurePlaybackSourceMediaAttached(source));
+  }
+
   private cleanupCallPlaybackSources() {
     this.stopCallPlaybackSyncTimer();
     Array.from(this.visiblePlaybackSourceTargets.values()).forEach(video => this.detachVisiblePlaybackSourceVideo(video));
@@ -2192,10 +2662,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.callPlaybackSourcesRecordingId = null;
     this.callPlaybackParticipantSnapshots.clear();
     this.callPlaybackPaused = true;
+    this.isCallPlaybackBuffering = false;
     this.callPlaybackCurrentTimeMs = 0;
     this.callPlaybackDurationMs = 0;
     this.callPlaybackClockStartedAtMs = 0;
     this.callPlaybackClockStartTimeMs = 0;
+    this.callPlaybackBufferTimeMs = 0;
     this.visiblePlaybackSyncToken = 0;
     this.activePlaybackVttRoomId = null;
     this.playbackSpotifyState = null;
@@ -2215,6 +2687,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.refreshCallPlaybackParticipantStreams(state.currentTimeMs);
     if (state.paused) {
       this.pauseCallPlaybackSources();
+    } else if (this.isCallPlaybackBuffering) {
+      this.continueCallPlaybackBuffering();
     } else {
       this.playCallPlaybackSources();
     }
@@ -2222,11 +2696,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private seekCallPlaybackSources(currentTimeMs: number) {
     this.isSeekingCallPlaybackSources = true;
+    this.isCallPlaybackBuffering = false;
+    this.callPlaybackBufferTimeMs = 0;
     this.callPlaybackCurrentTimeMs = currentTimeMs;
     this.visiblePlaybackSyncToken += 1;
     this.callPlaybackSources.forEach(source => {
       source.ended = false;
       if (this.hasStillFrameMedia(source)) {
+        return;
+      }
+
+      if (!this.shouldPreloadPlaybackSource(source, currentTimeMs)) {
+        this.detachPlaybackSourceMedia(source);
+        return;
+      }
+
+      if (!this.ensurePlaybackSourceMediaAttached(source)) {
         return;
       }
 
@@ -2242,8 +2727,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private playCallPlaybackSources() {
-    this.startCallPlaybackClock(this.callPlaybackCurrentTimeMs);
     this.refreshCallPlaybackParticipantStreams(this.callPlaybackCurrentTimeMs);
+    if (this.shouldBufferCallPlaybackAt(this.callPlaybackCurrentTimeMs, this.callPlaybackBufferStartDriftMs)) {
+      this.startCallPlaybackBuffering(this.callPlaybackCurrentTimeMs);
+      this.startCallPlaybackSyncTimer();
+      return;
+    }
+
+    this.isCallPlaybackBuffering = false;
+    this.callPlaybackBufferTimeMs = 0;
+    this.startCallPlaybackClock(this.callPlaybackCurrentTimeMs);
     this.callPlaybackSources
       .filter(source => source.active && !source.ended)
       .forEach(source => this.playPlaybackMediaSource(source));
@@ -2252,9 +2745,124 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private pauseCallPlaybackSources() {
     this.callPlaybackCurrentTimeMs = this.getCurrentCallPlaybackTimeMs();
+    this.isCallPlaybackBuffering = false;
+    this.callPlaybackBufferTimeMs = 0;
     this.callPlaybackClockStartedAtMs = 0;
     this.callPlaybackSources.forEach(source => source.video.pause());
     this.stopCallPlaybackSyncTimer();
+  }
+
+  private startCallPlaybackBuffering(currentTimeMs: number) {
+    const bufferTimeMs = Math.max(0, Math.min(this.callPlaybackDurationMs || currentTimeMs, currentTimeMs));
+    this.isCallPlaybackBuffering = true;
+    this.callPlaybackBufferTimeMs = bufferTimeMs;
+    this.callPlaybackCurrentTimeMs = bufferTimeMs;
+    this.callPlaybackClockStartedAtMs = 0;
+    this.callPlaybackSources.forEach(source => {
+      if (this.hasStillFrameMedia(source)) {
+        return;
+      }
+
+      source.video.pause();
+      if (this.isCallPlaybackSourceActive(source, bufferTimeMs)) {
+        this.preparePlaybackSourceForBuffering(source, bufferTimeMs);
+      }
+    });
+    this.syncRecordedSpotifyPlaybackForTime(bufferTimeMs, true);
+    this.cdr.detectChanges();
+  }
+
+  private continueCallPlaybackBuffering() {
+    if (!this.isCallPlaybackBuffering || this.callPlaybackPaused) {
+      return;
+    }
+
+    const bufferTimeMs = this.callPlaybackBufferTimeMs || this.callPlaybackCurrentTimeMs;
+    this.callPlaybackCurrentTimeMs = bufferTimeMs;
+    this.callPlaybackSources
+      .filter(source => this.isCallPlaybackSourceActive(source, bufferTimeMs))
+      .forEach(source => this.preparePlaybackSourceForBuffering(source, bufferTimeMs));
+
+    if (this.shouldBufferCallPlaybackAt(bufferTimeMs, this.callPlaybackBufferResumeDriftMs)) {
+      return;
+    }
+
+    this.resumeCallPlaybackAfterBuffering(bufferTimeMs);
+  }
+
+  private resumeCallPlaybackAfterBuffering(currentTimeMs: number) {
+    this.isCallPlaybackBuffering = false;
+    this.callPlaybackBufferTimeMs = 0;
+    this.visiblePlaybackSyncToken += 1;
+    this.callPlaybackCurrentTimeMs = currentTimeMs;
+    this.refreshCallPlaybackParticipantStreams(currentTimeMs);
+    this.callPlaybackSources
+      .filter(source => source.active && !source.ended)
+      .forEach(source => this.playPlaybackMediaSource(source));
+    this.startCallPlaybackClock(currentTimeMs);
+    this.syncRecordedSpotifyPlaybackForTime(currentTimeMs, true);
+    this.cdr.detectChanges();
+  }
+
+  private preparePlaybackSourceForBuffering(source: CallPlaybackSource, currentTimeMs: number) {
+    if (this.hasStillFrameMedia(source)) {
+      return;
+    }
+
+    if (!this.ensurePlaybackSourceMediaAttached(source)) {
+      return;
+    }
+
+    const expectedTimeSeconds = this.getPlaybackSourceExpectedTimeSeconds(source, currentTimeMs);
+    if (
+      source.video.readyState >= HTMLMediaElement.HAVE_METADATA &&
+      (!Number.isFinite(source.video.currentTime) || Math.abs(source.video.currentTime - expectedTimeSeconds) > 0.35)
+    ) {
+      this.setPlaybackMediaTime(source.video, expectedTimeSeconds);
+    }
+  }
+
+  private shouldBufferCallPlaybackAt(currentTimeMs: number, driftThresholdMs: number): boolean {
+    return this.callPlaybackSources
+      .filter(source => this.isCallPlaybackSourceActive(source, currentTimeMs))
+      .some(source => !this.isPlaybackSourceCaughtUp(source, currentTimeMs, driftThresholdMs));
+  }
+
+  private isPlaybackSourceCaughtUp(source: CallPlaybackSource, currentTimeMs: number, driftThresholdMs: number): boolean {
+    if (this.hasStillFrameMedia(source) || source.ended) {
+      return true;
+    }
+
+    if (!this.ensurePlaybackSourceMediaAttached(source)) {
+      return false;
+    }
+
+    const video = source.video;
+    if (video.ended) {
+      return currentTimeMs >= source.participant.endedAtMs - 500;
+    }
+
+    if (video.error || video.seeking || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return false;
+    }
+
+    const expectedTimeMs = this.getPlaybackSourceExpectedTimeSeconds(source, currentTimeMs) * 1000;
+    const actualTimeMs = Number.isFinite(video.currentTime) ? video.currentTime * 1000 : 0;
+    const lagMs = expectedTimeMs - actualTimeMs;
+    if (lagMs > driftThresholdMs) {
+      return false;
+    }
+
+    if (actualTimeMs - expectedTimeMs > this.callPlaybackBufferStartDriftMs) {
+      this.setPlaybackMediaTime(video, expectedTimeMs / 1000);
+      return false;
+    }
+
+    return true;
+  }
+
+  private getPlaybackSourceExpectedTimeSeconds(source: CallPlaybackSource, currentTimeMs: number): number {
+    return Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000;
   }
 
   setCallPlaybackPaused(paused: boolean) {
@@ -2300,11 +2908,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         return;
       }
 
-      const currentTimeMs = this.getCurrentCallPlaybackTimeMs();
+      const currentTimeMs = this.isCallPlaybackBuffering
+        ? this.callPlaybackBufferTimeMs
+        : this.getCurrentCallPlaybackTimeMs();
       this.callPlaybackCurrentTimeMs = currentTimeMs;
       this.sessionRecording.setPlaybackTime(currentTimeMs, this.callPlaybackPaused);
       this.refreshCallPlaybackParticipantStreams(currentTimeMs);
-      if (!this.callPlaybackPaused) {
+      if (!this.callPlaybackPaused && this.isCallPlaybackBuffering) {
+        this.continueCallPlaybackBuffering();
+      } else if (!this.callPlaybackPaused) {
+        if (this.shouldBufferCallPlaybackAt(currentTimeMs, this.callPlaybackBufferStartDriftMs)) {
+          this.startCallPlaybackBuffering(currentTimeMs);
+          return;
+        }
+
         this.callPlaybackSources
           .filter(source => source.active && source.video.paused && !source.ended && !this.hasStillFrameMedia(source))
           .forEach(source => this.playPlaybackMediaSource(source));
@@ -2339,7 +2956,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private playPlaybackMediaSource(source: CallPlaybackSource) {
-    if (this.hasStillFrameMedia(source)) {
+    if (this.hasStillFrameMedia(source) || this.isCallPlaybackBuffering) {
+      return;
+    }
+
+    if (!this.ensurePlaybackSourceMediaAttached(source)) {
       return;
     }
 
@@ -2352,18 +2973,22 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private refreshCallPlaybackParticipantStreams(currentTimeMs: number) {
+    this.preloadUpcomingPlaybackSources(currentTimeMs);
     this.callPlaybackSources.forEach(source => {
       const isActive = this.isCallPlaybackSourceActive(source, currentTimeMs);
       if (!isActive) {
         source.active = false;
         source.video.pause();
+        if (this.shouldReleasePlaybackSource(source, currentTimeMs)) {
+          this.detachPlaybackSourceMedia(source);
+        }
         return;
       }
 
       if (!source.active) {
         source.active = true;
         source.ended = false;
-        if (!this.hasStillFrameMedia(source)) {
+        if (!this.hasStillFrameMedia(source) && this.ensurePlaybackSourceMediaAttached(source)) {
           this.setPlaybackMediaTime(source.video, Math.max(0, currentTimeMs - source.participant.startedAtMs) / 1000);
         }
       }
@@ -2469,6 +3094,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
       if (video && !stream) {
         this.clearLiveRemoteVideoTrackAttachment(video);
+        this.clearVisiblePlaybackMediaElement(video);
         if (video.srcObject) {
           video.srcObject = null;
         }
@@ -2546,7 +3172,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       const stream = this.playbackLocalParticipantStream?.stream ?? null;
-      if (video.srcObject !== stream) {
+      if (video.srcObject !== stream || video.dataset['playbackElementSourceKey']) {
         this.clearVisiblePlaybackMediaElement(video);
         video.srcObject = stream;
         this.playMediaElement(video);
@@ -2567,6 +3193,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private bindVisiblePlaybackSourceVideo(targetVideo: HTMLVideoElement, source: CallPlaybackSource) {
+    if (!this.ensurePlaybackSourceMediaAttached(source)) {
+      this.clearVisiblePlaybackMediaElement(targetVideo);
+      targetVideo.muted = true;
+      return;
+    }
+
     const sourceKey = this.getPlaybackSourceKey(source);
     const previousTarget = this.visiblePlaybackSourceTargets.get(sourceKey);
     if (previousTarget && previousTarget !== targetVideo) {
@@ -2587,7 +3219,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     source.video.playsInline = true;
-    source.video.preload = 'auto';
+    source.video.preload = 'metadata';
     source.video.muted = false;
     source.video.style.display = 'block';
     source.video.style.visibility = '';
@@ -2602,7 +3234,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     source.video.classList.add('call-playback-visible-video');
     void this.applyAudioOutputToMediaElement(source.video);
 
-    if (this.callPlaybackPaused || source.ended) {
+    if (this.callPlaybackPaused || this.isCallPlaybackBuffering || source.ended) {
       if (!source.video.paused) {
         source.video.pause();
       }
@@ -2659,12 +3291,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       video.dataset['playbackSourceUrl'] = sourceUrl;
       video.src = sourceUrl;
       video.playsInline = true;
-      video.preload = 'auto';
+      video.preload = 'metadata';
     }
 
     video.muted = true;
     const syncToken = String(this.visiblePlaybackSyncToken);
-    if (isNewSource || video.dataset['playbackSyncToken'] !== syncToken || this.callPlaybackPaused) {
+    if (isNewSource || video.dataset['playbackSyncToken'] !== syncToken || this.callPlaybackPaused || this.isCallPlaybackBuffering) {
       const sourceTime = Math.max(0, this.callPlaybackCurrentTimeMs - source.participant.startedAtMs) / 1000;
       this.setPlaybackMediaTime(video, sourceTime);
       video.dataset['playbackSyncToken'] = syncToken;
@@ -2672,7 +3304,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.correctVisiblePlaybackMediaDrift(video, source);
     }
 
-    if (this.callPlaybackPaused || source.ended) {
+    if (this.callPlaybackPaused || this.isCallPlaybackBuffering || source.ended) {
       if (!video.paused) {
         video.pause();
       }
@@ -2723,7 +3355,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private correctVisiblePlaybackMediaDrift(video: HTMLVideoElement, source: CallPlaybackSource) {
-    if (this.callPlaybackPaused || source.ended || video.seeking || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+    if (this.callPlaybackPaused || this.isCallPlaybackBuffering || source.ended || video.seeking || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       return;
     }
 
@@ -3758,6 +4390,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     if (this.pendingAstralPlaybackRequest) {
       this.cancelAstralPlaybackPrompt();
+    }
+
+    if (this.showLocalRecordingsLibrary) {
+      this.closeLocalRecordingsLibrary();
     }
 
     this.closeSessionNotePicker();

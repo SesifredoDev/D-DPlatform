@@ -27,6 +27,7 @@ import type {UnlistenFn} from '@tauri-apps/api/event';
 import {AstralPlaybackDropService} from '../../shared/services/astral-recording/astral-playback-drop';
 import {ServerService} from '../../shared/services/server/server';
 import {AstralOptimizationRunner} from './astral-optimization-runner/astral-optimization-runner';
+import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-runner';
 
 @Component({
   selector: 'app-dashboard',
@@ -45,7 +46,8 @@ import {AstralOptimizationRunner} from './astral-optimization-runner/astral-opti
     MatDialogModule,
     MatSnackBarModule,
     ObsidianViewComponent,
-    AstralOptimizationRunner
+    AstralOptimizationRunner,
+    AstralPackagingRunner
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',

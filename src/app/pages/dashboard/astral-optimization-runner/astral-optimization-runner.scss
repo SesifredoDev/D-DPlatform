@@ -1,8 +1,5 @@
 :host {
-  position: fixed;
-  top: 18px;
-  right: 18px;
-  z-index: 3200;
+  display: block;
   pointer-events: none;
 }
 
@@ -93,6 +90,17 @@
   white-space: nowrap;
 }
 
+.runner-detail {
+  margin-top: 3px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .runner-dismiss {
   width: 28px;
   height: 28px;
@@ -165,13 +173,6 @@
 }
 
 @media (max-width: 640px) {
-  :host {
-    top: auto;
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
-  }
-
   .astral-runner-stack {
     width: 100%;
   }

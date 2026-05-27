@@ -14,6 +14,12 @@
           <div>
             <div class="runner-title">Optimizing Astral Recording</div>
             <div class="runner-stage">{{ job.message }}</div>
+            <div
+              class="runner-detail"
+              *ngIf="currentSegmentLabel(job)"
+              [title]="job.currentSegment">
+              {{ currentSegmentLabel(job) }}
+            </div>
           </div>
 
           <button
@@ -31,7 +37,10 @@
         </div>
 
         <div class="runner-meta">
-          <span *ngIf="job.total > 0">{{ job.current }}/{{ job.total }} segments</span>
+          <span *ngIf="segmentProgress(job)">{{ segmentProgress(job) }}</span>
+          <span *ngIf="segmentCounts(job)">{{ segmentCounts(job) }}</span>
+          <span *ngIf="currentSegmentSize(job)">{{ currentSegmentSize(job) }}</span>
+          <span *ngIf="packageProgress(job)">{{ packageProgress(job) }}</span>
           <span *ngIf="job.status === 'completed'">{{ formatBytes(job.optimizedSize) }}</span>
           <span *ngIf="job.status === 'completed' && sizeDelta(job)">{{ sizeDelta(job) }}</span>
           <span *ngIf="job.status === 'failed'">{{ job.error }}</span>
