@@ -4140,14 +4140,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     try {
       const currentUserId = this.requireCurrentUserId();
+      const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
+
+      await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
+
       this.localStream = await this.getStreamForJoin();
       this.assertActiveLocalStream();
       this.syncMicInputMonitor();
       this.syncLiveStateFromPreview();
       this.applyLocalTrackStates();
 
-      const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
-      await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
       await this.videoService.startPlayback();
       await this.videoService.updateUserData(this.channelId, characterToBroadcast);
       await this.videoService.startProducing(this.localStream);
@@ -4219,6 +4221,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private async handleJoinFailure(error: unknown) {
     console.error('[CRITICAL] Join call failed:', error);
     this.joinError = this.getJoinErrorMessage(error);
+    const shouldRestartPreview = !this.isBackendJoinAuthorizationError(error);
     this.stopSoundCloudCallSyncTimers();
     await this.videoService.leaveCall(this.channelId).catch(cleanupError => {
       console.warn('LiveKit cleanup after join failure failed', cleanupError);
@@ -4228,7 +4231,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.localStream = null;
     }
 
-    await this.startPreview();
+    if (shouldRestartPreview) {
+      await this.startPreview();
+    }
   }
 
   private getJoinErrorMessage(error: unknown): string {
@@ -4238,6 +4243,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     return 'Could not join this call. Check your device access and channel permissions.';
+  }
+
+  private isBackendJoinAuthorizationError(error: unknown): boolean {
+    const message = (error instanceof Error ? error.message : String(error || '')).toLowerCase();
+    return message.includes('authentication')
+      || message.includes('permission')
+      || message.includes('invalid call identity')
+      || message.includes('call channel not found');
   }
 
   async leaveCall() {

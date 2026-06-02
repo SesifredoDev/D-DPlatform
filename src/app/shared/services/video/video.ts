@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import {
   AudioPresets,
   ConnectionQuality,
@@ -17,11 +18,10 @@ import {
   VideoPresets
 } from 'livekit-client';
 import type { RemoteAudioTrack, RemoteVideoTrack } from 'livekit-client';
-import { BehaviorSubject, Subject } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, Subject } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { ThemeColors } from '../theme/theme.service';
 import { DeviceInfo, DeviceService } from '../device/device';
-import { TokenService } from '../auth/token';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
 import type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant, LiveKitConnectionInfo } from '../../models/video/video.model';
 export type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
@@ -146,8 +146,8 @@ export class Video {
   private readonly dataDecoder = new TextDecoder();
 
   constructor(
+    private http: HttpClient,
     private deviceService: DeviceService,
-    private tokenService: TokenService,
     private sharedWindowState: SharedWindowStateService
   ) {
     setLogLevel(environment.production ? 'warn' : 'info');
@@ -1617,21 +1617,22 @@ export class Video {
     return urls.some(url => /^turns?:/i.test(url));
   }
 
-  private async getLiveKitConnectionInfo(room: string, identity: string): Promise<LiveKitConnectionInfo> {
-    const url = `${environment.apiURL}livekit/token?room=${room}&identity=${encodeURIComponent(identity)}`;
-    const token = this.tokenService.getAccessToken();
-    const res = await fetch(url, {
-      credentials: 'include',
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-
-    if (!res.ok) {
-      const errorPayload = await res.json().catch(() => null);
-      const message = errorPayload?.error || errorPayload?.message || 'Failed to fetch LiveKit connection info';
+  private async getLiveKitConnectionInfo(channelId: string, identity: string): Promise<LiveKitConnectionInfo> {
+    try {
+      return await firstValueFrom(this.http.post<LiveKitConnectionInfo>(
+        `${environment.apiURL}livekit/token`,
+        { channelId, identity },
+        { withCredentials: true }
+      ));
+    } catch (error: any) {
+      const errorPayload = error?.error;
+      const message = errorPayload?.error
+        || errorPayload?.message
+        || (error?.status === 401 ? 'Authentication required to join this call' : '')
+        || error?.message
+        || 'Failed to fetch LiveKit connection info';
       throw new Error(message);
     }
-
-    return await res.json();
   }
 
   private async collectParticipantDiagnostics(participant: any, rtt: unknown): Promise<ParticipantMediaDiagnostics> {
