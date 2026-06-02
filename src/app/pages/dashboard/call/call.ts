@@ -304,6 +304,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private readonly subscriptions = new Subscription();
   private syncDebounceTimer: any = null;
   private isSyncing: boolean = false;
+  private pendingSoundCloudSyncState: any = null;
+  private lastAppliedSoundCloudSyncTimestamp = 0;
+  private soundCloudSyncApplySequence = 0;
+  private readonly maxSoundCloudSyncDriftMs = 30000;
+  private readonly soundCloudHostSyncIntervalMs = 12000;
+  private readonly soundCloudStateRequestRetryDelaysMs = [0, 750, 2500];
+  private soundCloudHostSyncInterval: ReturnType<typeof setInterval> | null = null;
+  private soundCloudStateRequestTimers: Array<ReturnType<typeof setTimeout>> = [];
+  private soundCloudParticipantSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly remoteAudioRouter = new CallRemoteAudioRouter(() => this.selectedOutputId);
   readonly supportsAudioOutputSelection = this.remoteAudioRouter.supportsAudioOutputSelection;
   readonly supportsRemoteAudioGain = this.remoteAudioRouter.supportsRemoteAudioGain;
@@ -543,11 +552,30 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.handleLocalSoundCloudAction(action);
     }));
     this.subscriptions.add(this.videoService.spotifyStateRequest$.subscribe(() => {
-      void this.broadcastCurrentSoundCloudState();
+      void this.broadcastCurrentSoundCloudState('auto', false);
     }));
     this.subscriptions.add(this.videoService.spotifyRequest$.subscribe(req => {
       this.addSoundCloudRequest(req);
     }));
+    this.subscriptions.add(this.videoService.callReconnected$.subscribe(() => {
+      this.handleSoundCloudCallSyncNudge();
+    }));
+    this.subscriptions.add(this.videoService.callParticipantConnected$.subscribe(() => {
+      this.handleSoundCloudCallSyncNudge();
+    }));
+  }
+
+  private handleSoundCloudCallSyncNudge() {
+    if (!this.localStream) {
+      return;
+    }
+
+    if (this.isServerOwner) {
+      this.scheduleSoundCloudParticipantSync();
+      return;
+    }
+
+    this.requestSoundCloudStateWithRetries();
   }
 
   private async applyIncomingSoundCloudSync(state: any) {
@@ -558,15 +586,21 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (!state.uri && !isVolumeOnlyCommand) return;
 
     const hasAuthorizedHost = !!state.hostId && this.isAuthorizedDmUserId(state.hostId);
+    const stateTimestamp = this.normalizeSoundCloudSyncTimestamp(state.timestamp);
     if (this.isServerOwner) {
       if (!hasAuthorizedHost) return;
       if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
     } else {
       if (!hasAuthorizedHost) return;
-      if (this.isSyncing) return;
+      if (this.isStaleSoundCloudSync(stateTimestamp)) return;
+      if (this.isSyncing) {
+        this.pendingSoundCloudSyncState = state;
+        return;
+      }
       this.isSyncing = true;
     }
 
+    const applySequence = ++this.soundCloudSyncApplySequence;
     try {
       if (hasVolumeUpdate) {
         await this.spotify.setVolumePercent(state.volumePercent, true);
@@ -579,13 +613,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       }
 
       if (isVolumeOnlyCommand || !state.uri) {
+        this.rememberAppliedSoundCloudSyncTimestamp(stateTimestamp);
         return;
       }
 
-      const currentState = await this.spotify.getPlaybackState();
+      const currentState = await this.spotify.getPlaybackState().catch(() => null);
       const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
-      const drift = state.timestamp ? (Date.now() - state.timestamp) : 0;
-      const adjustedPosition = state.position + (state.paused ? 0 : drift);
+      const drift = this.getSoundCloudSyncDriftMs(stateTimestamp, state.paused);
+      const adjustedPosition = this.normalizeSoundCloudSyncPosition(state.position) + drift;
       const isDifferentPosition = !currentState ||
         Math.abs(currentState.position - adjustedPosition) > 2000;
       const isDifferentStatus = currentState?.paused !== state.paused;
@@ -600,20 +635,72 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           await this.spotify.seek(adjustedPosition, true);
         }
       } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
-        await this.applySoundCloudPlaybackSync(state, adjustedPosition, isDifferentTrack, isDifferentPosition);
+        await this.applySoundCloudPlaybackSync(
+          state,
+          adjustedPosition,
+          isDifferentTrack,
+          isDifferentPosition,
+          applySequence
+        );
       }
+
+      this.rememberAppliedSoundCloudSyncTimestamp(stateTimestamp);
     } finally {
       if (!this.isServerOwner) {
-        setTimeout(() => this.isSyncing = false, 1500);
+        this.isSyncing = false;
+        const pendingState = this.pendingSoundCloudSyncState;
+        this.pendingSoundCloudSyncState = null;
+        if (pendingState) {
+          queueMicrotask(() => void this.applyIncomingSoundCloudSync(pendingState));
+        }
       }
     }
+  }
+
+  private normalizeSoundCloudSyncTimestamp(value: unknown): number | null {
+    const timestamp = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  }
+
+  private isStaleSoundCloudSync(timestamp: number | null): boolean {
+    return !!timestamp &&
+      !!this.lastAppliedSoundCloudSyncTimestamp &&
+      timestamp < this.lastAppliedSoundCloudSyncTimestamp;
+  }
+
+  private rememberAppliedSoundCloudSyncTimestamp(timestamp: number | null) {
+    if (!timestamp || this.isServerOwner) {
+      return;
+    }
+
+    this.lastAppliedSoundCloudSyncTimestamp = Math.max(
+      this.lastAppliedSoundCloudSyncTimestamp,
+      timestamp
+    );
+  }
+
+  private getSoundCloudSyncDriftMs(timestamp: number | null, paused: boolean): number {
+    if (!timestamp || paused) {
+      return 0;
+    }
+
+    return Math.min(
+      this.maxSoundCloudSyncDriftMs,
+      Math.max(0, Date.now() - timestamp)
+    );
+  }
+
+  private normalizeSoundCloudSyncPosition(value: unknown): number {
+    const position = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(position) ? Math.max(0, Math.round(position)) : 0;
   }
 
   private async applySoundCloudPlaybackSync(
     state: any,
     adjustedPosition: number,
     isDifferentTrack: boolean,
-    isDifferentPosition: boolean
+    isDifferentPosition: boolean,
+    applySequence: number
   ) {
     const metadata = {
       name: state.name,
@@ -629,8 +716,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         await this.spotify.togglePlay(true);
       }
     } else if (isDifferentTrack) {
-      await this.spotify.play(state.uri, state.position, true, state.contextUri, metadata);
-      setTimeout(() => this.spotify.pause(true), 1000);
+      await this.spotify.play(state.uri, this.normalizeSoundCloudSyncPosition(state.position), true, state.contextUri, metadata);
+      setTimeout(() => {
+        if (applySequence === this.soundCloudSyncApplySequence && this.localStream) {
+          void this.spotify.pause(true);
+        }
+      }, 1000);
     } else {
       await this.spotify.pause(true);
     }
@@ -655,14 +746,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         if (recordedSpotifyState) {
           this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
         }
-        this.videoService.sendSpotifyCommand(action.command, payload, action.source);
+        void this.videoService.sendSpotifyCommand(action.command, payload, action.source);
       }, 400);
       return;
     }
 
     if (action.command === 'play' && action.data?.uri) {
       this.recordMusicAction('request', action.data, action.source ?? 'manual', null);
-      this.videoService.sendSpotifyRequest({
+      void this.videoService.sendSpotifyRequest({
         uri: action.data.uri,
         name: action.data.name || 'Requested Song',
         artist: action.data.artist || 'Unknown Artist',
@@ -671,12 +762,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
   }
 
-  private async broadcastCurrentSoundCloudState() {
+  private async broadcastCurrentSoundCloudState(
+    source: 'manual' | 'auto' = 'manual',
+    shouldRecord: boolean = true
+  ) {
     if (!this.localStream || !this.isServerOwner) {
       return;
     }
 
-    const state = await this.spotify.getPlaybackState();
+    const state = await this.spotify.getPlaybackState().catch(() => null);
     if (state && state.track_window?.current_track) {
       const payload = {
         uri: state.track_window.current_track.uri,
@@ -687,21 +781,93 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         paused: state.paused,
         playing: !state.paused,
         contextUri: state.context?.uri,
+        duration: state.duration,
         shuffle: state.shuffle_state,
         volumePercent: this.getCurrentSpotifyVolumePercent(),
         hostId: this.character.ownerId
       };
 
-      this.videoService.sendSpotifyCommand('sync', payload, 'manual');
-      const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
-      this.recordMusicAction('sync', payload, 'manual', recordedSpotifyState);
-      if (recordedSpotifyState) {
-        this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+      await this.videoService.sendSpotifyCommand('sync', payload, source);
+      if (shouldRecord) {
+        const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(payload);
+        this.recordMusicAction('sync', payload, source, recordedSpotifyState);
+        if (recordedSpotifyState) {
+          this.recordCallEnvironmentEvent('spotify-state', recordedSpotifyState);
+        }
       }
     }
 
-    if (this.activeColors) {
+    if (shouldRecord && this.activeColors) {
       this.safeSendThemeUpdate(this.activeColors);
+    }
+  }
+
+  private requestSoundCloudStateWithRetries() {
+    this.clearSoundCloudStateRequestTimers();
+
+    this.soundCloudStateRequestTimers = this.soundCloudStateRequestRetryDelaysMs.map(delayMs =>
+      setTimeout(() => {
+        if (this.localStream && !this.isServerOwner) {
+          void this.videoService.requestSpotifyState();
+        }
+      }, delayMs)
+    );
+  }
+
+  private clearSoundCloudStateRequestTimers() {
+    this.soundCloudStateRequestTimers.forEach(timer => clearTimeout(timer));
+    this.soundCloudStateRequestTimers = [];
+  }
+
+  private scheduleSoundCloudParticipantSync() {
+    if (this.soundCloudParticipantSyncTimer) {
+      clearTimeout(this.soundCloudParticipantSyncTimer);
+    }
+
+    this.soundCloudParticipantSyncTimer = setTimeout(() => {
+      this.soundCloudParticipantSyncTimer = null;
+      void this.broadcastCurrentSoundCloudState('auto', false);
+    }, 500);
+  }
+
+  private syncSoundCloudHostSyncTimer() {
+    if (this.localStream && this.isServerOwner && !this.isCallPlaybackMode) {
+      if (this.soundCloudHostSyncInterval) {
+        return;
+      }
+
+      this.soundCloudHostSyncInterval = setInterval(() => {
+        void this.broadcastCurrentSoundCloudState('auto', false);
+      }, this.soundCloudHostSyncIntervalMs);
+      return;
+    }
+
+    this.stopSoundCloudHostSyncTimer();
+  }
+
+  private stopSoundCloudHostSyncTimer() {
+    if (!this.soundCloudHostSyncInterval) {
+      return;
+    }
+
+    clearInterval(this.soundCloudHostSyncInterval);
+    this.soundCloudHostSyncInterval = null;
+  }
+
+  private stopSoundCloudCallSyncTimers() {
+    this.stopSoundCloudHostSyncTimer();
+    this.clearSoundCloudStateRequestTimers();
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = null;
+    }
+    this.pendingSoundCloudSyncState = null;
+    this.isSyncing = false;
+    this.lastAppliedSoundCloudSyncTimestamp = 0;
+    this.soundCloudSyncApplySequence += 1;
+    if (this.soundCloudParticipantSyncTimer) {
+      clearTimeout(this.soundCloudParticipantSyncTimer);
+      this.soundCloudParticipantSyncTimer = null;
     }
   }
 
@@ -710,8 +876,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
+    if (!req?.uri) {
+      return;
+    }
+
     const isDuplicate = this.spotifyRequests.some(r =>
-      r.uri === req.uri && r.fromName === req.fromName
+      (req.requestId && r.requestId === req.requestId) ||
+      (r.uri === req.uri && r.fromName === req.fromName)
     );
     if (isDuplicate) {
       return;
@@ -948,6 +1119,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.videoService.setSceneMainCharacterControllerUserIds(dmControllerUserIds);
     this.canManageTemporaryDms = !!serverOwnerId && serverOwnerId === currentUserId;
     this.isServerOwner = this.serverService.canUserDm(server, currentUserId);
+    this.syncSoundCloudHostSyncTimer();
 
     if (!this.isServerOwner && this.isDmMode) {
       this.isDmMode = false;
@@ -1853,6 +2025,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.callPlaybackPaused = state.paused;
     this.callPlaybackCurrentTimeMs = state.currentTimeMs;
     this.callPlaybackDurationMs = state.durationMs;
+    this.syncSoundCloudHostSyncTimer();
 
     if (nextPlaybackMode) {
       this.prepareCallPlaybackSources(state.recording!);
@@ -3984,7 +4157,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.updateLocalVideoDisplay();
       }, 100);
 
-      this.videoService.requestSpotifyState();
+      this.syncSoundCloudHostSyncTimer();
+      if (this.isServerOwner) {
+        this.scheduleSoundCloudParticipantSync();
+      } else {
+        this.requestSoundCloudStateWithRetries();
+      }
     } catch (err) {
       await this.handleJoinFailure(err);
     } finally {
@@ -4041,6 +4219,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private async handleJoinFailure(error: unknown) {
     console.error('[CRITICAL] Join call failed:', error);
     this.joinError = this.getJoinErrorMessage(error);
+    this.stopSoundCloudCallSyncTimers();
     await this.videoService.leaveCall(this.channelId).catch(cleanupError => {
       console.warn('LiveKit cleanup after join failure failed', cleanupError);
     });
@@ -4064,6 +4243,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   async leaveCall() {
     this.stopSessionRecording();
     this.resetMicTestForCaptureChange();
+    this.stopSoundCloudCallSyncTimers();
     await this.videoService.leaveCall(this.channelId);
     this.themeService.revertToSaved();
     this.localStream = null;
@@ -4421,6 +4601,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.cleanupCallPlaybackSources();
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
+    this.stopSoundCloudCallSyncTimers();
     this.subscriptions.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
     if (this.sessionNotesSaveTimer) {
@@ -5215,13 +5396,19 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return this.getSessionNoteDateTime().replace(':', '-');
   }
 
-  handleSongRequest(request: any) {
-      this.spotify.play(request.uri, 0, false, undefined, {
+  async handleSongRequest(request: any) {
+    try {
+      await this.spotify.play(request.uri, 0, false, undefined, {
         name: request.name,
         artist: request.artist,
         image: request.image
       });
       this.removeRequest(request);
+    } catch {
+      this.snackBar.open('Could not play that SoundCloud request.', 'Close', {
+        duration: 3000
+      });
+    }
   }
 
   removeRequest(request: any) {
@@ -5341,6 +5528,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private async handleCallKickout(reason: string) {
     this.themeService.revertToSaved();
+    this.stopSoundCloudCallSyncTimers();
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => track.stop());
     }

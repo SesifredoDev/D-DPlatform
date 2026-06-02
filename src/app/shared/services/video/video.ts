@@ -37,6 +37,7 @@ export class Video {
 
   private static readonly maxIceServers = 4;
   private static readonly maxSceneMainCharacters = 4;
+  private static readonly dataMessageDedupeTtlMs = 5 * 60 * 1000;
   private static readonly defaultParticipantVolumePercent = 100;
   private static readonly minParticipantVolumePercent = 0;
   private static readonly maxParticipantVolumePercent = 200;
@@ -108,6 +109,8 @@ export class Video {
   public spotifySync$ = this.soundCloudSync$;
   public spotifyStateRequest$ = this.soundCloudStateRequest$;
   public spotifyRequest$ = this.soundCloudRequest$;
+  public callReconnected$ = new Subject<void>();
+  public callParticipantConnected$ = new Subject<string>();
   public themeSync$ = new Subject<ThemeColors>();
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
   public overlayImage$ = new BehaviorSubject<string | null>(null);
@@ -137,6 +140,10 @@ export class Video {
   private currentAudioPublicationTrack: MediaStreamTrack | null = null;
   private applyingSharedState = false;
   private isIntentionalDisconnect = false;
+  private dataMessageSequence = 0;
+  private readonly receivedDataMessageIds = new Map<string, number>();
+  private readonly dataEncoder = new TextEncoder();
+  private readonly dataDecoder = new TextDecoder();
 
   constructor(
     private deviceService: DeviceService,
@@ -224,6 +231,7 @@ export class Video {
         this.applyRemoteVideoSubscriptionPreferences();
         void this.syncCompanionState();
         void this.emitParticipants();
+        this.callReconnected$.next();
       })
       .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication, participant: RemoteParticipant) => {
         this.updateParticipantStream(participant);
@@ -282,10 +290,11 @@ export class Video {
         void this.syncCompanionState();
         void this.emitParticipants();
       })
-      .on(RoomEvent.ParticipantConnected, () => {
+      .on(RoomEvent.ParticipantConnected, (participant: RemoteParticipant) => {
         this.applyRemoteVideoSubscriptionPreferences();
         void this.syncCompanionState();
         void this.emitParticipants();
+        this.callParticipantConnected$.next(participant.identity);
         if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
           this.sendVttCommand('start', this.vttSession$.value.roomId!);
         }
@@ -327,44 +336,142 @@ export class Video {
         }
       })
       .on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant) => {
-        try {
-          const data = JSON.parse(new TextDecoder().decode(payload));
-          if (data.type === 'soundcloud-sync' || data.type === 'spotify-sync') {
-            this.soundCloudSync$.next({
-              ...data.data,
-              from: participant?.identity,
-              command: data.command,
-              source: data.source || 'manual'
-            });
-          } else if (data.type === 'soundcloud-state-request' || data.type === 'spotify-state-request') {
-            this.soundCloudStateRequest$.next({ from: participant?.identity || '' });
-          } else if (data.type === 'soundcloud-request' || data.type === 'spotify-request') {
-            this.soundCloudRequest$.next({
-              ...data.data,
-              from: participant?.identity || 'Unknown',
-              fromName: data.fromName || 'Unknown Player'
-            });
-          } else if (data.type === 'theme-sync') {
-            this.themeSync$.next(data.theme);
-          } else if (data.type === 'vtt-session') {
-            this.vttSession$.next({
-              active: data.command === 'start',
-              roomId: data.roomId,
-              hostId: data.command === 'start' ? participant?.identity || null : null
-            });
-          } else if (data.type === 'overlay-image') {
-            this.overlayImage$.next(data.url);
-          } else if (data.type === 'overlay-text') {
-            this.overlayText$.next(data.text);
-          } else if (data.type === 'temporary-atmosphere-background') {
-            this.temporaryAtmosphereBackground$.next(data.url);
-          } else if (data.type === 'scene-main-characters') {
-            void this.receiveSceneMainCharactersState(data.state, participant);
-          }
-        } catch (e) {
-          console.error('Failed to parse data message', e);
-        }
+        this.handleDataMessage(payload, participant);
       });
+  }
+
+  private handleDataMessage(payload: Uint8Array, participant?: RemoteParticipant) {
+    const data = this.parseDataMessage(payload);
+    if (!data || participant?.identity === this.room.localParticipant.identity) {
+      return;
+    }
+
+    if (!this.rememberDataMessage(data, participant)) {
+      return;
+    }
+
+    if (data.type === 'soundcloud-sync' || data.type === 'spotify-sync') {
+      this.handleSoundCloudSyncMessage(data, participant);
+    } else if (data.type === 'soundcloud-state-request' || data.type === 'spotify-state-request') {
+      this.soundCloudStateRequest$.next({ from: participant?.identity || '' });
+    } else if (data.type === 'soundcloud-request' || data.type === 'spotify-request') {
+      this.handleSoundCloudRequestMessage(data, participant);
+    } else if (data.type === 'theme-sync') {
+      this.themeSync$.next(data.theme);
+    } else if (data.type === 'vtt-session') {
+      this.vttSession$.next({
+        active: data.command === 'start',
+        roomId: data.roomId,
+        hostId: data.command === 'start' ? participant?.identity || null : null
+      });
+    } else if (data.type === 'overlay-image') {
+      this.overlayImage$.next(data.url);
+    } else if (data.type === 'overlay-text') {
+      this.overlayText$.next(data.text);
+    } else if (data.type === 'temporary-atmosphere-background') {
+      this.temporaryAtmosphereBackground$.next(data.url);
+    } else if (data.type === 'scene-main-characters') {
+      void this.receiveSceneMainCharactersState(data.state, participant);
+    }
+  }
+
+  private parseDataMessage(payload: Uint8Array): any | null {
+    try {
+      const data = JSON.parse(this.dataDecoder.decode(payload));
+      return data && typeof data === 'object' ? data : null;
+    } catch (error) {
+      console.error('Failed to parse data message', error);
+      return null;
+    }
+  }
+
+  private handleSoundCloudSyncMessage(data: any, participant?: RemoteParticipant) {
+    const command = typeof data.command === 'string' ? data.command : '';
+    if (!command) {
+      return;
+    }
+
+    const messageData = this.isRecord(data.data) ? data.data : {};
+    this.soundCloudSync$.next({
+      ...messageData,
+      from: participant?.identity,
+      command,
+      source: data.source === 'auto' ? 'auto' : 'manual',
+      messageId: this.getMessageId(data),
+      timestamp: this.normalizeMessageTimestamp(messageData.timestamp ?? data.sentAt)
+    });
+  }
+
+  private handleSoundCloudRequestMessage(data: any, participant?: RemoteParticipant) {
+    const messageData = this.isRecord(data.data) ? data.data : {};
+    const uri = this.getStringValue(messageData.uri);
+    if (!uri) {
+      return;
+    }
+
+    this.soundCloudRequest$.next({
+      uri,
+      name: this.getStringValue(messageData.name) || 'Requested Song',
+      artist: this.getStringValue(messageData.artist) || 'Unknown Artist',
+      image: this.getStringValue(messageData.image),
+      duration: this.getFiniteNumber(messageData.duration),
+      type: this.getStringValue(messageData.type) || 'track',
+      requestId: this.getMessageId(data),
+      requestedAt: this.normalizeMessageTimestamp(data.sentAt),
+      from: participant?.identity || 'Unknown',
+      fromName: this.getStringValue(data.fromName) || 'Unknown Player'
+    });
+  }
+
+  private rememberDataMessage(data: any, participant?: RemoteParticipant): boolean {
+    const messageId = this.getMessageId(data);
+    if (!messageId) {
+      return true;
+    }
+
+    const now = Date.now();
+    this.pruneReceivedDataMessages(now);
+    const key = `${participant?.identity || 'unknown'}:${messageId}`;
+    if (this.receivedDataMessageIds.has(key)) {
+      return false;
+    }
+
+    this.receivedDataMessageIds.set(key, now);
+    return true;
+  }
+
+  private pruneReceivedDataMessages(now: number) {
+    if (this.receivedDataMessageIds.size < 250) {
+      return;
+    }
+
+    this.receivedDataMessageIds.forEach((receivedAt, key) => {
+      if (now - receivedAt > Video.dataMessageDedupeTtlMs) {
+        this.receivedDataMessageIds.delete(key);
+      }
+    });
+  }
+
+  private getMessageId(data: any): string {
+    return this.getStringValue(data?.messageId) || this.getStringValue(data?.data?.messageId);
+  }
+
+  private normalizeMessageTimestamp(value: unknown): number | undefined {
+    const timestamp = this.getFiniteNumber(value);
+    return timestamp && timestamp > 0 ? timestamp : undefined;
+  }
+
+  private getStringValue(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  private getFiniteNumber(value: unknown): number | undefined {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numericValue) ? numericValue : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, any> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
   }
 
   private startPingMonitor() {
@@ -653,40 +760,78 @@ export class Video {
     return this.participantStreams.get(this.selectedAudioSource$.value) || null;
   }
 
-  sendSoundCloudCommand(command: string, data: any, source: string = 'manual') {
-    if (this.room.state !== 'connected') return;
-    const hostId = data?.hostId ?? this.currentParticipantMetadata?.userId;
-    const payload = new TextEncoder().encode(JSON.stringify({
+  private async publishReliableData(message: Record<string, unknown>): Promise<boolean> {
+    if (this.room.state !== 'connected') {
+      return false;
+    }
+
+    try {
+      const payload = this.dataEncoder.encode(JSON.stringify(message));
+      await this.room.localParticipant.publishData(payload, { reliable: true });
+      return true;
+    } catch (error) {
+      console.warn('Failed to publish LiveKit data message', message['type'], error);
+      return false;
+    }
+  }
+
+  private createDataMessageId(type: string): string {
+    this.dataMessageSequence += 1;
+    const identity = this.room.localParticipant.identity || this.currentParticipantIdentity || 'local';
+    return `${identity}:${type}:${Date.now()}:${this.dataMessageSequence}`;
+  }
+
+  async sendSoundCloudCommand(command: string, data: any, source: string = 'manual'): Promise<boolean> {
+    if (this.room.state !== 'connected' || !command) return false;
+
+    const sentAt = Date.now();
+    const messageId = this.createDataMessageId('soundcloud-sync');
+    const messageData = this.isRecord(data) ? data : {};
+    const hostId = messageData['hostId'] ?? this.currentParticipantMetadata?.userId;
+    return this.publishReliableData({
       type: 'soundcloud-sync',
+      version: 1,
+      messageId,
       command,
       source,
-      data: { ...data, hostId, timestamp: Date.now() }
-    }));
-    this.room.localParticipant.publishData(payload, { reliable: true });
+      sentAt,
+      data: { ...messageData, hostId, timestamp: sentAt, messageId }
+    });
   }
 
-  sendSpotifyCommand(command: string, data: any, source: string = 'manual') {
-    this.sendSoundCloudCommand(command, data, source);
+  sendSpotifyCommand(command: string, data: any, source: string = 'manual'): Promise<boolean> {
+    return this.sendSoundCloudCommand(command, data, source);
   }
 
-  sendSoundCloudRequest(item: any, fromName: string) {
-    if (this.room.state !== 'connected') return;
-    const track = item.track || item.item || item;
-    const payload = new TextEncoder().encode(JSON.stringify({
+  async sendSoundCloudRequest(item: any, fromName: string): Promise<boolean> {
+    if (this.room.state !== 'connected') return false;
+
+    const track = item?.track || item?.item || item;
+    const uri = this.getStringValue(track?.uri) || this.getStringValue(track?.permalink_url);
+    if (!uri) return false;
+
+    const sentAt = Date.now();
+    const messageId = this.createDataMessageId('soundcloud-request');
+    return this.publishReliableData({
       type: 'soundcloud-request',
-      fromName,
+      version: 1,
+      messageId,
+      sentAt,
+      fromName: fromName || 'Unknown Player',
       data: {
-        uri: track.uri || track.permalink_url,
-        name: track.name || track.title,
-        artist: track.artist || track.owner || track.user?.username || '',
-        image: track.image || track.artwork_url || track.images?.[0]?.url || track.album?.images?.[0]?.url || track.user?.avatar_url || ''
+        uri,
+        name: track.name || track.title || 'Requested Song',
+        artist: track.artist || track.owner || track.user?.username || 'Unknown Artist',
+        image: track.image || track.artwork_url || track.images?.[0]?.url || track.album?.images?.[0]?.url || track.user?.avatar_url || '',
+        duration: track.duration,
+        type: track.type || 'track',
+        messageId
       }
-    }));
-    this.room.localParticipant.publishData(payload, { reliable: true });
+    });
   }
 
-  sendSpotifyRequest(item: any, fromName: string) {
-    this.sendSoundCloudRequest(item, fromName);
+  sendSpotifyRequest(item: any, fromName: string): Promise<boolean> {
+    return this.sendSoundCloudRequest(item, fromName);
   }
 
   sendThemeUpdate(theme: ThemeColors) {
@@ -695,14 +840,17 @@ export class Video {
     this.room.localParticipant.publishData(payload, { reliable: true });
   }
 
-  requestSoundCloudState() {
-    if (this.room.state !== 'connected') return;
-    const payload = new TextEncoder().encode(JSON.stringify({ type: 'soundcloud-state-request' }));
-    this.room.localParticipant.publishData(payload, { reliable: true });
+  requestSoundCloudState(): Promise<boolean> {
+    return this.publishReliableData({
+      type: 'soundcloud-state-request',
+      version: 1,
+      messageId: this.createDataMessageId('soundcloud-state-request'),
+      sentAt: Date.now()
+    });
   }
 
-  requestSpotifyState() {
-    this.requestSoundCloudState();
+  requestSpotifyState(): Promise<boolean> {
+    return this.requestSoundCloudState();
   }
 
   sendVttCommand(command: 'start' | 'stop', roomId: string) {

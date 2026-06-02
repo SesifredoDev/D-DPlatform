@@ -891,7 +891,7 @@ export class BroadcastDialog implements OnInit {
       return;
     }
 
-    this.videoService.sendSoundCloudRequest(metadata, this.currentUserName);
+    await this.videoService.sendSoundCloudRequest(metadata, this.currentUserName);
   }
 
   private createBroadcastAudioMetadata(asset: UploadedBroadcastAsset) {

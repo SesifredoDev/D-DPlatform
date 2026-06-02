@@ -58,11 +58,14 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   private lastPersistedUiState = '';
   private savedItemsSub?: Subscription;
   private highlightTimeout?: ReturnType<typeof setTimeout>;
+  private searchRequestId = 0;
+  private loadingRequestId = 0;
+  private isDestroyed = false;
 
   ngOnInit() {
     this.restoreUiState();
     this.savedItemsSub = this.spotify.savedItems$.subscribe(() => {
-      void this.refreshSavedSearch();
+      void this.refreshSavedSearch().catch(() => undefined);
     });
   }
 
@@ -92,13 +95,23 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     this.isLoading = true;
     this.showProfile = false;
     this.showQueue = false;
+    const requestId = ++this.searchRequestId;
+    this.loadingRequestId = requestId;
     try {
       const results = await this.spotify.search(query);
+      if (!this.isCurrentSearchRequest(requestId)) return;
+
       this.applyResults(results);
       this.activeCategory = 'all';
       this.libraryMessage = results.length ? '' : `No saved SoundCloud items match "${query}".`;
+    } catch {
+      if (this.isCurrentSearchRequest(requestId)) {
+        this.libraryMessage = 'Could not search your saved SoundCloud library.';
+      }
     } finally {
-      this.isLoading = false;
+      if (!this.isDestroyed && this.loadingRequestId === requestId) {
+        this.isLoading = false;
+      }
     }
   }
 
@@ -121,6 +134,8 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       this.spotifySearch = '';
       this.libraryMessage = `Saved ${item.type}: ${item.name}`;
       await this.refreshSavedSearch();
+    } catch {
+      this.libraryMessage = 'Could not save that SoundCloud link.';
     } finally {
       this.isLoading = false;
     }
@@ -160,10 +175,19 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   async refreshSavedSearch() {
+    const requestId = ++this.searchRequestId;
     const query = this.isSoundCloudLink(this.spotifySearch) ? '' : this.spotifySearch.trim();
-    const results = await this.spotify.search(query);
-    this.applyResults(results);
-    this.activeCategory = 'all';
+    try {
+      const results = await this.spotify.search(query);
+      if (!this.isCurrentSearchRequest(requestId)) return;
+
+      this.applyResults(results);
+      this.activeCategory = 'all';
+    } catch {
+      if (this.isCurrentSearchRequest(requestId)) {
+        this.libraryMessage = 'Could not refresh your saved SoundCloud library.';
+      }
+    }
   }
 
   onSearchInputChange() {
@@ -178,6 +202,10 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       acc[type].push(item);
       return acc;
     }, {});
+  }
+
+  private isCurrentSearchRequest(requestId: number): boolean {
+    return !this.isDestroyed && requestId === this.searchRequestId;
   }
 
   async removeSavedItem(item: SoundCloudSearchResult | any, event?: Event) {
@@ -321,10 +349,19 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url || item.item?.uri;
     if (!uri) return;
 
-    if (this.isServerOwner || !this.isCallActive) {
+    try {
+      if (this.isServerOwner || !this.isCallActive) {
         await this.spotify.play(uri);
-    } else {
-        this.videoService.sendSoundCloudRequest(item, this.userName);
+      } else {
+        const sent = await this.videoService.sendSoundCloudRequest(item, this.userName);
+        this.libraryMessage = sent
+          ? 'Sent track request to the DM.'
+          : 'Could not send the request. Join the call and try again.';
+      }
+    } catch {
+      this.libraryMessage = this.isServerOwner || !this.isCallActive
+        ? 'Could not start playback for that SoundCloud item.'
+        : 'Could not send the SoundCloud request.';
     }
 
     if (this.spotifySearch) {
@@ -339,10 +376,20 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url || item.item?.uri;
     if (!uri) return;
 
-    if (this.isServerOwner) {
-      await this.spotify.addToQueue(uri);
-    } else {
-      this.videoService.sendSoundCloudRequest(item, this.userName);
+    try {
+      if (this.isServerOwner) {
+        await this.spotify.addToQueue(uri);
+        this.libraryMessage = 'Added to queue.';
+      } else {
+        const sent = await this.videoService.sendSoundCloudRequest(item, this.userName);
+        this.libraryMessage = sent
+          ? 'Sent track request to the DM.'
+          : 'Could not send the request. Join the call and try again.';
+      }
+    } catch {
+      this.libraryMessage = this.isServerOwner
+        ? 'Could not add that SoundCloud item to the queue.'
+        : 'Could not send the SoundCloud request.';
     }
     if (this.spotifySearch) {
       this.spotifySearch = '';
@@ -369,6 +416,9 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
         this.profileData = await this.spotify.getUser(id);
         this.profileItems = await this.spotify.getUserPlaylists(id);
       }
+    } catch {
+      this.libraryMessage = 'Could not load that SoundCloud profile.';
+      this.showProfile = false;
     } finally {
       this.isLoading = false;
     }
@@ -376,37 +426,58 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   async togglePlay() {
     if (!this.canControlPlayback) return;
-    await this.spotify.togglePlay();
+    await this.runPlaybackCommand(
+      () => this.spotify.togglePlay(),
+      'Could not toggle SoundCloud playback.'
+    );
   }
 
   async toggleShuffle() {
     if (!this.canControlPlayback) return;
     const currentState = this.spotify.shuffleState$.value;
-    await this.spotify.toggleShuffle(!currentState);
+    await this.runPlaybackCommand(
+      () => this.spotify.toggleShuffle(!currentState),
+      'Could not update shuffle.'
+    );
   }
 
   async nextTrack() {
     if (!this.canControlPlayback) return;
-    await this.spotify.nextTrack();
+    await this.runPlaybackCommand(
+      () => this.spotify.nextTrack(),
+      'Could not skip to the next SoundCloud item.'
+    );
   }
 
   async previousTrack() {
     if (!this.canControlPlayback) return;
-    await this.spotify.previousTrack();
+    await this.runPlaybackCommand(
+      () => this.spotify.previousTrack(),
+      'Could not go back to the previous SoundCloud item.'
+    );
   }
 
   async transferPlayback(deviceId: string) {
-    await this.spotify.transferPlayback(deviceId, true);
+    await this.runPlaybackCommand(
+      () => this.spotify.transferPlayback(deviceId, true),
+      'Could not transfer SoundCloud playback.'
+    );
     this.showDevicePicker = false;
   }
 
   async updateVolume(value: number | string) {
-    await this.spotify.setVolumePercent(value);
+    await this.runPlaybackCommand(
+      () => this.spotify.setVolumePercent(value),
+      'Could not update SoundCloud volume.'
+    );
   }
 
   async seekPlayback(value: number | string) {
     if (!this.canControlPlayback) return;
-    await this.spotify.seek(this.normalizePlaybackTime(value));
+    await this.runPlaybackCommand(
+      () => this.spotify.seek(this.normalizePlaybackTime(value)),
+      'Could not seek SoundCloud playback.'
+    );
   }
 
   get canControlPlayback(): boolean {
@@ -415,6 +486,14 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   get playbackControlTitle(): string {
     return this.canControlPlayback ? '' : 'Only DMs can control playback';
+  }
+
+  private async runPlaybackCommand(action: () => Promise<unknown>, failureMessage: string) {
+    try {
+      await action();
+    } catch {
+      this.libraryMessage = failureMessage;
+    }
   }
 
   formatPlaybackTime(value: number | string | null | undefined): string {
@@ -426,6 +505,9 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   ngOnDestroy() {
+    this.isDestroyed = true;
+    this.searchRequestId += 1;
+
     if (this.highlightTimeout) {
       clearTimeout(this.highlightTimeout);
     }
