@@ -21,6 +21,33 @@ export type {
   SoundCloudMusicListImportResult
 } from '../../models/playlist/soundcloud.service.model';
 
+export interface SoundCloudLivestreamPlaybackState {
+  title: string;
+  artist: string;
+  image: string | null;
+  positionMs: number;
+  durationMs: number;
+  paused: boolean;
+  volumePercent: number;
+  audioStream: MediaStream | null;
+  canCaptureAudio: boolean;
+  audioStreamIsPostVolume?: boolean;
+  captureSource?: 'native' | 'output-capture' | 'none';
+}
+
+export interface SoundCloudLivestreamOutputCaptureState {
+  active: boolean;
+  error: string;
+  status: string;
+  trackCount: number;
+}
+
+interface SoundCloudLivestreamAudioCapture {
+  stream: MediaStream | null;
+  audioStreamIsPostVolume: boolean;
+  source: 'native' | 'output-capture' | 'none';
+}
+
 @Injectable({ providedIn: 'root' })
 export class SoundCloudService {
   private static readonly savedItemsStateKey = 'soundcloud:saved-items';
@@ -39,8 +66,15 @@ export class SoundCloudService {
   private playbackRequestId = 0;
   private currentWidgetUrl: string | null = null;
   private nativeAudioElement: HTMLAudioElement | null = null;
+  private nativeAudioCaptureStream: MediaStream | null = null;
+  private nativeAudioContext: AudioContext | null = null;
+  private nativeAudioSource: MediaElementAudioSourceNode | null = null;
+  private nativeAudioLocalGain: GainNode | null = null;
+  private nativeAudioCaptureDestination: MediaStreamAudioDestinationNode | null = null;
+  private nativeAudioGraphFailed = false;
   private currentNativeAudioUrl: string | null = null;
   private nativeAudioTrack: SoundCloudSearchResult | null = null;
+  private livestreamOutputCaptureStream: MediaStream | null = null;
   private volumePercent = SoundCloudService.defaultVolumePercent;
   private currentPositionMs = 0;
   private currentDurationMs = 0;
@@ -60,6 +94,12 @@ export class SoundCloudService {
   public playbackPositionMs$ = new BehaviorSubject<number>(0);
   public playbackDurationMs$ = new BehaviorSubject<number>(0);
   public activeDeviceId$ = new BehaviorSubject<string | null>(SoundCloudService.browserDeviceId);
+  public livestreamOutputCaptureState$ = new BehaviorSubject<SoundCloudLivestreamOutputCaptureState>({
+    active: false,
+    error: '',
+    status: 'Not connected',
+    trackCount: 0
+  });
   public savedItems$ = new BehaviorSubject<SoundCloudSearchResult[]>([]);
   public savedPlaylists$ = new BehaviorSubject<any[]>([]);
   public recentPlays$ = new BehaviorSubject<any[]>([]);
@@ -276,7 +316,7 @@ export class SoundCloudService {
     try {
       const track = this.shouldUseNativeAudio(targetUrl)
         ? await this.playNativeAudio(targetUrl, positionMs, metadata)
-        : await this.playWidgetAudio(targetUrl, positionMs);
+        : await this.playSoundCloudAudio(targetUrl, positionMs, metadata);
 
       if (playbackRequestId !== this.playbackRequestId) {
         return track;
@@ -319,6 +359,7 @@ export class SoundCloudService {
     this.updatePlaybackPosition(0);
     this.updatePlaybackDuration(0);
     this.lastContextUri = null;
+    this.nativeAudioCaptureStream = null;
   }
 
   async pause(skipSync: boolean = false) {
@@ -438,6 +479,204 @@ export class SoundCloudService {
 
   getVolumePercent(): number {
     return this.volumePercent;
+  }
+
+  getLivestreamPlaybackState(): SoundCloudLivestreamPlaybackState | null {
+    const track = this.currentTrack$.value;
+    if (!track) {
+      return null;
+    }
+
+    const audioCapture = this.getLivestreamAudioCapture();
+    return {
+      title: track.name || track.title || 'SoundCloud',
+      artist: this.getTrackArtist(track),
+      image: this.getTrackImage(track) || null,
+      positionMs: this.currentPositionMs,
+      durationMs: this.currentDurationMs || track.duration || 0,
+      paused: this.isPaused$.value,
+      volumePercent: this.volumePercent,
+      audioStream: audioCapture.stream,
+      canCaptureAudio: !!audioCapture.stream,
+      audioStreamIsPostVolume: audioCapture.audioStreamIsPostVolume,
+      captureSource: audioCapture.source
+    };
+  }
+
+  getLivestreamAudioStream(): MediaStream | null {
+    return this.getLivestreamAudioCapture().stream;
+  }
+
+  async ensureLivestreamAudioCapture(): Promise<boolean> {
+    return !!this.getLivestreamAudioStream();
+  }
+
+  async startLivestreamOutputCapture(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      this.setLivestreamOutputCaptureState(
+        null,
+        'Browser audio capture is not available in this environment.'
+      );
+      return false;
+    }
+
+    this.stopLivestreamOutputCapture();
+
+    try {
+      const captureStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        } as MediaTrackConstraints
+      });
+      captureStream.getVideoTracks().forEach(track => track.stop());
+
+      const audioTracks = captureStream.getAudioTracks();
+      if (!audioTracks.length) {
+        captureStream.getTracks().forEach(track => track.stop());
+        this.setLivestreamOutputCaptureState(
+          null,
+          'The selected source did not include audio. Choose a tab, window, or screen with audio sharing enabled.'
+        );
+        return false;
+      }
+
+      this.livestreamOutputCaptureStream = new MediaStream(audioTracks);
+      audioTracks.forEach(track => {
+        track.addEventListener('ended', () => this.handleLivestreamOutputCaptureEnded());
+        track.addEventListener('mute', () => this.updateLivestreamOutputCaptureState());
+        track.addEventListener('unmute', () => this.updateLivestreamOutputCaptureState());
+      });
+      this.updateLivestreamOutputCaptureState();
+      return true;
+    } catch (error) {
+      this.setLivestreamOutputCaptureState(
+        null,
+        this.getLivestreamOutputCaptureErrorMessage(error)
+      );
+      return false;
+    }
+  }
+
+  stopLivestreamOutputCapture(clearError: boolean = true) {
+    this.livestreamOutputCaptureStream?.getTracks().forEach(track => track.stop());
+    this.livestreamOutputCaptureStream = null;
+    this.setLivestreamOutputCaptureState(null, clearError ? '' : this.livestreamOutputCaptureState$.value.error);
+  }
+
+  private getLivestreamAudioCapture(): SoundCloudLivestreamAudioCapture {
+    if (this.isPaused$.value) {
+      return { stream: null, audioStreamIsPostVolume: false, source: 'none' };
+    }
+
+    const nativeStream = this.getNativeLivestreamAudioStream();
+    if (nativeStream) {
+      return { stream: nativeStream, audioStreamIsPostVolume: false, source: 'native' };
+    }
+
+    const outputCaptureStream = this.getLivestreamOutputCaptureStream();
+    if (outputCaptureStream) {
+      return { stream: outputCaptureStream, audioStreamIsPostVolume: true, source: 'output-capture' };
+    }
+
+    return { stream: null, audioStreamIsPostVolume: false, source: 'none' };
+  }
+
+  private getNativeLivestreamAudioStream(): MediaStream | null {
+    if (!this.isCurrentNativeAudio() || !this.nativeAudioElement) {
+      return null;
+    }
+
+    const elementStream = this.getNativeAudioElementCaptureStream();
+    if (elementStream) {
+      return elementStream;
+    }
+
+    const graphStream = this.ensureNativeAudioCaptureGraph();
+    if (graphStream) {
+      void this.nativeAudioContext?.resume().catch(() => undefined);
+      return graphStream;
+    }
+
+    return null;
+  }
+
+  private getLivestreamOutputCaptureStream(): MediaStream | null {
+    const liveTracks = this.livestreamOutputCaptureStream?.getAudioTracks()
+      .filter(track => track.readyState === 'live' && track.enabled) ?? [];
+    if (!this.livestreamOutputCaptureStream || !liveTracks.length) {
+      return null;
+    }
+
+    return this.livestreamOutputCaptureStream;
+  }
+
+  private handleLivestreamOutputCaptureEnded() {
+    this.livestreamOutputCaptureStream = null;
+    this.setLivestreamOutputCaptureState(null, '');
+  }
+
+  private updateLivestreamOutputCaptureState() {
+    this.setLivestreamOutputCaptureState(
+      this.livestreamOutputCaptureStream,
+      this.livestreamOutputCaptureState$.value.error
+    );
+  }
+
+  private setLivestreamOutputCaptureState(stream: MediaStream | null, error: string) {
+    const liveTracks = stream?.getAudioTracks()
+      .filter(track => track.readyState === 'live' && track.enabled) ?? [];
+    const active = liveTracks.length > 0;
+    this.livestreamOutputCaptureState$.next({
+      active,
+      error,
+      status: error || (active ? 'Capturing shared audio' : 'Not connected'),
+      trackCount: liveTracks.length
+    });
+  }
+
+  private getLivestreamOutputCaptureErrorMessage(error: unknown): string {
+    const name = typeof error === 'object' && error && 'name' in error
+      ? String((error as { name?: unknown }).name)
+      : '';
+
+    if (name === 'NotAllowedError' || name === 'AbortError') {
+      return 'Audio capture was cancelled.';
+    }
+
+    return 'Could not start browser audio capture.';
+  }
+
+  private getNativeAudioElementCaptureStream(): MediaStream | null {
+    const liveTracks = this.nativeAudioCaptureStream?.getAudioTracks()
+      .filter(track => track.readyState === 'live') ?? [];
+    if (this.nativeAudioCaptureStream && liveTracks.length) {
+      return this.nativeAudioCaptureStream;
+    }
+
+    if (!this.nativeAudioElement) {
+      return null;
+    }
+
+    const audio = this.nativeAudioElement as HTMLAudioElement & {
+      captureStream?: () => MediaStream;
+      mozCaptureStream?: () => MediaStream;
+    };
+
+    try {
+      const stream = audio.captureStream?.() ?? audio.mozCaptureStream?.() ?? null;
+      if (!stream?.getAudioTracks().length) {
+        return null;
+      }
+
+      this.nativeAudioCaptureStream = stream;
+      return stream;
+    } catch {
+      this.nativeAudioCaptureStream = null;
+      return null;
+    }
   }
 
   async setVolume(v: number | string, skipSync: boolean = false) {
@@ -1135,6 +1374,14 @@ export class SoundCloudService {
     return this.syncCurrentSound(url);
   }
 
+  private async playSoundCloudAudio(
+    url: string,
+    positionMs: number,
+    _metadata?: Partial<SoundCloudSearchResult>
+  ): Promise<any> {
+    return this.playWidgetAudio(url, positionMs);
+  }
+
   private async playNativeAudio(
     url: string,
     positionMs: number,
@@ -1145,6 +1392,7 @@ export class SoundCloudService {
 
     if (this.currentNativeAudioUrl !== url) {
       audio.pause();
+      this.nativeAudioCaptureStream = null;
       audio.src = url;
       audio.preload = 'auto';
       audio.load();
@@ -1156,6 +1404,7 @@ export class SoundCloudService {
 
     this.nativeAudioTrack = this.createNativeAudioTrack(url, metadata);
     this.currentTrack$.next(this.nativeAudioTrack);
+    this.ensureNativeAudioCaptureGraph();
     this.applyNativeAudioVolume();
 
     if (positionMs > 0) {
@@ -1163,6 +1412,7 @@ export class SoundCloudService {
     }
 
     try {
+      await this.nativeAudioContext?.resume().catch(() => undefined);
       await audio.play();
       this.isPaused$.next(false);
       return this.nativeAudioTrack;
@@ -1180,6 +1430,7 @@ export class SoundCloudService {
 
     const audio = document.createElement('audio');
     audio.id = 'soundcloud-native-audio';
+    audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
     audio.style.position = 'fixed';
     audio.style.left = '-9999px';
@@ -1216,11 +1467,54 @@ export class SoundCloudService {
     return audio;
   }
 
+  private ensureNativeAudioCaptureGraph(): MediaStream | null {
+    if (!this.nativeAudioElement || this.nativeAudioGraphFailed) {
+      return null;
+    }
+
+    const existingStream = this.nativeAudioCaptureDestination?.stream ?? null;
+    const liveTracks = existingStream?.getAudioTracks()
+      .filter(track => track.readyState === 'live') ?? [];
+    if (existingStream && liveTracks.length) {
+      this.nativeAudioCaptureStream = existingStream;
+      void this.nativeAudioContext?.resume().catch(() => undefined);
+      return existingStream;
+    }
+
+    const AudioContextConstructor = this.getAudioContextConstructor();
+    if (!AudioContextConstructor) {
+      return null;
+    }
+
+    try {
+      this.nativeAudioContext = new AudioContextConstructor();
+      this.nativeAudioSource = this.nativeAudioContext.createMediaElementSource(this.nativeAudioElement);
+      this.nativeAudioLocalGain = this.nativeAudioContext.createGain();
+      this.nativeAudioCaptureDestination = this.nativeAudioContext.createMediaStreamDestination();
+      this.nativeAudioSource.connect(this.nativeAudioLocalGain);
+      this.nativeAudioLocalGain.connect(this.nativeAudioContext.destination);
+      this.nativeAudioSource.connect(this.nativeAudioCaptureDestination);
+      this.nativeAudioCaptureStream = this.nativeAudioCaptureDestination.stream;
+      this.applyNativeAudioVolume();
+      void this.nativeAudioContext.resume().catch(() => undefined);
+      return this.nativeAudioCaptureStream;
+    } catch (error) {
+      console.warn('Failed to create SoundCloud livestream audio capture graph', error);
+      this.nativeAudioGraphFailed = true;
+      this.nativeAudioContext = null;
+      this.nativeAudioSource = null;
+      this.nativeAudioLocalGain = null;
+      this.nativeAudioCaptureDestination = null;
+      return null;
+    }
+  }
+
   private pauseNativeAudioForSourceSwitch() {
     if (this.nativeAudioElement) {
       this.nativeAudioElement.pause();
     }
     this.currentNativeAudioUrl = null;
+    this.nativeAudioCaptureStream = null;
     this.nativeAudioTrack = null;
   }
 
@@ -1230,10 +1524,10 @@ export class SoundCloudService {
     }
   }
 
-  private safeWidgetCall(widget: any, methodName: string) {
+  private safeWidgetCall(widget: any, methodName: string, ...args: unknown[]) {
     try {
       if (widget && typeof widget[methodName] === 'function') {
-        widget[methodName]();
+        widget[methodName](...args);
       }
     } catch {
       // SoundCloud widget commands can throw while the iframe is changing source.
@@ -1287,7 +1581,11 @@ export class SoundCloudService {
       return 'Playback was blocked by the browser. Press play again to start audio.';
     }
 
-    return 'Unable to play that SoundCloud item.';
+    const message = typeof error === 'object' && error && 'message' in error
+      ? String((error as { message?: unknown }).message || '').trim()
+      : '';
+
+    return message || 'Unable to play that SoundCloud item.';
   }
 
   private async loadWidgetScript(): Promise<void> {
@@ -1621,7 +1919,19 @@ export class SoundCloudService {
       return;
     }
 
-    this.nativeAudioElement.volume = this.volumePercent / 100;
+    const volume = this.volumePercent / 100;
+    if (this.nativeAudioLocalGain) {
+      this.nativeAudioElement.volume = 1;
+      this.nativeAudioLocalGain.gain.value = volume;
+      return;
+    }
+
+    this.nativeAudioElement.volume = volume;
+  }
+
+  private getAudioContextConstructor(): typeof AudioContext | null {
+    const audioWindow = window as typeof window & { webkitAudioContext?: typeof AudioContext };
+    return audioWindow.AudioContext || audioWindow.webkitAudioContext || null;
   }
 
   private normalizeVolumePercent(value: number | string): number {
@@ -1834,6 +2144,12 @@ export class SoundCloudService {
     }
 
     return null;
+  }
+
+  private createApiUrl(path: string, query: Record<string, string>): URL {
+    const endpoint = new URL(path.replace(/^\/+/, ''), environment.apiURL);
+    Object.entries(query).forEach(([key, value]) => endpoint.searchParams.set(key, value));
+    return endpoint;
   }
 
   private isWidgetPlayableUrl(value: string): boolean {

@@ -1,0 +1,417 @@
+<section class="livestream-manager">
+  <header class="livestream-manager-header">
+    <div class="header-copy">
+      <span class="eyebrow">Call Broadcast</span>
+      <h2>Live Stream</h2>
+      <p>Configurable call feed with atmosphere, scene main layout, and mixed call audio.</p>
+    </div>
+    <div class="stream-status" [class.live]="runtime.isLivestreaming" [class.error]="runtime.error">
+      <mat-icon>{{ runtime.isLivestreaming ? 'cast_connected' : (runtime.error ? 'error' : 'cast') }}</mat-icon>
+      <span>{{ statusText }}</span>
+    </div>
+  </header>
+
+  <div class="livestream-manager-body">
+    <div class="preview-card">
+      <div class="preview-frame" [style.aspect-ratio]="outputAspectRatio">
+        <video #livestreamPreviewVideo autoplay playsinline muted></video>
+        <div class="preview-empty" *ngIf="!hasLivestreamOutput">
+          <mat-icon>cast</mat-icon>
+          <span>Preview starts with the stream</span>
+        </div>
+      </div>
+
+      <div class="source-summary">
+        <div>
+          <strong>{{ hasMatchingCallSource ? participantCount : 0 }}</strong>
+          <span>participants in feed</span>
+        </div>
+        <div>
+          <strong>{{ settings.frameRate }}</strong>
+          <span>fps</span>
+        </div>
+        <div>
+          <strong>{{ outputPresetLabel }}</strong>
+          <span>{{ outputSizeLabel }}</span>
+        </div>
+        <div>
+          <strong>{{ settings.videoBitrateKbps }}</strong>
+          <span>video kbps</span>
+        </div>
+        <div>
+          <strong>{{ settings.audioBitrateKbps }}</strong>
+          <span>audio kbps</span>
+        </div>
+      </div>
+    </div>
+
+    <form class="settings-card" (ngSubmit)="start()">
+      <div class="settings-grid">
+        <label>
+          <span>Destination</span>
+          <select
+            [ngModel]="settings.destination"
+            name="destination"
+            (ngModelChange)="onDestinationChange($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          >
+            <option value="youtube">YouTube</option>
+            <option value="twitch">Twitch</option>
+            <option value="custom">Custom RTMP</option>
+          </select>
+        </label>
+
+        <label>
+          <span>{{ serverUrlLabel }}</span>
+          <input
+            type="text"
+            [ngModel]="activeServerUrl"
+            name="serverUrl"
+            (ngModelChange)="setActiveServerUrl($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+            placeholder="rtmps://..."
+          />
+        </label>
+
+        <label class="stream-key">
+          <span>Stream Key</span>
+          <input
+            type="password"
+            autocomplete="off"
+            [ngModel]="settings.streamKey"
+            name="streamKey"
+            (ngModelChange)="setStreamKey($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+            placeholder="Paste stream key"
+          />
+        </label>
+
+        <label>
+          <span>Video output</span>
+          <select
+            [ngModel]="settings.resolutionPreset"
+            name="resolutionPreset"
+            (ngModelChange)="setResolutionPreset($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          >
+            @for (option of resolutionOptions; track option.preset) {
+              <option [value]="option.preset">
+                {{ option.label }} ({{ option.width }}x{{ option.height }}, {{ option.recommendedVideoBitrateKbps }}v/{{ option.recommendedAudioBitrateKbps }}a kbps)
+              </option>
+            }
+            <option value="custom">Custom size</option>
+          </select>
+        </label>
+
+        <label *ngIf="isCustomResolution">
+          <span>Width</span>
+          <input
+            type="number"
+            min="640"
+            max="3840"
+            step="2"
+            [ngModel]="settings.outputWidth"
+            name="outputWidth"
+            (ngModelChange)="setOutputWidth($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          />
+        </label>
+
+        <label *ngIf="isCustomResolution">
+          <span>Height</span>
+          <input
+            type="number"
+            min="360"
+            max="2160"
+            step="2"
+            [ngModel]="settings.outputHeight"
+            name="outputHeight"
+            (ngModelChange)="setOutputHeight($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          />
+        </label>
+
+        <label>
+          <span>Video bitrate</span>
+          <input
+            type="number"
+            min="800"
+            max="12000"
+            step="100"
+            [ngModel]="settings.videoBitrateKbps"
+            name="videoBitrate"
+            (ngModelChange)="setVideoBitrate($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          />
+        </label>
+
+        <label>
+          <span>Audio bitrate</span>
+          <input
+            type="number"
+            min="64"
+            max="320"
+            step="16"
+            [ngModel]="settings.audioBitrateKbps"
+            name="audioBitrate"
+            (ngModelChange)="setAudioBitrate($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          />
+        </label>
+
+        <label>
+          <span>FPS</span>
+          <input
+            type="number"
+            min="15"
+            max="60"
+            step="1"
+            [ngModel]="settings.frameRate"
+            name="frameRate"
+            (ngModelChange)="setFrameRate($event)"
+            [disabled]="runtime.isLivestreaming || runtime.isStarting"
+          />
+        </label>
+      </div>
+
+      <div
+        class="music-panel"
+        [class.active]="hasMusicAudioTrack"
+        [class.warning]="hasMusicState && !musicState?.paused && !hasMusicAudioTrack"
+      >
+        <div class="music-panel-header">
+          <div>
+            <span class="music-eyebrow">Stream Music</span>
+            <strong>{{ musicTitle }}</strong>
+            <small>{{ musicArtist }}</small>
+          </div>
+          <div class="music-phase">
+            <mat-icon>{{ musicStatusIcon }}</mat-icon>
+            <span>{{ musicStatusText }}</span>
+          </div>
+        </div>
+
+        <div
+          class="music-capture-strip"
+          [class.active]="musicOutputCaptureState.active"
+          [class.error]="musicOutputCaptureState.error"
+        >
+          <div class="music-capture-copy">
+            <span>Widget audio capture</span>
+            <strong>{{ musicOutputCaptureLabel }}</strong>
+            <small>{{ musicOutputCaptureState.status }}</small>
+          </div>
+          <div class="music-capture-actions">
+            <button
+              type="button"
+              class="btn-music-capture"
+              (click)="startMusicOutputCapture()"
+              [disabled]="!canUseMusicOutputCapture || musicOutputCaptureState.active"
+            >
+              <mat-icon>settings_voice</mat-icon>
+              <span>Capture App Audio</span>
+            </button>
+            <button
+              type="button"
+              class="btn-music-capture ghost"
+              *ngIf="musicOutputCaptureState.active"
+              (click)="stopMusicOutputCapture()"
+            >
+              <mat-icon>stop_circle</mat-icon>
+              <span>Stop Capture</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="music-meter-grid">
+          <div class="music-metric">
+            <span>Player level</span>
+            <strong>{{ musicLocalVolumePercent }}%</strong>
+          </div>
+          <div class="music-metric">
+            <span>Stream mix</span>
+            <strong>{{ musicStreamVolumePercent }}%</strong>
+          </div>
+          <div class="music-metric">
+            <span>Effective stream</span>
+            <strong>{{ musicEffectiveVolumePercent }}%</strong>
+          </div>
+          <div class="music-metric">
+            <span>Live tracks</span>
+            <strong>{{ musicTrackCount }}</strong>
+          </div>
+        </div>
+
+        <label class="music-volume">
+          <span>Stream music mix</span>
+          <div class="music-volume-control">
+            <input
+              type="range"
+              min="0"
+              max="200"
+              step="1"
+              [ngModel]="settings.musicVolumePercent"
+              name="streamMusicVolumeSlider"
+              (ngModelChange)="setMusicVolumePercent($event)"
+            />
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="1"
+              [ngModel]="settings.musicVolumePercent"
+              name="streamMusicVolumePercent"
+              (ngModelChange)="setMusicVolumePercent($event)"
+            />
+            <strong>{{ settings.musicVolumePercent }}%</strong>
+          </div>
+        </label>
+
+        <div class="music-footer">
+          <p class="music-help">{{ musicCaptureDetail }}</p>
+        </div>
+      </div>
+
+      <div class="intro-panel" [class.active]="runtime.isIntroPlaying" [class.error]="runtime.introError">
+        <div class="intro-panel-header">
+          <div>
+            <span class="intro-eyebrow">Intro Video</span>
+            <strong>Fade to intro, then return to call</strong>
+          </div>
+          <div class="intro-phase" *ngIf="runtime.isIntroPlaying">
+            <mat-icon>movie</mat-icon>
+            <span>{{ runtime.introPhase }}</span>
+          </div>
+        </div>
+
+        <div class="intro-grid">
+          <label class="intro-file">
+            <span>Local video file</span>
+            <input
+              type="file"
+              accept="video/*"
+              (change)="onIntroVideoFileSelected($event)"
+              [disabled]="runtime.isIntroPlaying"
+            />
+          </label>
+
+          <label class="intro-url">
+            <span>Web video URL</span>
+            <input
+              type="text"
+              [ngModel]="settings.introVideoFileName ? '' : settings.introVideoUrl"
+              name="introVideoUrl"
+              (ngModelChange)="setIntroVideoUrl($event)"
+              [disabled]="runtime.isIntroPlaying"
+              placeholder="Optional: https://example.com/intro.mp4"
+            />
+          </label>
+
+          <label>
+            <span>Fade ms</span>
+            <input
+              type="number"
+              min="250"
+              max="5000"
+              step="250"
+              [ngModel]="settings.introFadeMs"
+              name="introFadeMs"
+              (ngModelChange)="setIntroFadeMs($event)"
+              [disabled]="runtime.isIntroPlaying"
+            />
+          </label>
+
+          <label class="intro-volume">
+            <span>Intro audio level</span>
+            <div class="intro-volume-control">
+              <input
+                type="range"
+                min="0"
+                max="200"
+                step="1"
+                [ngModel]="settings.introVolumePercent"
+                name="introVolumeSlider"
+                (ngModelChange)="setIntroVolumePercent($event)"
+              />
+              <input
+                type="number"
+                min="0"
+                max="200"
+                step="1"
+                [ngModel]="settings.introVolumePercent"
+                name="introVolumePercent"
+                (ngModelChange)="setIntroVolumePercent($event)"
+              />
+              <strong>{{ settings.introVolumePercent }}%</strong>
+            </div>
+          </label>
+        </div>
+
+        <div class="intro-footer">
+          <div class="intro-status">
+            <mat-icon>{{ runtime.introError ? 'error' : (runtime.isIntroPlaying ? 'play_circle' : 'info') }}</mat-icon>
+            <span>{{ introStatusText }}</span>
+            <small *ngIf="runtime.isIntroPlaying">{{ introProgressLabel }}</small>
+          </div>
+
+          <div class="intro-actions">
+            <button
+              type="button"
+              class="btn-intro-start"
+              (click)="triggerIntro()"
+              [disabled]="!canTriggerIntro"
+            >
+              <mat-icon>movie_filter</mat-icon>
+              <span>Trigger Intro</span>
+            </button>
+            <button
+              type="button"
+              class="btn-intro-end"
+              *ngIf="runtime.isIntroPlaying"
+              (click)="endIntro()"
+            >
+              <mat-icon>keyboard_return</mat-icon>
+              <span>Return to Call</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-note">
+        <mat-icon>memory</mat-icon>
+        <span>Video output changes automatically update recommended video and audio bitrates for that scale.</span>
+      </div>
+
+      <div class="stream-message error" *ngIf="runtime.error">
+        <mat-icon>error</mat-icon>
+        <span>{{ runtime.error }}</span>
+      </div>
+      <div class="stream-message" *ngIf="!runtime.error && (runtime.status || runtime.isLivestreaming || runtime.isStarting || runtime.isStopping)">
+        <mat-icon>{{ runtime.isLivestreaming ? 'podcasts' : 'info' }}</mat-icon>
+        <span>{{ statusText }}</span>
+      </div>
+
+      <div class="stream-actions">
+        <button
+          type="submit"
+          class="btn-stream-start"
+          *ngIf="!runtime.isLivestreaming"
+          [disabled]="!canStart"
+        >
+          <mat-icon>{{ runtime.isStarting ? 'hourglass_empty' : 'podcasts' }}</mat-icon>
+          <span>{{ runtime.isStarting ? 'Starting' : 'Go Live' }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn-stream-stop"
+          *ngIf="runtime.isLivestreaming"
+          (click)="stop()"
+          [disabled]="runtime.isStopping"
+        >
+          <mat-icon>{{ runtime.isStopping ? 'hourglass_empty' : 'stop_circle' }}</mat-icon>
+          <span>{{ runtime.isStopping ? 'Stopping' : 'Stop Stream' }}</span>
+        </button>
+      </div>
+    </form>
+  </div>
+</section>

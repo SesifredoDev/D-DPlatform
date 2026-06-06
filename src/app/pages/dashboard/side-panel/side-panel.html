@@ -14,7 +14,7 @@
       [ngStyle]="collapsed ? collapsedServerButtonStyles : null">
       <img
         class="server-icon-mini"
-        [src]="selectedServer.icon || 'https://www.gravatar.com/avatar/'+selectedServer._id+'?d=identicon'"
+        [src]="getServerIconUrl(selectedServer)"
         (error)="$any($event.target).src = 'assets/default-avatar.png'"
         [ngStyle]="collapsed ? collapsedIconStyles : null">
       <span class="server-name-text" *ngIf="!collapsed">{{ selectedServer.name }}</span>
@@ -37,7 +37,7 @@
       <div class="menu-label">My Servers</div>
       @for (server of servers; track server) {
         <button mat-menu-item (click)="selectServer(server)" [class.active-item]="server._id === selectedServer._id">
-          <img class="menu-icon-img" [src]="server.icon || 'https://www.gravatar.com/avatar/'+server._id+'?d=identicon'" (error)="$any($event.target).src = 'assets/default-avatar.png'">
+          <img class="menu-icon-img" [src]="getServerIconUrl(server)" (error)="$any($event.target).src = 'assets/default-avatar.png'">
           <span>{{ server.name }}</span>
         </button>
       }
@@ -102,7 +102,7 @@
         <div class="avatar-container">
           <img
             class="identity-avatar"
-            [src]="selectedCharacter.icon || 'https://www.gravatar.com/avatar/'+selectedCharacter._id+'?d=identicon'"
+            [src]="getCharacterIconUrl(selectedCharacter)"
             (error)="$any($event.target).src = 'assets/default-avatar.png'">
           <div class="status-indicator online"></div>
         </div>
@@ -182,7 +182,8 @@
                   [ngStyle]="collapsed ? collapsedNavItemStyles : null">
                   <img
                     class="mini-avatar"
-                    [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'"
+                    [src]="getUserProfileIconUrl(member.user)"
+                    (error)="$any($event.target).src = 'assets/default-avatar.png'"
                     [ngStyle]="collapsed ? collapsedIconStyles : null">
                   <span class="item-label" *ngIf="!collapsed">{{ member.user.username }}</span>
                   @if (getUnreadCountForMember(member) > 0) {
@@ -238,7 +239,8 @@
                   <img
                     class="member-avatar"
                     *ngIf="!collapsed"
-                    [src]="member.user.profileIcon || 'https://www.gravatar.com/avatar/'+member.user._id+'?d=identicon'">
+                    [src]="getUserProfileIconUrl(member.user)"
+                    (error)="$any($event.target).src = 'assets/default-avatar.png'">
                   <div class="member-details" *ngIf="!collapsed">
                     <span class="username">{{ member.user.username }}</span>
                     <span class="member-role-badge" *ngIf="isMemberTemporaryDm(member)">Temporary DM</span>
@@ -253,10 +255,11 @@
                   @for (char of member.characters; track char._id) {
                     <img
                       class="tiny-char-icon"
-                      [src]="char.icon || 'https://www.gravatar.com/avatar/'+char._id+'?d=identicon'"
+                      [src]="getCharacterIconUrl(char)"
                       [matTooltip]="char.name"
                       [ngStyle]="collapsed ? collapsedCharacterIconStyles : null"
                       draggable="false"
+                      (error)="$any($event.target).src = 'assets/default-avatar.png'"
                       (click)="$event.stopPropagation(); openCharacter(char)"
                       (contextmenu)="onRightClickCharacter($event, char)">
                   }

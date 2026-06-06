@@ -169,6 +169,43 @@
       >
         <mat-icon>{{ isSavingAstralRecording ? 'hourglass_empty' : 'download' }}</mat-icon>
       </button>
+
+      <button
+        *ngIf="!isCallPlaybackMode"
+        type="button"
+        (click)="addFakeLivestreamCaller()"
+        class="btn-action btn-fake-livestream-callers"
+        [class.active]="fakeLivestreamCallerCount > 0"
+        [disabled]="fakeLivestreamCallerCount >= maxFakeLivestreamCallers"
+        [matTooltip]="'Temp: add fake stream caller (' + fakeLivestreamCallerCount + '/' + maxFakeLivestreamCallers + ')'"
+        aria-label="Add fake livestream caller"
+      >
+        <mat-icon>group_add</mat-icon>
+      </button>
+
+      <button
+        *ngIf="!isCallPlaybackMode && fakeLivestreamCallerCount > 0"
+        type="button"
+        (click)="clearFakeLivestreamCallers()"
+        class="btn-action btn-fake-livestream-callers"
+        matTooltip="Temp: clear fake stream callers"
+        aria-label="Clear fake livestream callers"
+      >
+        <mat-icon>person_remove</mat-icon>
+      </button>
+
+      <button
+        *ngIf="!isCallPlaybackMode"
+        type="button"
+        (click)="openLivestreamManager()"
+        class="btn-action btn-call-livestream call-overlay-trigger"
+        [class.active]="isLivestreaming || isStartingLivestream || isStoppingLivestream"
+        [class.btn-danger]="isLivestreaming"
+        [matTooltip]="callLivestreamStatusText"
+        aria-label="Call livestream"
+      >
+        <mat-icon>{{ isLivestreaming ? 'cast_connected' : 'cast' }}</mat-icon>
+      </button>
     </div>
 
     <div

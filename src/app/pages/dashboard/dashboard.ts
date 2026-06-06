@@ -28,6 +28,7 @@ import {AstralPlaybackDropService} from '../../shared/services/astral-recording/
 import {ServerService} from '../../shared/services/server/server';
 import {AstralOptimizationRunner} from './astral-optimization-runner/astral-optimization-runner';
 import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-runner';
+import {CallLivestreamManager} from './call/call-livestream-manager';
 
 @Component({
   selector: 'app-dashboard',
@@ -47,7 +48,8 @@ import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-
     MatSnackBarModule,
     ObsidianViewComponent,
     AstralOptimizationRunner,
-    AstralPackagingRunner
+    AstralPackagingRunner,
+    CallLivestreamManager
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
@@ -323,6 +325,11 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private async openTabInTauriPanel(tab: Tab) {
     if (this.isMobile || !this.canUseTauriPanels) return;
+    if (tab.type === 'livestream') {
+      this.showLivestreamMoveBlockedMessage();
+      return;
+    }
+
     if (this.isActiveCallTab(tab)) {
       this.showActiveCallMoveBlockedMessage();
       return;
@@ -394,7 +401,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
     if (this.isBlockedLiveCallTransfer(payload)) {
       this.tabDragTransfer.markHandled(payload.tabId);
-      this.showActiveCallMoveBlockedMessage();
+      this.showBlockedTabMoveMessage(payload);
       this.tabDragTransfer.clearSoon();
       return;
     }
@@ -411,7 +418,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     this.finishNativeTabDrag();
     this.tabDragTransfer.markHandled(payload.tabId);
     if (this.isBlockedLiveCallTransfer(payload)) {
-      this.showActiveCallMoveBlockedMessage();
+      this.showBlockedTabMoveMessage(payload);
       this.tabDragTransfer.clearSoon();
       return;
     }
@@ -433,6 +440,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
       case 'vtt': return 'map';
       case 'spotify': return 'music_note';
       case 'obsidian': return 'book';
+      case 'livestream': return 'cast';
       default: return 'window';
     }
   }
@@ -532,7 +540,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
       this.finishNativeTabDrag();
       this.tabDragTransfer.markHandled(tabPayload.tabId);
       if (this.isBlockedLiveCallTransfer(tabPayload)) {
-        this.showActiveCallMoveBlockedMessage();
+        this.showBlockedTabMoveMessage(tabPayload);
         this.tabDragTransfer.clearSoon();
         return;
       }
@@ -663,6 +671,10 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private isBlockedLiveCallTransfer(payload: TabDragPayload): boolean {
+    if (payload.type === 'livestream' && !this.tabDragTransfer.isFromCurrentWindow(payload)) {
+      return true;
+    }
+
     return payload.type === 'call' &&
       payload.hasLiveConnection === true &&
       !this.tabDragTransfer.isFromCurrentWindow(payload);
@@ -670,6 +682,19 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private showActiveCallMoveBlockedMessage() {
     window.alert('Active calls can be moved inside the same window, but cannot be moved to another window while connected. Leave the call first, or pop it out before joining.');
+  }
+
+  private showBlockedTabMoveMessage(payload: TabDragPayload) {
+    if (payload.type === 'livestream') {
+      this.showLivestreamMoveBlockedMessage();
+      return;
+    }
+
+    this.showActiveCallMoveBlockedMessage();
+  }
+
+  private showLivestreamMoveBlockedMessage() {
+    window.alert('Live stream management must stay in the same window as the active call because it uses that call view as its video source.');
   }
 
   private closeLiveVttTabs(roomId?: string) {

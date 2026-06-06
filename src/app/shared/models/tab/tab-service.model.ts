@@ -1,6 +1,6 @@
 import type { ICharacter } from '../user/character.model';
 
-export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper' | 'obsidian';
+export type TabType = 'text' | 'call' | 'character' | 'vtt' | 'spotify' | 'whisper' | 'obsidian' | 'livestream';
 
 export type MainTabPane = 'left' | 'right';
 

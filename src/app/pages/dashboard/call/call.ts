@@ -62,6 +62,8 @@ import type { AstralPackagingJob } from '../../../shared/services/astral-recordi
 import { VttSync } from '../../../shared/services/vttsync/vttsync';
 import { CallSessionRecordingWorker, MicTestRecordingWorker } from './call-recording.workers';
 import { createAstralRecordingManifest } from './call-recording/call-recording-astral-manifest';
+import type { CallLivestreamMusicState, CallLivestreamParticipant } from './call-livestream-compositor';
+import { CallLivestreamService, type CallLivestreamSourceSnapshot } from './call-livestream.service';
 import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
 import {
   CALL_DEFAULT_PC_SOURCE,
@@ -205,6 +207,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   sessionRecordingError = '';
   recordedSession: SessionRecording | null = null;
   isCallPlaybackMode = false;
+  isLivestreaming = false;
+  isStartingLivestream = false;
+  isStoppingLivestream = false;
+  fakeLivestreamCallerCount = 0;
+  readonly maxFakeLivestreamCallers = 16;
   isSavingAstralRecording = false;
   isTauriDesktop = false;
   showLocalRecordingsLibrary = false;
@@ -391,6 +398,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private astralOptimizer: AstralOptimizerService,
     private astralPackagingQueue: AstralPackagingQueueService,
     private astralPlaybackDrop: AstralPlaybackDropService,
+    private callLivestream: CallLivestreamService,
     private vttSync: VttSync
   ) {
     this.activeColors = this.themeService.getColors();
@@ -434,6 +442,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   async ngOnInit() {
     this.bindRouteParams();
     this.bindServerState();
+    this.bindCallLivestreamState();
     await this.initializeMediaState();
     await this.restoreLiveCallOrStartPreview();
     this.bindRemoteStreamState();
@@ -443,6 +452,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.bindSessionRecordingState();
     this.bindAstralOptimizationState();
     this.bindAstralPackagingState();
+    this.registerCallLivestreamSource();
 
     this.checkServerOwner();
     this.cdr.detectChanges();
@@ -472,6 +482,26 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.checkServerOwner();
       this.cdr.detectChanges();
     }));
+  }
+
+  private bindCallLivestreamState() {
+    this.subscriptions.add(this.callLivestream.state$.subscribe(state => {
+      this.isLivestreaming = state.isLivestreaming;
+      this.isStartingLivestream = state.isStarting;
+      this.isStoppingLivestream = state.isStopping;
+      this.cdr.detectChanges();
+    }));
+  }
+
+  private registerCallLivestreamSource() {
+    if (!this.channelId) {
+      return;
+    }
+
+    this.callLivestream.setFrameSource(
+      this.channelId,
+      () => this.createCallLivestreamSourceSnapshot()
+    );
   }
 
   private async initializeMediaState() {
@@ -534,6 +564,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       setTimeout(() => {
         this.bindVisibleRemoteVideos();
+        this.callLivestream.refreshFrameSource(this.channelId);
         void this.applyAudioOutputToAllMedia();
       });
     }));
@@ -1405,6 +1436,43 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return this.isServerOwner && this.isTauriDesktop && (!!this.localStream || this.isCallPlaybackMode);
   }
 
+  get callLivestreamStatusText(): string {
+    return this.callLivestream.getStatusText(this.channelId);
+  }
+
+  addFakeLivestreamCaller() {
+    if (this.fakeLivestreamCallerCount >= this.maxFakeLivestreamCallers) {
+      return;
+    }
+
+    this.fakeLivestreamCallerCount += 1;
+    this.callLivestream.refreshFrameSource(this.channelId);
+    this.cdr.detectChanges();
+  }
+
+  clearFakeLivestreamCallers() {
+    if (!this.fakeLivestreamCallerCount) {
+      return;
+    }
+
+    this.fakeLivestreamCallerCount = 0;
+    this.callLivestream.refreshFrameSource(this.channelId);
+    this.cdr.detectChanges();
+  }
+
+  openLivestreamManager() {
+    this.closeClickOffOverlays();
+    this.registerCallLivestreamSource();
+    this.callLivestream.refreshFrameSource(this.channelId);
+    this.tabService.openTab(
+      `livestream:${this.channelId}`,
+      'Live Stream',
+      'livestream',
+      'right',
+      { channelId: this.channelId }
+    );
+  }
+
   get canSaveAstralRecording(): boolean {
     return this.hasDownloadableAstralRecording && !this.isSavingAstralRecording;
   }
@@ -1473,6 +1541,153 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   stopSessionRecording(discardRecording: boolean = false) {
     this.callRecordingWorker.stop(discardRecording);
+  }
+
+  private createCallLivestreamSourceSnapshot(): CallLivestreamSourceSnapshot {
+    const participants = this.getCallLivestreamParticipants();
+
+    return {
+      channelId: this.channelId,
+      hasLiveCall: !!this.localStream,
+      isPlaybackMode: this.isCallPlaybackMode,
+      theme: this.activeColors,
+      temporaryAtmosphereBackground: this.activeTemporaryAtmosphereBackground,
+      participants,
+      music: this.getCallLivestreamMusicState(),
+      isSceneMainLayoutActive: this.isCallLivestreamSceneMainLayoutActive(participants)
+    };
+  }
+
+  private isCallLivestreamSceneMainLayoutActive(participants: CallLivestreamParticipant[]): boolean {
+    return participants.some(participant => participant.isSceneMainCharacter);
+  }
+
+  private getCallLivestreamMusicState(): CallLivestreamMusicState | null {
+    const playback = this.spotify.getLivestreamPlaybackState();
+    if (!playback) {
+      return null;
+    }
+
+    return {
+      title: playback.title,
+      artist: playback.artist,
+      image: playback.image,
+      positionMs: playback.positionMs,
+      durationMs: playback.durationMs,
+      paused: playback.paused,
+      volumePercent: playback.volumePercent,
+      audioStream: playback.audioStream,
+      canCaptureAudio: playback.canCaptureAudio,
+      audioStreamIsPostVolume: playback.audioStreamIsPostVolume,
+      captureSource: playback.captureSource
+    };
+  }
+
+  private getCallLivestreamParticipants(): CallLivestreamParticipant[] {
+    const participants: CallLivestreamParticipant[] = [];
+    const localStream = this.getLocalRecordingStream();
+
+    if (this.showLocalSelfView && localStream) {
+      const character = this.localDisplayCharacter;
+      const name = character.name || 'You';
+      participants.push({
+        id: this.getLocalDisplayParticipantId() || 'local',
+        name,
+        race: character.race || '',
+        icon: this.getLivestreamParticipantIcon(character),
+        level: character.classes?.[0]?.level,
+        isDungeonMaster: this.localDisplayIsDm,
+        avatarLabel: this.getAvatarLabel(name),
+        stream: localStream,
+        videoElement: this.localVideo?.nativeElement ?? null,
+        isLocal: true,
+        isVideoHidden: this.isVideoOff || !this.hasVideoTrack(localStream),
+        volumePercent: 100,
+        isSceneMainCharacter: this.localSceneMainCharacter
+      });
+    }
+
+    const remoteVideoElements = this.remoteVideos?.toArray() ?? [];
+    this.remoteStreams.forEach((remote, index) => {
+      const character = remote.userData;
+      const name = character?.name || 'Player';
+      const volumePercent = this.getLiveParticipantVolumePercent(remote);
+      participants.push({
+        id: remote.id,
+        name,
+        race: character?.race || '',
+        icon: this.getLivestreamParticipantIcon(character),
+        level: character?.classes?.[0]?.level,
+        isDungeonMaster: character?.name === 'DM',
+        avatarLabel: this.getAvatarLabel(name),
+        stream: remote.stream ?? null,
+        videoElement: remoteVideoElements[index]?.nativeElement ?? null,
+        isLocal: false,
+        isVideoHidden: !this.hasVideoTrack(remote.stream),
+        volumePercent,
+        isSceneMainCharacter: remote.isSceneMainCharacter
+      });
+    });
+
+    participants.push(...this.getFakeCallLivestreamParticipants());
+
+    return participants;
+  }
+
+  private getFakeCallLivestreamParticipants(): CallLivestreamParticipant[] {
+    const fakeCallers = [
+      { name: 'Mira Ashvale', race: 'Human Fighter', level: 5 },
+      { name: 'Thorn Bramblefoot', race: 'Halfling Rogue', level: 4 },
+      { name: 'Vael Stormscribe', race: 'Elf Wizard', level: 6 },
+      { name: 'Borin Ironvale', race: 'Dwarf Cleric', level: 5 },
+      { name: 'Nyx Underbough', race: 'Tiefling Bard', level: 4 },
+      { name: 'Seraphine Dawn', race: 'Aasimar Paladin', level: 7 },
+      { name: 'Korrin Reed', race: 'Half-Elf Ranger', level: 5 },
+      { name: 'Old Marrow', race: 'Dungeon Master', level: 20, isDungeonMaster: true },
+      { name: 'Ilyra Moonfall', race: 'Elf Druid', level: 6 },
+      { name: 'Garruk Stonejaw', race: 'Orc Barbarian', level: 5 },
+      { name: 'Pip Copperpot', race: 'Gnome Artificer', level: 4 },
+      { name: 'Sable Vey', race: 'Changeling Warlock', level: 6 },
+      { name: 'Rook Emberhand', race: 'Dragonborn Monk', level: 5 },
+      { name: 'Cassia Wren', race: 'Human Sorcerer', level: 4 },
+      { name: 'Fen Blackwater', race: 'Half-Orc Fighter', level: 6 },
+      { name: 'Elowen Thistle', race: 'Firbolg Cleric', level: 5 }
+    ];
+
+    return fakeCallers.slice(0, this.fakeLivestreamCallerCount).map((caller, index) => ({
+      id: `fake-livestream-caller-${index + 1}`,
+      name: caller.name,
+      race: caller.race,
+      icon: null,
+      level: caller.level,
+      isDungeonMaster: !!caller.isDungeonMaster,
+      avatarLabel: this.getAvatarLabel(caller.name),
+      stream: null,
+      videoElement: null,
+      isLocal: false,
+      isVideoHidden: true,
+      volumePercent: 0,
+      isSceneMainCharacter: false
+    }));
+  }
+
+  private getLiveParticipantVolumePercent(remote: ParticipantStream): number {
+    return this.normalizeParticipantVolume(
+      this.videoService.getParticipantVolume(remote.id) ?? remote.volumePercent,
+      200
+    );
+  }
+
+  private getLivestreamParticipantIcon(character: ICharacter | undefined): string | null {
+    if (!character) {
+      return null;
+    }
+
+    return character.icon || (character._id ? `https://www.gravatar.com/avatar/${character._id}?d=identicon` : null);
+  }
+
+  private getAvatarLabel(name: string): string {
+    return (name.trim().charAt(0) || '?').toUpperCase();
   }
 
   async saveAstralRecording(recording: SessionRecording | null = this.recordedSession) {
@@ -1942,6 +2157,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   startSessionPlayback(recording: SessionRecording | null = this.recordedSession) {
     this.sessionRecordingError = '';
+    if (this.isLivestreaming || this.isStartingLivestream) {
+      this.sessionRecordingError = 'Stop live streaming before playback';
+      return;
+    }
+
     if (this.isSessionRecording) {
       this.sessionRecordingError = 'Stop recording before playback';
       return;
@@ -4254,6 +4474,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   async leaveCall() {
+    await this.callLivestream.stop();
     this.stopSessionRecording();
     this.resetMicTestForCaptureChange();
     this.stopSoundCloudCallSyncTimers();
@@ -4328,6 +4549,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     }
 
     if (channelIdChange && channelIdChange.currentValue) {
+      if (channelIdChange.previousValue) {
+        this.callLivestream.clearFrameSource(channelIdChange.previousValue);
+      }
+      this.registerCallLivestreamSource();
       this.checkServerOwner();
     }
   }
@@ -4610,6 +4835,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   ngOnDestroy() {
     this.gridResizeObserver?.disconnect();
     this.gridResizeObserver = null;
+    void this.callLivestream.stop().catch(() => undefined);
+    this.callLivestream.clearFrameSource(this.channelId);
     this.stopSessionRecording();
     this.cleanupCallPlaybackSources();
     this.resetMicTestForCaptureChange();
@@ -5535,11 +5762,13 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const displayStream = this.getCompanionLocalStream(participants) || this.localStream;
     if (this.localVideo && displayStream && this.localVideo.nativeElement.srcObject !== displayStream) {
       this.localVideo.nativeElement.srcObject = displayStream;
+      this.callLivestream.refreshFrameSource(this.channelId);
       void this.applyAudioOutputToAllMedia();
     }
   }
 
   private async handleCallKickout(reason: string) {
+    await this.callLivestream.stop();
     this.themeService.revertToSaved();
     this.stopSoundCloudCallSyncTimers();
     if (this.localStream) {
@@ -5743,12 +5972,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private configureRemoteAudio(remote: ParticipantStream, video: HTMLVideoElement) {
-    const volumePercent = remote.volumePercent ?? this.videoService.getParticipantVolume(remote.id);
+    const volumePercent = this.getLiveParticipantVolumePercent(remote);
     this.remoteAudioRouter.configureRemoteAudio(remote.id, remote.stream, volumePercent, video, remote.remoteAudioTrack);
   }
 
   private applyRemoteVolumes() {
-    this.remoteStreams.forEach(remote => this.applyRemoteVolume(remote.id, remote.volumePercent));
+    this.remoteStreams.forEach(remote => this.applyRemoteVolume(remote.id, this.getLiveParticipantVolumePercent(remote)));
   }
 
   private applyRemoteVolume(participantId: string, volumePercent: number) {

@@ -32,6 +32,7 @@ import {MessagingSocketService} from '../../../shared/services/messaging-socket/
 import {Subscription} from 'rxjs';
 import {BroadcastDialog} from '../../../objects/broadcast-dialog/broadcast-dialog';
 import {UnreadMessageBadgeService} from '../../../shared/services/unread-message-badge/unread-message-badge.service';
+import { FileService } from '../../../shared/services/file/file';
 import type {
   ChannelAccessPermission,
   ServerManagementPermission
@@ -202,6 +203,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     public obsidianService: ObsidianVaultService,
     private messagingSocketService: MessagingSocketService,
     private unreadBadgeService: UnreadMessageBadgeService,
+    private fileService: FileService,
     private snackBar: MatSnackBar
   ) {
   }
@@ -324,8 +326,17 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     this.messagingSocketService.disconnect();
   }
 
+  private debugLog(...args: unknown[]): void {
+    const consoleRef = globalThis.console;
+    const log = consoleRef?.['log'];
+
+    if (typeof log === 'function') {
+      log.call(consoleRef, '[SidePanel]', ...args);
+    }
+  }
 
   onCharacterChange(char: ICharacter) {
+    this.debugLog('Character selected', char);
     this.selectedCharacter = char;
     this.charService.setActiveCharacter(this.selectedCharacter);
 
@@ -357,11 +368,11 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   }
 
   openObsidian(){
-    console.log("open Obsidian")
+    this.debugLog('Open Obsidian requested');
     if(!this.selectedServer) return
     let obsidianChannel = this.obsidianService.getObsidianChannel(this.selectedServer._id);
 
-    console.log(obsidianChannel, "opening")
+    this.debugLog('Opening Obsidian channel', obsidianChannel);
     this.selectChannel(obsidianChannel)
   }
 
@@ -539,7 +550,7 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     );
 
     if (added) {
-      console.log(`Added ${character.name} to the map via right-click.`);
+      this.debugLog(`Added ${character.name} to the map via right-click.`);
     } else {
       console.warn('Cannot add token: no active VTT map was found for this server.');
       this.snackBar.open('Open or join the VTT map first.', 'OK', { duration: 2500 });
@@ -841,6 +852,29 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   formatUnreadCount(count: number): string {
     return count > 99 ? '99+' : String(count);
+  }
+
+  getServerIconUrl(server: IServer | null | undefined): string {
+    return this.resolveAvatarUrl(server?.icon, server?._id);
+  }
+
+  getUserProfileIconUrl(user: any): string {
+    return this.resolveAvatarUrl(user?.profileIconUrl || user?.profileIcon, user?._id);
+  }
+
+  getCharacterIconUrl(character: ICharacter | null | undefined): string {
+    const char = character as (ICharacter & { iconUrl?: string | null }) | null | undefined;
+    return this.resolveAvatarUrl(char?.iconUrl || char?.icon, char?._id);
+  }
+
+  private resolveAvatarUrl(value: unknown, fallbackId: unknown): string {
+    const icon = typeof value === 'string' ? value.trim() : '';
+    if (icon) {
+      return this.fileService.resolveFileUrl(icon);
+    }
+
+    const id = typeof fallbackId === 'string' && fallbackId.trim() ? fallbackId.trim() : '0';
+    return `https://www.gravatar.com/avatar/${encodeURIComponent(id)}?d=identicon`;
   }
 
 }

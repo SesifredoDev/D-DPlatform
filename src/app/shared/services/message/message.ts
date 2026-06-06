@@ -5,6 +5,7 @@ import { BehaviorSubject, Observable, finalize, map, of, tap } from 'rxjs';
 
 import { environment } from '../../../../environments/environment';
 import { UserService } from '../user/user';
+import { FileService } from '../file/file';
 import type { Attachment, Reaction, MessageData } from '../../models/message/message.model';
 export type { Attachment, Reaction, MessageData } from '../../models/message/message.model';
 @Injectable({ providedIn: 'root' })
@@ -16,7 +17,11 @@ export class Message {
   private olderHistoryExhausted = new Set<string>();
   private socketAuthReady = false;
 
-  constructor(private http: HttpClient, private userService: UserService) {
+  constructor(
+    private http: HttpClient,
+    private userService: UserService,
+    private fileService: FileService
+  ) {
     this.socket = io(`${environment.messageUrl}`, {
       path: '/socket.io/',
       withCredentials: true,
@@ -245,8 +250,56 @@ export class Message {
       ...message,
       channel: channelId,
       channelId,
+      author: this.normalizeUserIcon(message.author),
+      recipient: this.normalizeUserIcon(message.recipient),
+      character: this.normalizeCharacterIcon(message.character),
       attachments: (message.attachments || []).map(attachment => this.normalizeAttachment(attachment)),
+      replyTo: this.normalizeReplyTo(message.replyTo),
       reactions: message.reactions || []
     };
+  }
+
+  private normalizeReplyTo(replyTo: any): any {
+    if (!replyTo || typeof replyTo !== 'object') return replyTo;
+
+    return {
+      ...replyTo,
+      author: this.normalizeUserIcon(replyTo.author),
+      character: this.normalizeCharacterIcon(replyTo.character),
+      attachments: (replyTo.attachments || []).map((attachment: Attachment) =>
+        this.normalizeAttachment(attachment)
+      )
+    };
+  }
+
+  private normalizeUserIcon(user: any): any {
+    if (!user || typeof user !== 'object') return user;
+
+    const profileIcon = this.resolveMessageFileUrl(user.profileIconUrl || user.profileIcon);
+    if (!profileIcon) return user;
+
+    return {
+      ...user,
+      profileIcon,
+      profileIconUrl: profileIcon
+    };
+  }
+
+  private normalizeCharacterIcon(character: any): any {
+    if (!character || typeof character !== 'object') return character;
+
+    const icon = this.resolveMessageFileUrl(character.iconUrl || character.icon);
+    if (!icon) return character;
+
+    return {
+      ...character,
+      icon,
+      iconUrl: icon
+    };
+  }
+
+  private resolveMessageFileUrl(value: unknown): string | null {
+    const url = typeof value === 'string' ? value.trim() : '';
+    return url ? this.fileService.resolveFileUrl(url) : null;
   }
 }

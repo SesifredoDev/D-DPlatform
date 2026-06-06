@@ -1,4 +1,18 @@
 {
+  "app": {
+    "windows": [
+      {
+        "title": "D-D Platform",
+        "url": "index.html",
+        "width": 1900,
+        "height": 1080,
+        "resizable": true,
+        "fullscreen": false,
+        "useHttpsScheme": true,
+        "dragDropEnabled": false
+      }
+    ]
+  },
   "build": {
     "beforeDevCommand": null
   }

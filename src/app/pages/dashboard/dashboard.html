@@ -39,7 +39,7 @@
           <span class="tab-title">{{ tab.title }}</span>
           <button mat-icon-button type="button" class="tab-action popout-btn" title="Pop out tab" aria-label="Pop out tab"
                   draggable="false"
-                  *ngIf="canUseTauriPanels"
+                  *ngIf="canUseTauriPanels && tab.type !== 'livestream'"
                   (mousedown)="$event.stopPropagation()"
                   (click)="popOutTab($event, tab)">
             <mat-icon>open_in_new</mat-icon>
@@ -84,6 +84,8 @@
               [previewOnly]="tab.data?.previewOnly === true"
               (previewTabRequested)="openObsidianPreviewTab($event, tab)">
             </app-obsidian-view>
+          } @else if (tab.type === 'livestream') {
+            <app-call-livestream-manager [channelId]="tab.data?.channelId ?? ''"></app-call-livestream-manager>
           }
         </div>
       }
@@ -119,7 +121,7 @@
             <span class="tab-title">{{ tab.title }}</span>
             <button mat-icon-button type="button" class="tab-action popout-btn" title="Pop out tab" aria-label="Pop out tab"
                     draggable="false"
-                    *ngIf="canUseTauriPanels"
+                    *ngIf="canUseTauriPanels && tab.type !== 'livestream'"
                     (mousedown)="$event.stopPropagation()"
                     (click)="popOutTab($event, tab)">
               <mat-icon>open_in_new</mat-icon>
@@ -164,6 +166,8 @@
               [previewOnly]="tab.data?.previewOnly === true"
               (previewTabRequested)="openObsidianPreviewTab($event, tab)">
             </app-obsidian-view>
+            } @else if (tab.type === 'livestream') {
+              <app-call-livestream-manager [channelId]="tab.data?.channelId ?? ''"></app-call-livestream-manager>
             }
           </div>
         }

@@ -5,7 +5,8 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -201,6 +202,17 @@ struct AstralRecordingOptimizeResponse {
     segment_count: u32,
     optimized_segment_count: u32,
     skipped_segment_count: u32,
+}
+
+#[derive(Default)]
+struct CallStreamingState {
+    session: Mutex<Option<CallStreamingSession>>,
+}
+
+struct CallStreamingSession {
+    session_id: String,
+    child: Child,
+    stdin: Option<ChildStdin>,
 }
 
 fn serve_app_asset<R: tauri::Runtime>(
@@ -594,6 +606,185 @@ async fn astral_recording_optimize_package(
     })
     .await
     .map_err(|error| format!("Astral optimization task failed: {error}"))?
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn call_streaming_start(
+    app: AppHandle,
+    state: tauri::State<'_, CallStreamingState>,
+    session_id: String,
+    rtmp_url: String,
+    width: u32,
+    height: u32,
+    frame_rate: u32,
+    video_bitrate_kbps: u32,
+    audio_bitrate_kbps: u32,
+) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+    let rtmp_url = validate_call_streaming_rtmp_url(&rtmp_url)?;
+    let width = width.clamp(640, 3840);
+    let height = height.clamp(360, 2160);
+    let frame_rate = frame_rate.clamp(15, 60);
+    let video_bitrate_kbps = video_bitrate_kbps.clamp(800, 12000);
+    let audio_bitrate_kbps = audio_bitrate_kbps.clamp(64, 320);
+    let ffmpeg_command = resolve_media_tool_command(&app, "ffmpeg");
+    let video_bitrate = format!("{video_bitrate_kbps}k");
+    let audio_bitrate = format!("{audio_bitrate_kbps}k");
+    let maxrate = video_bitrate.clone();
+    let bufsize = format!("{}k", video_bitrate_kbps.saturating_mul(2));
+    let keyframe_interval = frame_rate.saturating_mul(2).to_string();
+    let frame_rate_arg = frame_rate.to_string();
+    let video_filter = format!(
+        "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
+    );
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "Could not lock streaming session state.".to_string())?;
+    if guard.is_some() {
+        return Err("A call live stream is already running.".to_string());
+    }
+
+    let mut command = Command::new(ffmpeg_command);
+    configure_background_process(&mut command);
+    let mut child = command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "webm",
+            "-i",
+            "pipe:0",
+            "-vf",
+            &video_filter,
+            "-r",
+            &frame_rate_arg,
+            "-g",
+            &keyframe_interval,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-b:v",
+            &video_bitrate,
+            "-maxrate",
+            &maxrate,
+            "-bufsize",
+            &bufsize,
+            "-c:a",
+            "aac",
+            "-b:a",
+            &audio_bitrate,
+            "-ar",
+            "44100",
+            "-ac",
+            "2",
+            "-f",
+            "flv",
+            &rtmp_url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                "ffmpeg was not found. Bundle ffmpeg with the desktop app before live streaming."
+                    .to_string()
+            } else {
+                format!("Could not start ffmpeg: {error}")
+            }
+        })?;
+
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Could not open ffmpeg input stream.".to_string())?;
+
+    *guard = Some(CallStreamingSession {
+        session_id,
+        child,
+        stdin: Some(stdin),
+    });
+
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn call_streaming_write_chunk(
+    state: tauri::State<'_, CallStreamingState>,
+    session_id: String,
+    data_base64: String,
+) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+    let bytes = STANDARD
+        .decode(data_base64)
+        .map_err(|error| format!("Invalid live stream chunk data: {error}"))?;
+    if bytes.is_empty() {
+        return Ok(());
+    }
+
+    let mut guard = state
+        .session
+        .lock()
+        .map_err(|_| "Could not lock streaming session state.".to_string())?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| "No call live stream is running.".to_string())?;
+    if session.session_id != session_id {
+        return Err("Live stream session mismatch.".to_string());
+    }
+
+    if let Some(status) = session.child.try_wait().map_err(to_io_error)? {
+        *guard = None;
+        return Err(format!(
+            "ffmpeg exited before the stream finished ({status})."
+        ));
+    }
+
+    let stdin = session
+        .stdin
+        .as_mut()
+        .ok_or_else(|| "ffmpeg input stream is closed.".to_string())?;
+    stdin.write_all(&bytes).map_err(to_io_error)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn call_streaming_stop(
+    state: tauri::State<'_, CallStreamingState>,
+    session_id: String,
+) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+    let mut session = {
+        let mut guard = state
+            .session
+            .lock()
+            .map_err(|_| "Could not lock streaming session state.".to_string())?;
+        match guard.as_ref() {
+            Some(active_session) if active_session.session_id == session_id => guard.take(),
+            Some(_) => return Err("Live stream session mismatch.".to_string()),
+            None => None,
+        }
+    };
+
+    if let Some(active_session) = session.as_mut() {
+        active_session.stdin.take();
+        if active_session
+            .child
+            .try_wait()
+            .map_err(to_io_error)?
+            .is_none()
+        {
+            let _ = active_session.child.kill();
+            let _ = active_session.child.wait();
+        }
+    }
+
+    Ok(())
 }
 
 fn astral_recording_optimize_package_blocking(
@@ -2793,6 +2984,24 @@ fn validate_session_id(session_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_call_streaming_rtmp_url(url: &str) -> Result<String, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("Live stream destination URL is required.".to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.starts_with("rtmp://") && !lower.starts_with("rtmps://") {
+        return Err("Live stream destination must start with rtmp:// or rtmps://.".to_string());
+    }
+
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err("Live stream destination cannot contain whitespace.".to_string());
+    }
+
+    Ok(trimmed.to_string())
+}
+
 fn is_recordable_session_dir_name(session_id: &str) -> bool {
     session_id.starts_with("astral-")
         && !session_id.starts_with("astral-import-")
@@ -2967,6 +3176,7 @@ fn to_io_error(error: io::Error) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(CallStreamingState::default())
         .register_uri_scheme_protocol(APP_PROTOCOL, serve_app_asset)
         .invoke_handler(tauri::generate_handler![
             astral_recording_begin,
@@ -2985,7 +3195,10 @@ pub fn run() {
             astral_recording_import_write_chunk,
             astral_recording_import_finalize,
             astral_recording_import_abort,
-            astral_recording_optimize_package
+            astral_recording_optimize_package,
+            call_streaming_start,
+            call_streaming_write_chunk,
+            call_streaming_stop
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

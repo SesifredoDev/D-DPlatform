@@ -22,7 +22,7 @@
           <div class="message-item">
             <div class="avatar-column">
               <img
-                [src]="msg.character?.icon || msg.author?.profileIcon || 'https://www.gravatar.com/avatar/'+(msg.character?._id || msg.author?._id)+'?d=identicon'"
+                [src]="getMessageAvatarUrl(msg)"
                 class="user-avatar"
                 alt="Avatar"
                 (error)="$any($event.target).src = 'assets/default-avatar.png'">
@@ -176,22 +176,22 @@
                         </div>
                       } @else if(isImageAttachment(att)) {
                         <a
-                          [href]="att.url"
+                          [href]="getAttachmentUrl(att)"
                           target="_blank"
                           rel="noopener noreferrer"
                           class="attachment-image-link"
-                          (click)="openExternalUrl(att.url, $event)">
-                          <img [src]="att.url" [alt]="getAttachmentDisplayName(att)" class="attachment-image">
+                          (click)="openExternalUrl(getAttachmentUrl(att), $event)">
+                          <img [src]="getAttachmentUrl(att)" [alt]="getAttachmentDisplayName(att)" class="attachment-image">
                         </a>
                       } @else if(isVideoAttachment(att)) {
                         <div class="attachment-media attachment-video">
-                          <video controls preload="metadata" [src]="att.url"></video>
+                          <video controls preload="metadata" [src]="getAttachmentUrl(att)"></video>
                           <a
-                            [href]="att.url"
+                            [href]="getAttachmentUrl(att)"
                             target="_blank"
                             rel="noopener noreferrer"
                             class="attachment-caption"
-                            (click)="openExternalUrl(att.url, $event)">
+                            (click)="openExternalUrl(getAttachmentUrl(att), $event)">
                             <mat-icon>movie</mat-icon>
                             <span>{{ getAttachmentDisplayName(att) }}</span>
                           </a>
@@ -205,23 +205,23 @@
                               <small>{{ formatAttachmentType(att) }}</small>
                             </div>
                           </div>
-                          <audio controls preload="metadata" [src]="att.url"></audio>
+                          <audio controls preload="metadata" [src]="getAttachmentUrl(att)"></audio>
                           <a
-                            [href]="att.url"
+                            [href]="getAttachmentUrl(att)"
                             target="_blank"
                             rel="noopener noreferrer"
                             class="attachment-caption"
-                            (click)="openExternalUrl(att.url, $event)">
+                            (click)="openExternalUrl(getAttachmentUrl(att), $event)">
                             Open audio
                           </a>
                         </div>
                       } @else {
                         <a
-                          [href]="att.url"
+                          [href]="getAttachmentUrl(att)"
                           target="_blank"
                           rel="noopener noreferrer"
                           class="attachment-file"
-                          (click)="openExternalUrl(att.url, $event)">
+                          (click)="openExternalUrl(getAttachmentUrl(att), $event)">
                           <mat-icon>insert_drive_file</mat-icon>
                           <span class="attachment-file-copy">
                             <span>{{ getAttachmentDisplayName(att) }}</span>
@@ -302,7 +302,7 @@
             <div class="attachment-preview">
               @if(isImageAttachment(att)) {
                 <img
-                  [src]="att.url"
+                  [src]="getAttachmentUrl(att)"
                   [alt]="getAttachmentDisplayName(att)"
                   class="attachment-preview-thumb">
               } @else {

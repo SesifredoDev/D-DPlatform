@@ -18,12 +18,22 @@ export class FileService {
    * 2. If relative (like /api/files/key), prefix with backend base URL.
    */
   resolveFileUrl(url: string): string {
-    if (!url) return url;
-    if (this.isDdbSheetPdfUrl(url)) {
-      return `${environment.apiURL}ddb/pdf?url=${encodeURIComponent(url)}`;
+    const value = url?.trim();
+    if (!value) return url;
+    if (/^(data|blob):/i.test(value)) return value;
+    if (this.isDdbSheetPdfUrl(value)) {
+      return `${environment.apiURL}ddb/pdf?url=${encodeURIComponent(value)}`;
     }
-    if (/^https?:\/\//i.test(url)) return url;
-    return new URL(url, environment.backendURL).toString();
+
+    const storedFileKey = this.extractStoredFileKey(value);
+    if (storedFileKey) {
+      return `${this.baseUrl}/${encodeURIComponent(storedFileKey)}`;
+    }
+
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.replace(/^\/+/, '').startsWith('assets/')) return value;
+
+    return new URL(value, environment.backendURL).toString();
   }
 
   // Direct upload for smaller files
@@ -112,6 +122,51 @@ export class FileService {
 
   private isAstralFile(file: File): boolean {
     return file.name.toLowerCase().endsWith('.astral');
+  }
+
+  private isStoredFileKey(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-.+/i.test(value);
+  }
+
+  private extractStoredFileKey(value: string): string | null {
+    const normalizedValue = value.replace(/^\/+/, '');
+    const relativeFileKey = this.getFileKeyFromApiPath(normalizedValue);
+    if (relativeFileKey) return relativeFileKey;
+    if (this.isStoredFileKey(normalizedValue)) return normalizedValue;
+
+    try {
+      const parsedUrl = new URL(value);
+      const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+      const filesIndex = pathSegments.findIndex(segment => segment.toLowerCase() === 'files');
+
+      if (filesIndex >= 0 && pathSegments[filesIndex + 1]) {
+        const fileKey = this.safeDecodeURIComponent(pathSegments[filesIndex + 1]);
+        return this.isStoredFileKey(fileKey) ? fileKey : null;
+      }
+
+      const pathnameKey = this.safeDecodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ''));
+      if (this.isStoredFileKey(pathnameKey)) return pathnameKey;
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  private getFileKeyFromApiPath(value: string): string | null {
+    const match = value.match(/^(?:api\/)?files\/([^/?#]+)/i);
+    if (!match) return null;
+
+    const fileKey = this.safeDecodeURIComponent(match[1]);
+    return this.isStoredFileKey(fileKey) ? fileKey : null;
+  }
+
+  private safeDecodeURIComponent(value: string): string {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
   }
 
   private isDdbSheetPdfUrl(url: string): boolean {

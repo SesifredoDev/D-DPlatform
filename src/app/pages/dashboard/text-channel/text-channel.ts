@@ -333,6 +333,22 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     this.replyingTo = message;
   }
 
+  getMessageAvatarUrl(message: MessageData): string {
+    const character = message.character;
+    const characterIcon = character?.iconUrl;
+    if (characterIcon) {
+      return this.resolveAvatarUrl(
+        characterIcon,
+        character._id
+      );
+    }
+
+    return this.resolveAvatarUrl(
+      message.author?.profileIconUrl,
+      message.author?._id
+    );
+  }
+
   cancelReply() {
     this.replyingTo = null;
   }
@@ -477,7 +493,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   }
 
   getAttachmentDownloadUrl(attachment: Attachment): string {
-    const url = attachment.url;
+    const url = this.getAttachmentUrl(attachment);
     if (!url) return '';
 
     try {
@@ -489,11 +505,17 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     }
   }
 
+  getAttachmentUrl(attachment: Attachment): string {
+    const url = attachment.url || attachment.key || '';
+    return url ? this.fileService.resolveFileUrl(url) : '';
+  }
+
   playAstralAttachment(attachment: Attachment, event?: Event) {
     event?.preventDefault();
     event?.stopPropagation();
 
-    if (!attachment.url) {
+    const attachmentUrl = this.getAttachmentUrl(attachment);
+    if (!attachmentUrl) {
       this.snackBar.open('This .astral attachment is missing its download URL.', 'Close', {
         duration: 4000
       });
@@ -513,7 +535,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
       const remotePlayback = this.getAstralAttachmentRemotePlayback(attachment);
       this.astralPlaybackDrop.requestPlayback({
         channelId: targetCallTab.id,
-        url: attachment.url,
+        url: attachmentUrl,
         remoteManifestUrl: remotePlayback?.manifestUrl,
         remoteMediaUrlTemplate: remotePlayback?.mediaUrlTemplate,
         packageSize: attachment.size,
@@ -533,12 +555,13 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
       };
     }
 
-    if (!attachment.key || !attachment.url) {
+    const attachmentUrl = this.getAttachmentUrl(attachment);
+    if (!attachment.key || !attachmentUrl) {
       return null;
     }
 
     try {
-      const url = new URL(attachment.url);
+      const url = new URL(attachmentUrl);
       const filesMarker = '/files/';
       const markerIndex = url.pathname.lastIndexOf(filesMarker);
       if (markerIndex < 0) {
@@ -647,6 +670,20 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     } catch {
       return null;
     }
+  }
+
+  private resolveAvatarUrl(value: unknown, fallbackId: unknown): string {
+    const icon = typeof value === 'string' ? value.trim() : '';
+    if (icon) {
+      return this.resolveIconUrl(icon);
+    }
+
+    const id = typeof fallbackId === 'string' && fallbackId.trim() ? fallbackId.trim() : '0';
+    return `https://www.gravatar.com/avatar/${encodeURIComponent(id)}?d=identicon`;
+  }
+
+  private resolveIconUrl(icon: string): string {
+    return this.fileService.resolveFileUrl(icon);
   }
 
   private hasContentType(attachment: Attachment, prefix: string): boolean {
