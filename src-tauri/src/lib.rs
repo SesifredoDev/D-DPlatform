@@ -5,8 +5,8 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::process::{Child, ChildStderr, ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -24,6 +24,7 @@ const ASTRAL_MAGIC: &[u8] = b"ASTRAL1\0";
 const RECOVERABLE_MEDIA_EXTENSIONS: &[&str] = &[
     "webm", "webp", "mp4", "m4v", "mov", "ogg", "opus", "mp3", "wav", "png", "jpg", "jpeg", "gif",
 ];
+const CALL_STREAMING_STDERR_LIMIT: usize = 4000;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -211,8 +212,14 @@ struct CallStreamingState {
 
 struct CallStreamingSession {
     session_id: String,
+    processes: Vec<CallStreamingProcess>,
+}
+
+struct CallStreamingProcess {
     child: Child,
     stdin: Option<ChildStdin>,
+    stderr_log: Arc<Mutex<String>>,
+    rtmp_url: String,
 }
 
 fn serve_app_asset<R: tauri::Runtime>(
@@ -613,7 +620,7 @@ fn call_streaming_start(
     app: AppHandle,
     state: tauri::State<'_, CallStreamingState>,
     session_id: String,
-    rtmp_url: String,
+    rtmp_urls: Vec<String>,
     width: u32,
     height: u32,
     frame_rate: u32,
@@ -621,7 +628,7 @@ fn call_streaming_start(
     audio_bitrate_kbps: u32,
 ) -> Result<(), String> {
     validate_session_id(&session_id)?;
-    let rtmp_url = validate_call_streaming_rtmp_url(&rtmp_url)?;
+    let rtmp_urls = validate_call_streaming_rtmp_urls(&rtmp_urls)?;
     let width = width.clamp(640, 3840);
     let height = height.clamp(360, 2160);
     let frame_rate = frame_rate.clamp(15, 60);
@@ -646,69 +653,104 @@ fn call_streaming_start(
         return Err("A call live stream is already running.".to_string());
     }
 
-    let mut command = Command::new(ffmpeg_command);
-    configure_background_process(&mut command);
-    let mut child = command
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "webm",
-            "-i",
-            "pipe:0",
-            "-vf",
-            &video_filter,
-            "-r",
-            &frame_rate_arg,
-            "-g",
-            &keyframe_interval,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-tune",
-            "zerolatency",
-            "-b:v",
-            &video_bitrate,
-            "-maxrate",
-            &maxrate,
-            "-bufsize",
-            &bufsize,
-            "-c:a",
-            "aac",
-            "-b:a",
-            &audio_bitrate,
-            "-ar",
-            "44100",
-            "-ac",
-            "2",
-            "-f",
-            "flv",
-            &rtmp_url,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                "ffmpeg was not found. Bundle ffmpeg with the desktop app before live streaming."
-                    .to_string()
-            } else {
-                format!("Could not start ffmpeg: {error}")
+    let mut processes = Vec::with_capacity(rtmp_urls.len());
+    for rtmp_url in &rtmp_urls {
+        let mut command = Command::new(&ffmpeg_command);
+        configure_background_process(&mut command);
+        let mut child = match command
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "webm",
+                "-i",
+                "pipe:0",
+                "-vf",
+                &video_filter,
+                "-r",
+                &frame_rate_arg,
+                "-g",
+                &keyframe_interval,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-tune",
+                "zerolatency",
+                "-b:v",
+                &video_bitrate,
+                "-maxrate",
+                &maxrate,
+                "-bufsize",
+                &bufsize,
+                "-c:a",
+                "aac",
+                "-b:a",
+                &audio_bitrate,
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                "-flvflags",
+                "no_duration_filesize",
+                "-f",
+                "flv",
+                rtmp_url,
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => {
+                stop_call_streaming_processes(&mut processes)?;
+                return Err(if error.kind() == io::ErrorKind::NotFound {
+                    "ffmpeg was not found. Bundle ffmpeg with the desktop app before live streaming."
+                        .to_string()
+                } else {
+                    format!("Could not start ffmpeg: {error}")
+                });
             }
-        })?;
+        };
 
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "Could not open ffmpeg input stream.".to_string())?;
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                stop_call_streaming_processes(&mut processes)?;
+                return Err("Could not open ffmpeg error stream.".to_string());
+            }
+        };
+        let stderr_log = spawn_call_streaming_stderr_reader(stderr);
+        let stdin = match child.stdin.take() {
+            Some(stdin) => stdin,
+            None => {
+                let mut failed_process = CallStreamingProcess {
+                    child,
+                    stdin: None,
+                    stderr_log,
+                    rtmp_url: rtmp_url.clone(),
+                };
+                stop_call_streaming_processes(std::slice::from_mut(&mut failed_process))?;
+                stop_call_streaming_processes(&mut processes)?;
+                return Err("Could not open ffmpeg input stream.".to_string());
+            }
+        };
+
+        processes.push(CallStreamingProcess {
+            child,
+            stdin: Some(stdin),
+            stderr_log,
+            rtmp_url: rtmp_url.clone(),
+        });
+    }
 
     *guard = Some(CallStreamingSession {
         session_id,
-        child,
-        stdin: Some(stdin),
+        processes,
     });
 
     Ok(())
@@ -732,25 +774,141 @@ fn call_streaming_write_chunk(
         .session
         .lock()
         .map_err(|_| "Could not lock streaming session state.".to_string())?;
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| "No call live stream is running.".to_string())?;
-    if session.session_id != session_id {
-        return Err("Live stream session mismatch.".to_string());
-    }
+    let stream_failure = {
+        let session = guard
+            .as_mut()
+            .ok_or_else(|| "No call live stream is running.".to_string())?;
+        if session.session_id != session_id {
+            return Err("Live stream session mismatch.".to_string());
+        }
 
-    if let Some(status) = session.child.try_wait().map_err(to_io_error)? {
+        let mut stream_failure = None;
+        for process in &mut session.processes {
+            if let Some(status) = process.child.try_wait().map_err(to_io_error)? {
+                stream_failure = Some(format_call_streaming_process_failure(
+                    process,
+                    &format!("ffmpeg exited before the stream finished ({status})."),
+                ));
+                break;
+            }
+        }
+
+        if stream_failure.is_none() {
+            for process in &mut session.processes {
+                let Some(stdin) = process.stdin.as_mut() else {
+                    stream_failure = Some(format_call_streaming_process_failure(
+                        process,
+                        "ffmpeg input stream is closed.",
+                    ));
+                    break;
+                };
+
+                if let Err(error) = stdin.write_all(&bytes) {
+                    stream_failure = Some(format_call_streaming_process_failure(
+                        process,
+                        &format!("Could not write stream data to ffmpeg: {error}"),
+                    ));
+                    break;
+                }
+            }
+        }
+
+        if stream_failure.is_some() {
+            if let Err(error) = stop_call_streaming_processes(&mut session.processes) {
+                stream_failure = Some(match stream_failure {
+                    Some(message) => format!("{message} Cleanup failed: {error}"),
+                    None => error,
+                });
+            }
+        }
+
+        stream_failure
+    };
+
+    if let Some(message) = stream_failure {
         *guard = None;
-        return Err(format!(
-            "ffmpeg exited before the stream finished ({status})."
-        ));
+        return Err(message);
+    };
+
+    Ok(())
+}
+
+fn stop_call_streaming_processes(processes: &mut [CallStreamingProcess]) -> Result<(), String> {
+    for process in processes {
+        process.stdin.take();
+        if process.child.try_wait().map_err(to_io_error)?.is_none() {
+            let _ = process.child.kill();
+            let _ = process.child.wait();
+        }
     }
 
-    let stdin = session
-        .stdin
-        .as_mut()
-        .ok_or_else(|| "ffmpeg input stream is closed.".to_string())?;
-    stdin.write_all(&bytes).map_err(to_io_error)
+    Ok(())
+}
+
+fn spawn_call_streaming_stderr_reader(mut stderr: ChildStderr) -> Arc<Mutex<String>> {
+    let stderr_log = Arc::new(Mutex::new(String::new()));
+    let stderr_log_for_thread = Arc::clone(&stderr_log);
+
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 1024];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(size) => {
+                    let text = String::from_utf8_lossy(&buffer[..size]);
+                    append_call_streaming_stderr(&stderr_log_for_thread, text.as_ref());
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    stderr_log
+}
+
+fn append_call_streaming_stderr(stderr_log: &Arc<Mutex<String>>, text: &str) {
+    let Ok(mut log) = stderr_log.lock() else {
+        return;
+    };
+
+    log.push_str(text);
+    if log.len() > CALL_STREAMING_STDERR_LIMIT {
+        let overflow = log.len() - CALL_STREAMING_STDERR_LIMIT;
+        let drain_to = log
+            .char_indices()
+            .map(|(index, _)| index)
+            .find(|index| *index >= overflow)
+            .unwrap_or(overflow);
+        log.drain(..drain_to);
+    }
+}
+
+fn format_call_streaming_process_failure(process: &CallStreamingProcess, reason: &str) -> String {
+    let stderr = read_call_streaming_stderr(&process.stderr_log);
+    let stderr = sanitize_call_streaming_error(&stderr, &process.rtmp_url);
+    if stderr.is_empty() {
+        return reason.to_string();
+    }
+
+    format!("{reason} ffmpeg: {stderr}")
+}
+
+fn read_call_streaming_stderr(stderr_log: &Arc<Mutex<String>>) -> String {
+    stderr_log
+        .lock()
+        .map(|log| log.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn sanitize_call_streaming_error(message: &str, rtmp_url: &str) -> String {
+    let mut sanitized = message.trim().replace(rtmp_url, "[stream URL]");
+    if let Some((_, stream_key)) = rtmp_url.rsplit_once('/') {
+        if stream_key.len() > 3 {
+            sanitized = sanitized.replace(stream_key, "[stream key]");
+        }
+    }
+
+    sanitized
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -772,19 +930,24 @@ fn call_streaming_stop(
     };
 
     if let Some(active_session) = session.as_mut() {
-        active_session.stdin.take();
-        if active_session
-            .child
-            .try_wait()
-            .map_err(to_io_error)?
-            .is_none()
-        {
-            let _ = active_session.child.kill();
-            let _ = active_session.child.wait();
-        }
+        stop_call_streaming_processes(&mut active_session.processes)?;
     }
 
     Ok(())
+}
+
+fn validate_call_streaming_rtmp_urls(urls: &[String]) -> Result<Vec<String>, String> {
+    if urls.is_empty() {
+        return Err("At least one live stream destination URL is required.".to_string());
+    }
+
+    if urls.len() > 4 {
+        return Err("A maximum of 4 live stream destinations is supported.".to_string());
+    }
+
+    urls.iter()
+        .map(|url| validate_call_streaming_rtmp_url(url))
+        .collect()
 }
 
 fn astral_recording_optimize_package_blocking(

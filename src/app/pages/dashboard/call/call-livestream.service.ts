@@ -119,6 +119,12 @@ export class CallLivestreamService {
   private sessionId = '';
   private chunkWriteChain: Promise<void> = Promise.resolve();
   private stopPromise: Promise<void> | null = null;
+  private hasReceivedStreamChunk = false;
+  private hasWrittenStreamChunk = false;
+  private recorderDataEventCount = 0;
+  private recorderEmptyDataEventCount = 0;
+  private firstChunkTimeout = 0;
+  private recorderChunkPump = 0;
   private introVideoElement: HTMLVideoElement | null = null;
   private introAudioContext: AudioContext | null = null;
   private introAudioSource: MediaElementAudioSourceNode | null = null;
@@ -504,6 +510,10 @@ export class CallLivestreamService {
 
     const sessionId = this.createSessionId();
     this.sessionId = sessionId;
+    this.hasReceivedStreamChunk = false;
+    this.hasWrittenStreamChunk = false;
+    this.recorderDataEventCount = 0;
+    this.recorderEmptyDataEventCount = 0;
     this.patchState({ isStarting: true });
 
     try {
@@ -521,10 +531,11 @@ export class CallLivestreamService {
         }
       );
       this.patchState({ outputStream });
+      this.compositor.requestFrame();
 
       await this.callStreaming.start({
         sessionId,
-        rtmpUrl,
+        rtmpUrls: [rtmpUrl],
         width: outputDimensions.width,
         height: outputDimensions.height,
         frameRate,
@@ -538,25 +549,37 @@ export class CallLivestreamService {
         audioBitsPerSecond: audioBitrateKbps * 1000
       });
       recorder.ondataavailable = event => {
+        this.recorderDataEventCount += 1;
         if (event.data.size > 0) {
+          if (!this.hasReceivedStreamChunk) {
+            this.hasReceivedStreamChunk = true;
+            this.clearFirstChunkTimeout();
+            this.patchState({ status: `Encoder produced data; forwarding to ${this.destinationLabel}` });
+          }
           this.queueChunk(sessionId, event.data);
+          return;
         }
+
+        this.recorderEmptyDataEventCount += 1;
       };
       recorder.onerror = event => {
         console.error('Call livestream recorder error', event);
-        void this.fail('Live stream encoder failed.');
+        const recorderError = (event as Event & { error?: unknown }).error;
+        void this.fail(this.getErrorMessage(recorderError, 'Live stream encoder failed.'));
       };
-      recorder.start(1000);
+      recorder.start();
 
       this.recorder = recorder;
       this.patchState({
         isLivestreaming: true,
-        status: `Streaming to ${this.destinationLabel}`
+        status: `Connecting to ${this.destinationLabel} ingest`
       });
+      this.startRecorderChunkPump(sessionId, frameRate);
+      this.scheduleFirstChunkTimeout(sessionId);
     } catch (error) {
       console.error('Failed to start call livestream', error);
       this.patchState({
-        error: error instanceof Error ? error.message : 'Could not start live stream.'
+        error: this.getErrorMessage(error, 'Could not start live stream.')
       });
       await this.cleanup(sessionId);
     } finally {
@@ -974,11 +997,26 @@ export class CallLivestreamService {
   private queueChunk(sessionId: string, blob: Blob) {
     this.chunkWriteChain = this.chunkWriteChain
       .catch(() => undefined)
-      .then(() => this.callStreaming.writeChunk(sessionId, blob))
+      .then(() => this.withTimeout(
+        this.callStreaming.writeChunk(sessionId, blob),
+        15000,
+        `Timed out writing stream data to ffmpeg. ${this.getRecorderDiagnostics()}`
+      ))
+      .then(() => {
+        if (this.sessionId !== sessionId) {
+          return;
+        }
+
+        if (!this.hasWrittenStreamChunk) {
+          this.hasWrittenStreamChunk = true;
+          this.clearFirstChunkTimeout();
+          this.patchState({ status: `Sending stream data to ${this.destinationLabel}` });
+        }
+      })
       .catch(error => {
         console.error('Failed to write call livestream chunk', error);
         if (this.sessionId === sessionId && this.state$.value.isLivestreaming) {
-          void this.fail('Live stream connection failed.');
+          void this.fail(this.getErrorMessage(error, 'Live stream connection failed.'));
         }
       });
   }
@@ -999,6 +1037,7 @@ export class CallLivestreamService {
 
     const recorder = this.recorder;
     this.recorder = null;
+    this.stopRecorderChunkPump();
     if (recorder && recorder.state !== 'inactive') {
       await new Promise<void>(resolve => {
         const timeout = window.setTimeout(resolve, 2000);
@@ -1021,6 +1060,8 @@ export class CallLivestreamService {
   }
 
   private async cleanup(sessionId: string | null = this.sessionId) {
+    this.clearFirstChunkTimeout();
+    this.stopRecorderChunkPump();
     if (sessionId) {
       await this.callStreaming.stop(sessionId).catch(error => {
         console.warn('Failed to stop call livestream process', error);
@@ -1029,6 +1070,10 @@ export class CallLivestreamService {
 
     this.cleanupOutput();
     this.sessionId = '';
+    this.hasReceivedStreamChunk = false;
+    this.hasWrittenStreamChunk = false;
+    this.recorderDataEventCount = 0;
+    this.recorderEmptyDataEventCount = 0;
     this.chunkWriteChain = Promise.resolve();
     this.patchState({
       isLivestreaming: false,
@@ -1155,6 +1200,93 @@ export class CallLivestreamService {
       ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
       : Math.random().toString(36).slice(2, 14);
     return `callstream-${Date.now()}-${randomPart}`;
+  }
+
+  private scheduleFirstChunkTimeout(sessionId: string) {
+    this.clearFirstChunkTimeout();
+    this.firstChunkTimeout = window.setTimeout(() => {
+      this.firstChunkTimeout = 0;
+      if (
+        this.sessionId === sessionId &&
+        this.state$.value.isLivestreaming &&
+        !this.hasReceivedStreamChunk
+      ) {
+        void this.fail(`Live stream encoder did not produce any data. ${this.getRecorderDiagnostics()}`);
+      }
+    }, 12000);
+  }
+
+  private startRecorderChunkPump(sessionId: string, frameRate: number) {
+    this.stopRecorderChunkPump();
+    const intervalMs = Math.max(250, Math.min(1000, Math.round(1000 / Math.max(1, frameRate)) * 6));
+    this.recorderChunkPump = window.setInterval(() => {
+      if (this.sessionId !== sessionId) {
+        this.stopRecorderChunkPump();
+        return;
+      }
+
+      this.compositor.requestFrame();
+      const recorder = this.recorder;
+      if (!recorder || recorder.state !== 'recording') {
+        return;
+      }
+
+      try {
+        recorder.requestData();
+      } catch (error) {
+        console.warn('Failed to request livestream recorder data', error);
+      }
+    }, intervalMs);
+  }
+
+  private stopRecorderChunkPump() {
+    if (!this.recorderChunkPump) {
+      return;
+    }
+
+    window.clearInterval(this.recorderChunkPump);
+    this.recorderChunkPump = 0;
+  }
+
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      promise
+        .then(resolve, reject)
+        .finally(() => window.clearTimeout(timeout));
+    });
+  }
+
+  private clearFirstChunkTimeout() {
+    if (!this.firstChunkTimeout) {
+      return;
+    }
+
+    window.clearTimeout(this.firstChunkTimeout);
+    this.firstChunkTimeout = 0;
+  }
+
+  private getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+
+    if (typeof error === 'string' && error.trim()) {
+      return error;
+    }
+
+    return fallback;
+  }
+
+  private getRecorderDiagnostics(): string {
+    const recorderState = this.recorder?.state ?? 'none';
+    const tracks = this.state$.value.outputStream?.getTracks()
+      .map(track => {
+        const muted = 'muted' in track ? ` muted=${track.muted}` : '';
+        return `${track.kind}:${track.readyState}:enabled=${track.enabled}${muted}`;
+      })
+      .join(', ') || 'no tracks';
+    return `Recorder state: ${recorderState}; data events: ${this.recorderDataEventCount}; empty events: ${this.recorderEmptyDataEventCount}; tracks: ${tracks}.`;
   }
 
   private patchState(patch: Partial<CallLivestreamRuntimeState>) {
