@@ -1,5 +1,6 @@
 import type {
   CompanionSourceId,
+  MobileCallJoinMode,
   RemoteVideoQualityPreference
 } from '../../../shared/models/video/video.model';
 import type { DeviceType } from '../../../shared/models/device/device.model';
@@ -78,6 +79,10 @@ export function isMicrophoneProcessingMode(value: unknown): value is MicrophoneP
 
 export function isRemoteVideoQualityPreference(value: unknown): value is RemoteVideoQualityPreference {
   return value === 'low' || value === 'medium' || value === 'high';
+}
+
+export function isMobileCallJoinMode(value: unknown): value is MobileCallJoinMode {
+  return value === 'caller' || value === 'companion';
 }
 
 export function normalizeRemoteVideoQualityLevel(value: unknown): RemoteVideoQualityLevel {

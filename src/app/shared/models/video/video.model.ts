@@ -1,7 +1,9 @@
 import type { ConnectionQuality } from 'livekit-client';
 import type { DeviceInfo } from '../device/device.model';
 
-export type CallDeviceRole = 'desktop-main' | 'phone-camera';
+export type CallDeviceRole = 'desktop-main' | 'phone-camera' | 'phone-caller';
+
+export type MobileCallJoinMode = 'caller' | 'companion';
 
 export type CompanionSourceId = 'desktop-local' | string;
 

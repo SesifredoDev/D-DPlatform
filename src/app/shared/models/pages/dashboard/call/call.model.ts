@@ -1,4 +1,4 @@
-import type { CallParticipantMetadata, CompanionSourceId, ParticipantMediaDiagnostics, RemoteVideoQualityPreference } from '../../../video/video.model';
+import type { CallParticipantMetadata, CompanionSourceId, MobileCallJoinMode, ParticipantMediaDiagnostics, RemoteVideoQualityPreference } from '../../../video/video.model';
 import type { ICharacter } from '../../../user/character.model';
 import type { ThemeColors } from '../../../theme/theme.service.model';
 import type { SessionRecordingParticipantMedia } from '../../../session-recording/session-recording.model';
@@ -50,6 +50,7 @@ export interface StoredCallMediaPreferences {
   isPreviewMuted?: boolean;
   isPreviewVideoOff?: boolean;
   experimentalMobile1080pEnabled?: boolean;
+  mobileJoinMode?: MobileCallJoinMode;
 }
 
 export interface RemoteAudioOutput {

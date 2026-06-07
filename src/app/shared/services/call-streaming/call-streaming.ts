@@ -3,7 +3,7 @@ import type { TauriCoreApi } from '../../models/astral-recording/astral-recordin
 
 export interface CallStreamingStartOptions {
   sessionId: string;
-  rtmpUrls: string[];
+  outputUrl: string;
   width: number;
   height: number;
   frameRate: number;
@@ -41,7 +41,7 @@ export class CallStreamingService {
   private async requireCore(): Promise<TauriCoreApi> {
     const core = await this.getCore();
     if (!core?.isTauri()) {
-      throw new Error('Live streaming is only available in the Tauri desktop app.');
+      throw new Error('OBS media output is only available in the Tauri desktop app.');
     }
 
     return core;

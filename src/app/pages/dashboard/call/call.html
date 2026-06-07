@@ -1,4 +1,8 @@
-<div class="video-container">
+<div
+  class="video-container"
+  [class.mobile-standard-caller]="isMobileStandardCaller"
+  [class.mobile-webcam-companion]="isMobileCompanionMode"
+>
 
   <!-- PRE-JOIN SCREEN -->
   @if (!localStream && !isCallPlaybackMode) {
@@ -24,6 +28,31 @@
         <div class="setup-content">
           <h2>Ready to join?</h2>
           <p>Configure your devices before entering the call.</p>
+
+          <div *ngIf="isMobileBrowser" class="mobile-join-mode-selector" role="radiogroup" aria-label="Mobile join mode">
+            <button
+              type="button"
+              class="mobile-join-mode-option"
+              [class.active]="mobileJoinMode === 'caller'"
+              [attr.aria-pressed]="mobileJoinMode === 'caller'"
+              (click)="setMobileJoinMode('caller')"
+            >
+              <mat-icon>groups</mat-icon>
+              <strong>Standard Caller</strong>
+              <span>See everyone and join normally from this phone.</span>
+            </button>
+            <button
+              type="button"
+              class="mobile-join-mode-option"
+              [class.active]="mobileJoinMode === 'companion'"
+              [attr.aria-pressed]="mobileJoinMode === 'companion'"
+              (click)="setMobileJoinMode('companion')"
+            >
+              <mat-icon>photo_camera</mat-icon>
+              <strong>Webcam Mode</strong>
+              <span>Use this phone as a camera/mic for your desktop.</span>
+            </button>
+          </div>
 
           <div class="settings-grid">
             <div class="device-select">
@@ -77,7 +106,7 @@
           </div>
 
           <div *ngIf="isMobileBrowser" class="mobile-permission-prompt">
-            <p>Mobile video now targets 1080p by default. 1440p can be enabled experimentally.</p>
+            <p>{{ mobileJoinModeDescription }} Mobile video targets 1080p by default. 1440p can be enabled experimentally.</p>
             <button class="btn-primary-join" (click)="toggleExperimentalMobile1080p()" [disabled]="isPreparingMobileMedia">
               <mat-icon>{{ experimentalMobile1080pEnabled ? 'high_quality' : 'hd' }}</mat-icon>
               <span>{{ experimentalMobile1080pEnabled ? 'Experimental 1440p On' : 'Enable Experimental 1440p' }}</span>
@@ -85,7 +114,7 @@
           </div>
 
           <div *ngIf="isMobileBrowser && !mobileMediaReady" class="mobile-permission-prompt">
-            <p>{{ mobileMediaMessage || 'Enable camera and microphone first to see preview and device options.' }}</p>
+            <p>{{ mobileMediaMessage || mobileMediaPromptText }}</p>
             <button class="btn-primary-join" (click)="prepareMobileMedia()" [disabled]="isPreparingMobileMedia">
               <mat-icon>{{ isPreparingMobileMedia ? 'hourglass_top' : 'videocam' }}</mat-icon>
               <span>{{ isPreparingMobileMedia ? 'Preparing...' : 'Enable Camera & Mic' }}</span>
@@ -99,7 +128,7 @@
 
           <button class="btn-primary-join" (click)="joinCall()" [disabled]="isJoining">
             <mat-icon>{{ isJoining ? 'hourglass_top' : 'login' }}</mat-icon>
-            <span>{{ isJoining ? 'Joining...' : 'Enter Call' }}</span>
+            <span>{{ isJoining ? 'Joining...' : primaryJoinButtonLabel }}</span>
           </button>
 
           <div class="session-recording-panel" *ngIf="hasRecordedSessionPlayback && !isSessionRecording">

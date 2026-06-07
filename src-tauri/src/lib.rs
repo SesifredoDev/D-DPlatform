@@ -219,7 +219,7 @@ struct CallStreamingProcess {
     child: Child,
     stdin: Option<ChildStdin>,
     stderr_log: Arc<Mutex<String>>,
-    rtmp_url: String,
+    output_url: String,
 }
 
 fn serve_app_asset<R: tauri::Runtime>(
@@ -620,7 +620,7 @@ fn call_streaming_start(
     app: AppHandle,
     state: tauri::State<'_, CallStreamingState>,
     session_id: String,
-    rtmp_urls: Vec<String>,
+    output_url: String,
     width: u32,
     height: u32,
     frame_rate: u32,
@@ -628,7 +628,7 @@ fn call_streaming_start(
     audio_bitrate_kbps: u32,
 ) -> Result<(), String> {
     validate_session_id(&session_id)?;
-    let rtmp_urls = validate_call_streaming_rtmp_urls(&rtmp_urls)?;
+    let output_url = validate_call_streaming_output_url(&output_url)?;
     let width = width.clamp(640, 3840);
     let height = height.clamp(360, 2160);
     let frame_rate = frame_rate.clamp(15, 60);
@@ -639,7 +639,9 @@ fn call_streaming_start(
     let audio_bitrate = format!("{audio_bitrate_kbps}k");
     let maxrate = video_bitrate.clone();
     let bufsize = format!("{}k", video_bitrate_kbps.saturating_mul(2));
-    let keyframe_interval = frame_rate.saturating_mul(2).to_string();
+    let keyframe_interval = frame_rate.to_string();
+    let x264_params =
+        format!("keyint={keyframe_interval}:min-keyint={keyframe_interval}:scenecut=0");
     let frame_rate_arg = frame_rate.to_string();
     let video_filter = format!(
         "scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
@@ -650,103 +652,110 @@ fn call_streaming_start(
         .lock()
         .map_err(|_| "Could not lock streaming session state.".to_string())?;
     if guard.is_some() {
-        return Err("A call live stream is already running.".to_string());
+        return Err("An OBS media feed is already running.".to_string());
     }
 
-    let mut processes = Vec::with_capacity(rtmp_urls.len());
-    for rtmp_url in &rtmp_urls {
-        let mut command = Command::new(&ffmpeg_command);
-        configure_background_process(&mut command);
-        let mut child = match command
-            .args([
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-f",
-                "webm",
-                "-i",
-                "pipe:0",
-                "-vf",
-                &video_filter,
-                "-r",
-                &frame_rate_arg,
-                "-g",
-                &keyframe_interval,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-tune",
-                "zerolatency",
-                "-b:v",
-                &video_bitrate,
-                "-maxrate",
-                &maxrate,
-                "-bufsize",
-                &bufsize,
-                "-c:a",
-                "aac",
-                "-b:a",
-                &audio_bitrate,
-                "-ar",
-                "44100",
-                "-ac",
-                "2",
-                "-flvflags",
-                "no_duration_filesize",
-                "-f",
-                "flv",
-                rtmp_url,
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(error) => {
-                stop_call_streaming_processes(&mut processes)?;
-                return Err(if error.kind() == io::ErrorKind::NotFound {
-                    "ffmpeg was not found. Bundle ffmpeg with the desktop app before live streaming."
-                        .to_string()
-                } else {
-                    format!("Could not start ffmpeg: {error}")
-                });
+    let mut command = Command::new(&ffmpeg_command);
+    configure_background_process(&mut command);
+    let mut child = command
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-fflags",
+            "nobuffer",
+            "-flags",
+            "low_delay",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-f",
+            "webm",
+            "-i",
+            "pipe:0",
+            "-vf",
+            &video_filter,
+            "-r",
+            &frame_rate_arg,
+            "-g",
+            &keyframe_interval,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-tune",
+            "zerolatency",
+            "-x264-params",
+            &x264_params,
+            "-b:v",
+            &video_bitrate,
+            "-maxrate",
+            &maxrate,
+            "-bufsize",
+            &bufsize,
+            "-c:a",
+            "aac",
+            "-b:a",
+            &audio_bitrate,
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-mpegts_flags",
+            "resend_headers",
+            "-flush_packets",
+            "1",
+            "-muxdelay",
+            "0",
+            "-muxpreload",
+            "0",
+            "-f",
+            "mpegts",
+            &output_url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                "ffmpeg was not found. Bundle ffmpeg with the desktop app before starting the OBS media feed."
+                    .to_string()
+            } else {
+                format!("Could not start ffmpeg: {error}")
             }
-        };
+        })?;
 
-        let stderr = match child.stderr.take() {
-            Some(stderr) => stderr,
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                stop_call_streaming_processes(&mut processes)?;
-                return Err("Could not open ffmpeg error stream.".to_string());
-            }
-        };
-        let stderr_log = spawn_call_streaming_stderr_reader(stderr);
-        let stdin = match child.stdin.take() {
-            Some(stdin) => stdin,
-            None => {
-                let mut failed_process = CallStreamingProcess {
-                    child,
-                    stdin: None,
-                    stderr_log,
-                    rtmp_url: rtmp_url.clone(),
-                };
-                stop_call_streaming_processes(std::slice::from_mut(&mut failed_process))?;
-                stop_call_streaming_processes(&mut processes)?;
-                return Err("Could not open ffmpeg input stream.".to_string());
-            }
-        };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Could not open ffmpeg error stream.".to_string());
+        }
+    };
+    let stderr_log = spawn_call_streaming_stderr_reader(stderr);
+    let stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => {
+            let mut failed_process = CallStreamingProcess {
+                child,
+                stdin: None,
+                stderr_log,
+                output_url: output_url.clone(),
+            };
+            stop_call_streaming_processes(std::slice::from_mut(&mut failed_process))?;
+            return Err("Could not open ffmpeg input stream.".to_string());
+        }
+    };
 
-        processes.push(CallStreamingProcess {
-            child,
-            stdin: Some(stdin),
-            stderr_log,
-            rtmp_url: rtmp_url.clone(),
-        });
-    }
+    let processes = vec![CallStreamingProcess {
+        child,
+        stdin: Some(stdin),
+        stderr_log,
+        output_url,
+    }];
 
     *guard = Some(CallStreamingSession {
         session_id,
@@ -777,9 +786,9 @@ fn call_streaming_write_chunk(
     let stream_failure = {
         let session = guard
             .as_mut()
-            .ok_or_else(|| "No call live stream is running.".to_string())?;
+            .ok_or_else(|| "No OBS media feed is running.".to_string())?;
         if session.session_id != session_id {
-            return Err("Live stream session mismatch.".to_string());
+            return Err("OBS media feed session mismatch.".to_string());
         }
 
         let mut stream_failure = None;
@@ -885,7 +894,7 @@ fn append_call_streaming_stderr(stderr_log: &Arc<Mutex<String>>, text: &str) {
 
 fn format_call_streaming_process_failure(process: &CallStreamingProcess, reason: &str) -> String {
     let stderr = read_call_streaming_stderr(&process.stderr_log);
-    let stderr = sanitize_call_streaming_error(&stderr, &process.rtmp_url);
+    let stderr = sanitize_call_streaming_error(&stderr, &process.output_url);
     if stderr.is_empty() {
         return reason.to_string();
     }
@@ -900,15 +909,8 @@ fn read_call_streaming_stderr(stderr_log: &Arc<Mutex<String>>) -> String {
         .unwrap_or_default()
 }
 
-fn sanitize_call_streaming_error(message: &str, rtmp_url: &str) -> String {
-    let mut sanitized = message.trim().replace(rtmp_url, "[stream URL]");
-    if let Some((_, stream_key)) = rtmp_url.rsplit_once('/') {
-        if stream_key.len() > 3 {
-            sanitized = sanitized.replace(stream_key, "[stream key]");
-        }
-    }
-
-    sanitized
+fn sanitize_call_streaming_error(message: &str, output_url: &str) -> String {
+    message.trim().replace(output_url, "[OBS output URL]")
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -924,7 +926,7 @@ fn call_streaming_stop(
             .map_err(|_| "Could not lock streaming session state.".to_string())?;
         match guard.as_ref() {
             Some(active_session) if active_session.session_id == session_id => guard.take(),
-            Some(_) => return Err("Live stream session mismatch.".to_string()),
+            Some(_) => return Err("OBS media feed session mismatch.".to_string()),
             None => None,
         }
     };
@@ -934,20 +936,6 @@ fn call_streaming_stop(
     }
 
     Ok(())
-}
-
-fn validate_call_streaming_rtmp_urls(urls: &[String]) -> Result<Vec<String>, String> {
-    if urls.is_empty() {
-        return Err("At least one live stream destination URL is required.".to_string());
-    }
-
-    if urls.len() > 4 {
-        return Err("A maximum of 4 live stream destinations is supported.".to_string());
-    }
-
-    urls.iter()
-        .map(|url| validate_call_streaming_rtmp_url(url))
-        .collect()
 }
 
 fn astral_recording_optimize_package_blocking(
@@ -3147,19 +3135,19 @@ fn validate_session_id(session_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_call_streaming_rtmp_url(url: &str) -> Result<String, String> {
+fn validate_call_streaming_output_url(url: &str) -> Result<String, String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
-        return Err("Live stream destination URL is required.".to_string());
+        return Err("OBS output URL is required.".to_string());
     }
 
     let lower = trimmed.to_ascii_lowercase();
-    if !lower.starts_with("rtmp://") && !lower.starts_with("rtmps://") {
-        return Err("Live stream destination must start with rtmp:// or rtmps://.".to_string());
+    if !lower.starts_with("udp://127.0.0.1:") && !lower.starts_with("udp://localhost:") {
+        return Err("OBS output must use a localhost udp:// URL.".to_string());
     }
 
     if trimmed.chars().any(char::is_whitespace) {
-        return Err("Live stream destination cannot contain whitespace.".to_string());
+        return Err("OBS output URL cannot contain whitespace.".to_string());
     }
 
     Ok(trimmed.to_string())

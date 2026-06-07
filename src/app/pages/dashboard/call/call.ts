@@ -19,6 +19,7 @@ import type {
   CallRecordingParticipant,
   CompanionDeviceOption,
   CompanionSourceId,
+  MobileCallJoinMode,
   ParticipantMediaDiagnostics
 } from '../../../shared/models/video/video.model';
 import { Subscription } from 'rxjs';
@@ -62,7 +63,12 @@ import type { AstralPackagingJob } from '../../../shared/services/astral-recordi
 import { VttSync } from '../../../shared/services/vttsync/vttsync';
 import { CallSessionRecordingWorker, MicTestRecordingWorker } from './call-recording.workers';
 import { createAstralRecordingManifest } from './call-recording/call-recording-astral-manifest';
-import type { CallLivestreamMusicState, CallLivestreamParticipant } from './call-livestream-compositor';
+import type {
+  CallLivestreamBroadcastOverlay,
+  CallLivestreamBroadcastOverlayType,
+  CallLivestreamMusicState,
+  CallLivestreamParticipant
+} from './call-livestream-compositor';
 import { CallLivestreamService, type CallLivestreamSourceSnapshot } from './call-livestream.service';
 import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
 import {
@@ -77,6 +83,7 @@ import {
 import {
   buildCallMediaConstraints,
   getRemoteVideoQualityPreference,
+  isMobileCallJoinMode,
   isMicrophoneProcessingMode,
   isRemoteVideoQualityPreference,
   normalizeRemoteVideoQualityLevel,
@@ -235,6 +242,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   isPreparingMobileMedia = false;
   mobileMediaReady = false;
   mobileMediaMessage = '';
+  mobileJoinMode: MobileCallJoinMode = 'caller';
   joinError = '';
   experimentalMobile1080pEnabled = false;
   private hasRequestedMobileMedia = false;
@@ -269,6 +277,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   broadcastOverlayNoteStatus = '';
   private lastBroadcastOverlayActivatedAt = 0;
   private readonly broadcastOverlayDismissGraceMs = 250;
+  private callLivestreamBroadcastOverlay: CallLivestreamBroadcastOverlay | null = null;
+  private readonly callLivestreamBroadcastOverlayDurationMs = 20000;
 
   // Session notes state
   showSessionNotes = false;
@@ -932,6 +942,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       this.activeColors = colors;
       this.rememberValidThemeBackground(colors);
       this.themeService.applyTheme(colors, false); // DO NOT save call atmosphere to local player preference
+      this.activateCallLivestreamBroadcastOverlay({
+        type: 'theme',
+        title: 'Atmosphere Broadcast',
+        text: 'Atmosphere updated',
+        image: colors.backgroundImage ?? null
+      });
       this.recordCallEnvironmentEvent('theme-sync', colors);
     }));
 
@@ -957,6 +973,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
+      if (url) {
+        this.activateCallLivestreamBroadcastOverlay({
+          type: 'image',
+          title: 'Image Broadcast',
+          text: null,
+          image: url
+        });
+      } else {
+        this.clearCallLivestreamBroadcastOverlay('image');
+      }
       if (url === this.activeOverlayImage && !(url && this.activeOverlayText)) {
         return;
       }
@@ -974,6 +1000,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
       }
+      const broadcastText = text?.trim() || '';
+      if (broadcastText) {
+        this.activateCallLivestreamBroadcastOverlay({
+          type: 'text',
+          title: 'Text Broadcast',
+          text: broadcastText,
+          image: null
+        });
+      } else {
+        this.clearCallLivestreamBroadcastOverlay('text');
+      }
       if (text === this.activeOverlayText && !(text && this.activeOverlayImage)) {
         return;
       }
@@ -990,6 +1027,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.subscriptions.add(this.videoService.temporaryAtmosphereBackground$.subscribe(url => {
       if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
         return;
+      }
+      if (url) {
+        this.activateCallLivestreamBroadcastOverlay({
+          type: 'atmosphere',
+          title: 'Atmosphere Broadcast',
+          text: 'Temporary atmosphere updated',
+          image: url
+        });
+      } else {
+        this.clearCallLivestreamBroadcastOverlay('atmosphere');
       }
       if (url === this.activeTemporaryAtmosphereBackground) {
         return;
@@ -1554,7 +1601,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       temporaryAtmosphereBackground: this.activeTemporaryAtmosphereBackground,
       participants,
       music: this.getCallLivestreamMusicState(),
-      isSceneMainLayoutActive: this.isCallLivestreamSceneMainLayoutActive(participants)
+      isSceneMainLayoutActive: this.isCallLivestreamSceneMainLayoutActive(participants),
+      broadcastOverlay: this.getActiveCallLivestreamBroadcastOverlay()
     };
   }
 
@@ -2326,21 +2374,57 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       switch (event.action) {
         case 'theme-sync':
           this.applyRecordedTheme(data);
+          this.activateCallLivestreamBroadcastOverlay({
+            type: 'theme',
+            title: 'Atmosphere Broadcast',
+            text: 'Atmosphere updated',
+            image: data?.backgroundImage ?? null
+          });
           break;
         case 'overlay-image':
           this.activeOverlayImage = data?.url ?? data ?? null;
+          if (this.activeOverlayImage) {
+            this.activateCallLivestreamBroadcastOverlay({
+              type: 'image',
+              title: 'Image Broadcast',
+              text: null,
+              image: this.activeOverlayImage
+            });
+          } else {
+            this.clearCallLivestreamBroadcastOverlay('image');
+          }
           if (this.activeOverlayImage) {
             this.activeOverlayText = null;
           }
           break;
         case 'overlay-text':
           this.activeOverlayText = data?.text ?? data ?? null;
+          if (this.activeOverlayText?.trim()) {
+            this.activateCallLivestreamBroadcastOverlay({
+              type: 'text',
+              title: 'Text Broadcast',
+              text: this.activeOverlayText.trim(),
+              image: null
+            });
+          } else {
+            this.clearCallLivestreamBroadcastOverlay('text');
+          }
           if (this.activeOverlayText) {
             this.activeOverlayImage = null;
           }
           break;
         case 'temporary-atmosphere-background':
           this.activeTemporaryAtmosphereBackground = data?.url ?? data ?? null;
+          if (this.activeTemporaryAtmosphereBackground) {
+            this.activateCallLivestreamBroadcastOverlay({
+              type: 'atmosphere',
+              title: 'Atmosphere Broadcast',
+              text: 'Temporary atmosphere updated',
+              image: this.activeTemporaryAtmosphereBackground
+            });
+          } else {
+            this.clearCallLivestreamBroadcastOverlay('atmosphere');
+          }
           this.applyTemporaryAtmosphereBackground(this.activeTemporaryAtmosphereBackground);
           break;
         case 'scene-main-characters':
@@ -4009,6 +4093,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   get isSceneMainLayoutActive(): boolean {
+    if (this.isMobileStandardCaller) {
+      return false;
+    }
+
     return this.hasVisibleSceneMainCharacters && this.hasSceneMainLayoutSpace;
   }
 
@@ -4353,6 +4441,45 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return this.remoteVideoQualityOptions[this.remoteVideoQualityLevel]?.label ?? 'Balanced';
   }
 
+  get isMobileStandardCaller(): boolean {
+    return this.isMobileBrowser && this.mobileJoinMode === 'caller';
+  }
+
+  get isMobileCompanionMode(): boolean {
+    return this.isMobileBrowser && this.mobileJoinMode === 'companion';
+  }
+
+  get mobileJoinModeDescription(): string {
+    return this.mobileJoinMode === 'companion'
+      ? 'Webcam mode sends this phone camera and mic to your desktop call. It will not show the room grid.'
+      : 'Standard caller mode joins the room on this phone with everyone visible in a mobile-friendly grid.';
+  }
+
+  get mobileMediaPromptText(): string {
+    return this.mobileJoinMode === 'companion'
+      ? 'Enable camera and microphone first to use this phone as a webcam.'
+      : 'Enable camera and microphone first to preview and join as a caller.';
+  }
+
+  get primaryJoinButtonLabel(): string {
+    if (!this.isMobileBrowser) {
+      return 'Enter Call';
+    }
+
+    return this.mobileJoinMode === 'companion' ? 'Use as Webcam' : 'Join as Caller';
+  }
+
+  setMobileJoinMode(mode: MobileCallJoinMode) {
+    if (!this.isMobileBrowser || this.mobileJoinMode === mode) {
+      return;
+    }
+
+    this.mobileJoinMode = mode;
+    this.joinError = '';
+    this.persistMediaPreferences();
+    this.cdr.detectChanges();
+  }
+
   async joinCall() {
     if (!this.channelId || !this.character || this.isJoining) return;
     this.isJoining = true;
@@ -4362,7 +4489,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       const currentUserId = this.requireCurrentUserId();
       const characterToBroadcast = this.isDmMode ? this.dmCharacter : this.character;
 
-      await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast);
+      await this.videoService.initVideoCall(this.channelId, currentUserId, characterToBroadcast, {
+        mobileJoinMode: this.isMobileBrowser ? this.mobileJoinMode : undefined
+      });
 
       this.localStream = await this.getStreamForJoin();
       this.assertActiveLocalStream();
@@ -4661,6 +4790,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
     this.recordCallEnvironmentEvent('theme-sync', this.activeColors);
+    this.activateCallLivestreamBroadcastOverlay({
+      type: 'theme',
+      title: 'Atmosphere Broadcast',
+      text: 'Atmosphere updated',
+      image: this.activeColors.backgroundImage ?? null
+    });
     this.themePickerBaselineColors = null;
     this.showThemePicker = false;
   }
@@ -4687,6 +4822,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.rememberValidThemeBackground(this.activeColors);
     if (this.safeSendThemeUpdate(this.activeColors)) {
       this.recordCallEnvironmentEvent('theme-sync', this.activeColors);
+      this.activateCallLivestreamBroadcastOverlay({
+        type: 'theme',
+        title: 'Atmosphere Broadcast',
+        text: 'Atmosphere reset',
+        image: this.activeColors.backgroundImage ?? null
+      });
       this.themePickerBaselineColors = cloneThemeColors(this.activeColors);
     }
   }
@@ -4830,6 +4971,50 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private isBroadcastOverlayInDismissGracePeriod(): boolean {
     return !!(this.activeOverlayImage || this.activeOverlayText) &&
       Date.now() - this.lastBroadcastOverlayActivatedAt < this.broadcastOverlayDismissGraceMs;
+  }
+
+  private activateCallLivestreamBroadcastOverlay(
+    overlay: Omit<CallLivestreamBroadcastOverlay, 'startedAtMs' | 'durationMs'>
+  ) {
+    const text = overlay.text?.trim() || null;
+    if (!text && !overlay.image) {
+      return;
+    }
+
+    this.callLivestreamBroadcastOverlay = {
+      ...overlay,
+      text,
+      startedAtMs: Date.now(),
+      durationMs: this.callLivestreamBroadcastOverlayDurationMs
+    };
+    this.callLivestream.refreshFrameSource(this.channelId);
+  }
+
+  private clearCallLivestreamBroadcastOverlay(type?: CallLivestreamBroadcastOverlayType) {
+    if (!this.callLivestreamBroadcastOverlay) {
+      return;
+    }
+
+    if (type && this.callLivestreamBroadcastOverlay.type !== type) {
+      return;
+    }
+
+    this.callLivestreamBroadcastOverlay = null;
+    this.callLivestream.refreshFrameSource(this.channelId);
+  }
+
+  private getActiveCallLivestreamBroadcastOverlay(): CallLivestreamBroadcastOverlay | null {
+    const overlay = this.callLivestreamBroadcastOverlay;
+    if (!overlay) {
+      return null;
+    }
+
+    if (Date.now() - overlay.startedAtMs < overlay.durationMs) {
+      return overlay;
+    }
+
+    this.callLivestreamBroadcastOverlay = null;
+    return null;
   }
 
   ngOnDestroy() {
@@ -5679,7 +5864,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private shouldDisplayRemoteParticipant(participant: any): boolean {
-    if (this.isMobileBrowser) {
+    if (this.isMobileCompanionMode) {
       return false;
     }
 
@@ -5868,6 +6053,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     if (typeof preferences.experimentalMobile1080pEnabled === 'boolean') {
       this.experimentalMobile1080pEnabled = preferences.experimentalMobile1080pEnabled;
     }
+    if (isMobileCallJoinMode(preferences.mobileJoinMode)) {
+      this.mobileJoinMode = preferences.mobileJoinMode;
+    }
     if (typeof preferences.selectedPcVideoSource === 'string' && preferences.selectedPcVideoSource) {
       this.selectedPcVideoSource = preferences.selectedPcVideoSource;
       await this.videoService.selectVideoSource(preferences.selectedPcVideoSource);
@@ -5889,7 +6077,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       selectedPcAudioSource: this.selectedPcAudioSource,
       isPreviewMuted: this.localStream ? this.isAudioMuted : this.isPreviewMuted,
       isPreviewVideoOff: this.localStream ? this.isVideoOff : this.isPreviewVideoOff,
-      experimentalMobile1080pEnabled: this.experimentalMobile1080pEnabled
+      experimentalMobile1080pEnabled: this.experimentalMobile1080pEnabled,
+      mobileJoinMode: this.mobileJoinMode
     };
 
     writeStoredCallMediaPreferences(preferences);
@@ -5900,6 +6089,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     preferences.isPreviewMuted = this.localStream ? this.isAudioMuted : this.isPreviewMuted;
     preferences.isPreviewVideoOff = this.localStream ? this.isVideoOff : this.isPreviewVideoOff;
     preferences.experimentalMobile1080pEnabled = this.experimentalMobile1080pEnabled;
+    preferences.mobileJoinMode = this.mobileJoinMode;
     writeStoredCallMediaPreferences(preferences);
   }
 

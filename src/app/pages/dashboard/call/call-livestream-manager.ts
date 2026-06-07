@@ -5,7 +5,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { Subscription } from 'rxjs';
 import {
   CallLivestreamService,
-  type CallLivestreamDestination,
   type CallLivestreamRuntimeState,
   type CallLivestreamSettings,
   type CallLivestreamSourceSnapshot
@@ -99,18 +98,6 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
     return this.livestream.getStatusText(this.channelId);
   }
 
-  get destinationLabel(): string {
-    return this.livestream.destinationLabel;
-  }
-
-  get serverUrlLabel(): string {
-    return this.livestream.serverUrlLabel;
-  }
-
-  get activeServerUrl(): string {
-    return this.livestream.activeServerUrl;
-  }
-
   get hasMatchingCallSource(): boolean {
     return !!this.source && (!this.channelId || this.source.channelId === this.channelId);
   }
@@ -133,6 +120,10 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
 
   get outputSizeLabel(): string {
     return this.livestream.outputSizeLabel;
+  }
+
+  get obsMediaSourceUrl(): string {
+    return this.livestream.obsMediaSourceUrl;
   }
 
   get outputAspectRatio(): string {
@@ -222,7 +213,7 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
       return `${this.musicOutputCaptureState.trackCount} audio track${this.musicOutputCaptureState.trackCount === 1 ? '' : 's'}`;
     }
 
-    return 'Auto on stream start';
+    return 'Auto on output start';
   }
 
   get musicStatusIcon(): string {
@@ -261,7 +252,7 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
     }
 
     if (music.canCaptureAudio) {
-      return 'Capture stream has no live tracks';
+      return 'Capture source has no live tracks';
     }
 
     return 'Visual only';
@@ -270,23 +261,23 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
   get musicCaptureDetail(): string {
     const music = this.musicState;
     if (!music) {
-      return 'The manager will show the current track, capture state, and stream mix once playback is active.';
+      return 'The manager will show the current track, capture state, and output mix once playback is active.';
     }
 
     if (music.paused) {
-      return 'The track is paused, so no music audio is currently being sent to the stream mix.';
+      return 'The track is paused, so no music audio is currently being sent to the output mix.';
     }
 
     if (this.hasMusicAudioTrack) {
       if (this.isMusicUsingOutputCapture) {
-        return 'The stream is using the browser audio capture fallback. The stream mix slider scales that captured music without applying the player volume a second time.';
+        return 'The OBS output is using the browser audio capture fallback. The output mix slider scales that captured music without applying the player volume a second time.';
       }
 
-      return 'A live audio track is available to the compositor. The stream mix slider below scales it without changing local playback volume.';
+      return 'A live audio track is available to the compositor. The output mix slider below scales it without changing local playback volume.';
     }
 
     if (music.canCaptureAudio) {
-      return 'The player reported a capturable stream, but the stream currently has no live enabled audio tracks.';
+      return 'The player reported a capturable source, but it currently has no live enabled audio tracks.';
     }
 
     if (!this.canUseMusicOutputCapture) {
@@ -297,7 +288,7 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
       return this.musicOutputCaptureState.error;
     }
 
-    return 'The SoundCloud widget is visual only to the compositor. Starting the stream will ask for an audio source automatically; choose a source that includes the music audio.';
+    return 'The SoundCloud widget is visual only to the compositor. Starting the OBS media feed will ask for an audio source automatically; choose a source that includes the music audio.';
   }
 
   get musicLocalVolumePercent(): number {
@@ -316,20 +307,6 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
     return this.livestream.getStreamMusicVolumePercent(this.musicLocalVolumePercent);
   }
 
-  onDestinationChange(destination: string) {
-    const normalizedDestination: CallLivestreamDestination =
-      destination === 'twitch' || destination === 'custom' ? destination : 'youtube';
-    this.livestream.setDestination(normalizedDestination);
-  }
-
-  setActiveServerUrl(value: string) {
-    this.livestream.setActiveServerUrl(value);
-  }
-
-  setStreamKey(value: string) {
-    this.livestream.updateSettings({ streamKey: value });
-  }
-
   setResolutionPreset(value: string) {
     this.livestream.setResolutionPreset(value);
   }
@@ -340,18 +317,6 @@ export class CallLivestreamManager implements OnInit, OnDestroy {
 
   setOutputHeight(value: number | string) {
     this.livestream.setOutputHeight(value);
-  }
-
-  setVideoBitrate(value: number | string) {
-    this.livestream.updateSettings({
-      videoBitrateKbps: this.normalizeNumber(value, 800, 12000, 4500)
-    });
-  }
-
-  setAudioBitrate(value: number | string) {
-    this.livestream.updateSettings({
-      audioBitrateKbps: this.normalizeNumber(value, 64, 320, 160)
-    });
   }
 
   setFrameRate(value: number | string) {

@@ -39,6 +39,17 @@ export interface CallLivestreamIntroState {
   introVolumePercent: number;
 }
 
+export type CallLivestreamBroadcastOverlayType = 'text' | 'image' | 'atmosphere' | 'theme';
+
+export interface CallLivestreamBroadcastOverlay {
+  type: CallLivestreamBroadcastOverlayType;
+  title: string;
+  text: string | null;
+  image: string | null;
+  startedAtMs: number;
+  durationMs: number;
+}
+
 export interface CallLivestreamFrameState {
   theme: ThemeColors;
   temporaryAtmosphereBackground: string | null;
@@ -46,6 +57,7 @@ export interface CallLivestreamFrameState {
   music: CallLivestreamMusicState | null;
   intro?: CallLivestreamIntroState | null;
   isSceneMainLayoutActive: boolean;
+  broadcastOverlay: CallLivestreamBroadcastOverlay | null;
 }
 
 export interface CallLivestreamCompositorOptions {
@@ -74,6 +86,12 @@ interface AudioMixNode {
 
 interface StopOptions {
   preserveAudioContext?: boolean;
+}
+
+interface BroadcastTextContent {
+  kicker: string;
+  title: string;
+  body: string;
 }
 
 export class CallLivestreamCompositor {
@@ -354,6 +372,8 @@ export class CallLivestreamCompositor {
     if (intro && intro.introOpacity > 0.01) {
       this.drawIntroVideo(intro, state.theme);
     }
+
+    this.drawBroadcastOverlay(state.broadcastOverlay, state.theme);
   }
 
   private drawBackground(state: CallLivestreamFrameState) {
@@ -567,6 +587,401 @@ export class CallLivestreamCompositor {
     context.fill();
     this.roundRect(x, y, Math.max(height, width * progress), height, height / 2);
     context.fillStyle = this.hexToRgba(primary, music.paused ? 0.48 : 0.86);
+    context.fill();
+  }
+
+  private drawBroadcastOverlay(overlay: CallLivestreamBroadcastOverlay | null, theme: ThemeColors) {
+    if (!overlay || !this.context || !this.canvas) {
+      return;
+    }
+
+    const elapsedMs = Date.now() - overlay.startedAtMs;
+    if (elapsedMs < 0 || elapsedMs >= overlay.durationMs) {
+      return;
+    }
+
+    if (overlay.type === 'image' && overlay.image) {
+      this.drawBroadcastImageOverlay(overlay, theme, elapsedMs);
+      return;
+    }
+
+    this.drawBroadcastTextOverlay(overlay, theme, elapsedMs);
+  }
+
+  private drawBroadcastTextOverlay(
+    overlay: CallLivestreamBroadcastOverlay,
+    theme: ThemeColors,
+    elapsedMs: number
+  ) {
+    const context = this.context!;
+    const canvas = this.canvas!;
+    const content = this.getBroadcastTextContent(overlay);
+    const hasBody = !!content.body;
+    const textLength = `${content.title} ${content.body}`.trim().length;
+    const safeMargin = Math.round(Math.min(canvas.width, canvas.height) * 0.065);
+    const cardWidthRatio = hasBody ? 0.78 : 0.66;
+    const cardWidth = Math.round(Math.min(canvas.width - safeMargin * 2, Math.max(420, canvas.width * cardWidthRatio)));
+    const maxCardHeight = Math.round(Math.min(canvas.height - safeMargin * 2, canvas.height * (hasBody ? 0.58 : 0.34)));
+    const padding = Math.round(Math.min(cardWidth, maxCardHeight) * (hasBody ? 0.052 : 0.064));
+    const primary = theme.primary || '#7289da';
+    const fontFamily = theme.fontFamily || '"Segoe UI", Arial, sans-serif';
+    const kickerFontSize = Math.max(11, Math.round(canvas.height * 0.017));
+    const titleFontSize = Math.max(22, Math.round(canvas.height * (hasBody ? 0.037 : 0.052)));
+    const bodyFontScale = textLength > 420 ? 0.027 : textLength > 220 ? 0.031 : 0.035;
+    const bodyFontSize = Math.max(18, Math.round(canvas.height * bodyFontScale));
+    const bodyLineHeight = Math.round(bodyFontSize * 1.28);
+    const progressHeight = Math.max(5, Math.round(canvas.height * 0.008));
+    const thumbnailSize = overlay.image
+      ? Math.min(Math.round(cardWidth * 0.2), Math.max(72, maxCardHeight - padding * 2 - progressHeight - 16))
+      : 0;
+    const textXOffset = thumbnailSize ? thumbnailSize + padding * 0.72 : 0;
+    const textWidth = Math.max(120, cardWidth - padding * 2 - textXOffset);
+    const kickerHeight = kickerFontSize + 8;
+    const titleLineHeight = Math.round(titleFontSize * 1.12);
+    const bodyMaxHeight = Math.max(
+      bodyLineHeight,
+      maxCardHeight - padding * 2 - kickerHeight - titleLineHeight - progressHeight - (hasBody ? 22 : 10)
+    );
+    const titleMaxHeight = hasBody ? titleLineHeight * 2 : Math.max(titleLineHeight, bodyMaxHeight);
+    const wrappedTitle = this.wrapTextToHeight(content.title, textWidth, titleMaxHeight, titleLineHeight);
+    const wrappedBody = hasBody
+      ? this.wrapTextToHeight(content.body, textWidth, bodyMaxHeight, bodyLineHeight)
+      : { lines: [], truncated: false };
+    const contentHeight = Math.max(
+      thumbnailSize,
+      kickerHeight +
+        wrappedTitle.lines.length * titleLineHeight +
+        (wrappedBody.lines.length ? 12 + wrappedBody.lines.length * bodyLineHeight : 0)
+    );
+    const cardHeight = Math.min(
+      maxCardHeight,
+      Math.max(118, padding * 2 + contentHeight + progressHeight + 18)
+    );
+    const x = Math.round((canvas.width - cardWidth) / 2);
+    const y = Math.round(canvas.height - safeMargin - cardHeight);
+
+    context.save();
+    this.drawBroadcastCardFrame(x, y, cardWidth, cardHeight, theme, primary);
+
+    const contentX = x + padding;
+    const contentY = y + padding;
+    if (overlay.image && thumbnailSize > 0) {
+      this.drawBroadcastThumbnail(overlay.image, contentX, contentY, thumbnailSize, theme);
+    }
+
+    const textX = contentX + textXOffset;
+    context.textAlign = 'left';
+    context.textBaseline = 'alphabetic';
+    this.drawBroadcastKicker(content.kicker, textX, contentY, textWidth, kickerFontSize, primary, fontFamily);
+
+    const titleY = contentY + kickerHeight + titleFontSize;
+    context.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    context.shadowBlur = 6;
+    context.fillStyle = theme.textColor || '#eef0f6';
+    context.font = `900 ${titleFontSize}px ${fontFamily}`;
+    wrappedTitle.lines.forEach((line, index) => {
+      context.fillText(line, textX, titleY + titleLineHeight * index);
+    });
+    context.shadowBlur = 0;
+
+    if (wrappedBody.lines.length) {
+      context.fillStyle = 'rgba(255, 255, 255, 0.82)';
+      context.font = `700 ${bodyFontSize}px ${fontFamily}`;
+      const bodyY = titleY + titleLineHeight * wrappedTitle.lines.length + 12;
+      wrappedBody.lines.forEach((line, index) => {
+        context.fillText(line, textX, bodyY + bodyLineHeight * index);
+      });
+    }
+
+    context.fillStyle = this.hexToRgba(primary, 0.3);
+    context.fillRect(textX, y + cardHeight - padding - progressHeight - 12, Math.min(textWidth, 120), 1);
+
+    this.drawBroadcastProgress(
+      x + padding,
+      y + cardHeight - padding - progressHeight,
+      cardWidth - padding * 2,
+      progressHeight,
+      primary,
+      elapsedMs,
+      overlay.durationMs
+    );
+    context.restore();
+  }
+
+  private drawBroadcastKicker(
+    kicker: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    fontSize: number,
+    primary: string,
+    fontFamily: string
+  ) {
+    const context = this.context!;
+    const label = kicker.toUpperCase();
+    const pillHeight = fontSize + 9;
+    context.save();
+    context.font = `900 ${fontSize}px ${fontFamily}`;
+    const pillWidth = Math.min(maxWidth, Math.max(84, context.measureText(label).width + 22));
+
+    this.roundRect(x, y, pillWidth, pillHeight, pillHeight / 2);
+    context.fillStyle = this.hexToRgba(primary, 0.2);
+    context.fill();
+    context.lineWidth = 1;
+    context.strokeStyle = this.hexToRgba(primary, 0.48);
+    context.stroke();
+
+    context.fillStyle = this.hexToRgba(primary, 0.96);
+    context.textAlign = 'left';
+    context.textBaseline = 'middle';
+    this.drawTruncatedText(label, x + 11, y + pillHeight / 2 + 0.5, Math.max(20, pillWidth - 22));
+    context.restore();
+  }
+
+  private getBroadcastTextContent(overlay: CallLivestreamBroadcastOverlay): BroadcastTextContent {
+    const fallbackTitle = overlay.title || 'Broadcast';
+    const rawText = overlay.text || fallbackTitle;
+    const decodedText = this.decodeBroadcastText(rawText);
+    const heading = this.getFirstBroadcastHeading(decodedText);
+    const kicker = this.getBroadcastKicker(overlay.type);
+
+    if (heading) {
+      const bodySource = this.removeFirstBroadcastHeading(decodedText);
+      return {
+        kicker,
+        title: heading,
+        body: this.normalizeBroadcastText(bodySource)
+      };
+    }
+
+    const normalizedText = this.normalizeBroadcastText(decodedText);
+    const lines = normalizedText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    if (!lines.length) {
+      return {
+        kicker,
+        title: fallbackTitle,
+        body: ''
+      };
+    }
+
+    if (overlay.type !== 'text') {
+      return {
+        kicker,
+        title: fallbackTitle,
+        body: normalizedText === fallbackTitle ? '' : normalizedText
+      };
+    }
+
+    if (lines.length === 1) {
+      return lines[0].length <= 120
+        ? { kicker, title: lines[0], body: '' }
+        : { kicker, title: 'Message Broadcast', body: lines[0] };
+    }
+
+    if (lines[0].length <= 84) {
+      return {
+        kicker,
+        title: lines[0],
+        body: lines.slice(1).join('\n')
+      };
+    }
+
+    return {
+      kicker,
+      title: 'Message Broadcast',
+      body: normalizedText
+    };
+  }
+
+  private getBroadcastKicker(type: CallLivestreamBroadcastOverlayType): string {
+    if (type === 'text') {
+      return 'Broadcast Message';
+    }
+
+    if (type === 'atmosphere' || type === 'theme') {
+      return 'Atmosphere Update';
+    }
+
+    return 'Broadcast';
+  }
+
+  private getFirstBroadcastHeading(text: string): string | null {
+    const headingMatch = /^\s{0,3}#{1,3}\s+(.+?)\s*$/m.exec(text);
+    if (!headingMatch) {
+      return null;
+    }
+
+    return this.normalizeBroadcastText(headingMatch[1]).replace(/\n+/g, ' ').trim() || null;
+  }
+
+  private removeFirstBroadcastHeading(text: string): string {
+    const headingMatch = /^\s{0,3}#{1,3}\s+(.+?)\s*$/m.exec(text);
+    if (!headingMatch || headingMatch.index === undefined) {
+      return text;
+    }
+
+    return `${text.slice(0, headingMatch.index)}${text.slice(headingMatch.index + headingMatch[0].length)}`;
+  }
+
+  private drawBroadcastImageOverlay(
+    overlay: CallLivestreamBroadcastOverlay,
+    theme: ThemeColors,
+    elapsedMs: number
+  ) {
+    const context = this.context!;
+    const canvas = this.canvas!;
+    const safeMargin = Math.round(Math.min(canvas.width, canvas.height) * 0.07);
+    const cardWidth = Math.round(Math.min(canvas.width - safeMargin * 2, canvas.width * 0.72));
+    const cardHeight = Math.round(Math.min(canvas.height - safeMargin * 2, canvas.height * 0.72));
+    const padding = Math.round(Math.min(cardWidth, cardHeight) * 0.045);
+    const primary = theme.primary || '#7289da';
+    const fontFamily = theme.fontFamily || '"Segoe UI", Arial, sans-serif';
+    const titleFontSize = Math.max(14, Math.round(canvas.height * 0.022));
+    const progressHeight = Math.max(5, Math.round(canvas.height * 0.008));
+    const x = Math.round((canvas.width - cardWidth) / 2);
+    const y = Math.round((canvas.height - cardHeight) / 2);
+    const imageX = x + padding;
+    const imageY = y + padding + titleFontSize + 14;
+    const imageWidth = cardWidth - padding * 2;
+    const imageHeight = cardHeight - padding * 3 - titleFontSize - progressHeight - 20;
+
+    context.save();
+    this.drawBroadcastCardFrame(x, y, cardWidth, cardHeight, theme, primary);
+
+    context.textAlign = 'left';
+    context.textBaseline = 'alphabetic';
+    context.fillStyle = this.hexToRgba(primary, 0.92);
+    context.font = `900 ${titleFontSize}px ${fontFamily}`;
+    this.drawTruncatedText((overlay.title || 'Broadcast Image').toUpperCase(), x + padding, y + padding + titleFontSize, imageWidth);
+
+    const imageEntry = this.getImageEntry(overlay.image!);
+    this.roundRect(imageX, imageY, imageWidth, imageHeight, Math.min(18, padding * 0.65));
+    context.fillStyle = 'rgba(255, 255, 255, 0.07)';
+    context.fill();
+    context.save();
+    this.roundRect(imageX, imageY, imageWidth, imageHeight, Math.min(18, padding * 0.65));
+    context.clip();
+    if (imageEntry.loaded && !imageEntry.failed) {
+      try {
+        this.drawImageContain(imageEntry.image, imageX, imageY, imageWidth, imageHeight);
+      } catch {
+        imageEntry.failed = true;
+        this.drawBroadcastImagePlaceholder(imageX, imageY, imageWidth, imageHeight, 'Image unavailable', theme);
+      }
+    } else {
+      this.drawBroadcastImagePlaceholder(imageX, imageY, imageWidth, imageHeight, 'Loading broadcast image', theme);
+    }
+    context.restore();
+
+    this.drawBroadcastProgress(
+      x + padding,
+      y + cardHeight - padding - progressHeight,
+      cardWidth - padding * 2,
+      progressHeight,
+      primary,
+      elapsedMs,
+      overlay.durationMs
+    );
+    context.restore();
+  }
+
+  private drawBroadcastCardFrame(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    theme: ThemeColors,
+    primary: string
+  ) {
+    const context = this.context!;
+    const radius = Math.min(28, Math.max(16, Math.round(height * 0.08)));
+    context.shadowColor = 'rgba(0, 0, 0, 0.44)';
+    context.shadowBlur = 28;
+    context.shadowOffsetY = 8;
+    this.roundRect(x, y, width, height, radius);
+    context.fillStyle = this.hexToRgba(theme.background || '#121212', 0.94);
+    context.fill();
+    context.shadowBlur = 0;
+    context.shadowOffsetY = 0;
+    context.lineWidth = 2;
+    context.strokeStyle = this.hexToRgba(primary, 0.62);
+    context.stroke();
+  }
+
+  private drawBroadcastThumbnail(
+    url: string,
+    x: number,
+    y: number,
+    size: number,
+    theme: ThemeColors
+  ) {
+    const context = this.context!;
+    const radius = Math.min(18, size * 0.16);
+    const entry = this.getImageEntry(url);
+    context.save();
+    this.roundRect(x, y, size, size, radius);
+    context.clip();
+    if (entry.loaded && !entry.failed) {
+      try {
+        this.drawImageCover(entry.image, x, y, size, size);
+        context.restore();
+        return;
+      } catch {
+        entry.failed = true;
+      }
+    }
+
+    this.drawBroadcastImagePlaceholder(x, y, size, size, 'Broadcast', theme);
+    context.restore();
+  }
+
+  private drawBroadcastImagePlaceholder(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    label: string,
+    theme: ThemeColors
+  ) {
+    const context = this.context!;
+    const primary = theme.primary || '#7289da';
+    const gradient = context.createLinearGradient(x, y, x + width, y + height);
+    gradient.addColorStop(0, this.hexToRgba(primary, 0.32));
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.38)');
+    context.fillStyle = gradient;
+    context.fillRect(x, y, width, height);
+    context.fillStyle = 'rgba(255, 255, 255, 0.78)';
+    context.font = `800 ${Math.max(13, Math.round(Math.min(width, height) * 0.08))}px ${theme.fontFamily || '"Segoe UI", Arial, sans-serif'}`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    this.drawTruncatedText(label, x + width / 2, y + height / 2, Math.max(40, width - 24));
+    context.textAlign = 'left';
+  }
+
+  private drawBroadcastProgress(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    primary: string,
+    elapsedMs: number,
+    durationMs: number
+  ) {
+    const context = this.context!;
+    const remaining = Math.max(0, Math.min(1, 1 - elapsedMs / Math.max(1, durationMs)));
+    this.roundRect(x, y, width, height, height / 2);
+    context.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    context.fill();
+    if (remaining <= 0) {
+      return;
+    }
+
+    this.roundRect(x, y, Math.max(height, width * remaining), height, height / 2);
+    context.fillStyle = this.hexToRgba(primary, 0.86);
     context.fill();
   }
 
@@ -1133,6 +1548,21 @@ export class CallLivestreamCompositor {
     this.context!.drawImage(image, drawX, drawY, drawWidth, drawHeight);
   }
 
+  private drawImageContain(image: HTMLImageElement, x: number, y: number, width: number, height: number) {
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    if (!sourceWidth || !sourceHeight) {
+      return;
+    }
+
+    const scale = Math.min(width / sourceWidth, height / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const drawX = x + (width - drawWidth) / 2;
+    const drawY = y + (height - drawHeight) / 2;
+    this.context!.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  }
+
   private drawTruncatedText(text: string, x: number, y: number, maxWidth: number) {
     const context = this.context!;
     if (context.measureText(text).width <= maxWidth) {
@@ -1147,6 +1577,168 @@ export class CallLivestreamCompositor {
     }
 
     context.fillText(`${truncated}${ellipsis}`, x, y);
+  }
+
+  private wrapTextToHeight(
+    text: string,
+    maxWidth: number,
+    maxHeight: number,
+    lineHeight: number
+  ): { lines: string[]; truncated: boolean } {
+    const context = this.context!;
+    const maxLines = Math.max(1, Math.floor(maxHeight / Math.max(1, lineHeight)));
+    const paragraphs = text
+      .replace(/\r/g, '')
+      .split('\n')
+      .map(line => line.trim());
+    const lines: string[] = [];
+    let truncated = false;
+
+    for (const paragraph of paragraphs) {
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+
+      if (!paragraph) {
+        if (lines.length > 0) {
+          lines.push('');
+        }
+        continue;
+      }
+
+      const words = paragraph.split(/\s+/).filter(Boolean);
+      let currentLine = '';
+      for (const word of words) {
+        const candidate = currentLine ? `${currentLine} ${word}` : word;
+        if (context.measureText(candidate).width <= maxWidth) {
+          currentLine = candidate;
+          continue;
+        }
+
+        if (currentLine) {
+          lines.push(currentLine);
+          currentLine = '';
+          if (lines.length >= maxLines) {
+            truncated = true;
+            break;
+          }
+        }
+
+        if (context.measureText(word).width <= maxWidth) {
+          currentLine = word;
+          continue;
+        }
+
+        const broken = this.breakLongWord(word, maxWidth);
+        for (const segment of broken) {
+          if (currentLine) {
+            lines.push(currentLine);
+            currentLine = '';
+            if (lines.length >= maxLines) {
+              truncated = true;
+              break;
+            }
+          }
+
+          if (lines.length >= maxLines) {
+            truncated = true;
+            break;
+          }
+
+          currentLine = segment;
+        }
+
+        if (truncated) {
+          break;
+        }
+      }
+
+      if (truncated) {
+        break;
+      }
+
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+    }
+
+    const normalizedLines = lines.length ? lines.slice(0, maxLines) : [''];
+    if (lines.length > maxLines) {
+      truncated = true;
+    }
+
+    if (truncated) {
+      normalizedLines[normalizedLines.length - 1] = this.appendMoreSuffix(
+        normalizedLines[normalizedLines.length - 1],
+        maxWidth
+      );
+    }
+
+    return { lines: normalizedLines, truncated };
+  }
+
+  private breakLongWord(word: string, maxWidth: number): string[] {
+    const context = this.context!;
+    const segments: string[] = [];
+    let segment = '';
+
+    for (const character of word) {
+      const candidate = `${segment}${character}`;
+      if (!segment || context.measureText(candidate).width <= maxWidth) {
+        segment = candidate;
+        continue;
+      }
+
+      segments.push(segment);
+      segment = character;
+    }
+
+    if (segment) {
+      segments.push(segment);
+    }
+
+    return segments;
+  }
+
+  private appendMoreSuffix(line: string, maxWidth: number): string {
+    const context = this.context!;
+    const suffix = '...more';
+    let base = line.trimEnd();
+    while (base.length > 0 && context.measureText(`${base}${suffix}`).width > maxWidth) {
+      base = base.slice(0, -1).trimEnd();
+    }
+
+    return base ? `${base}${suffix}` : suffix;
+  }
+
+  private normalizeBroadcastText(text: string): string {
+    return this.decodeBroadcastText(text)
+      .replace(/```[\s\S]*?```/g, block => block.replace(/```[^\n]*\n?/g, '').replace(/\n?```/g, ''))
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+      .replace(/^\s*[-*+]\s+\[[ xX]\]\s+/gm, '')
+      .replace(/^\s*[-*+]\s+/gm, '')
+      .replace(/^\s*\d+[.)]\s+/gm, '')
+      .replace(/^\s*\[[ xX]\]\s+/gm, '')
+      .replace(/[`*_~>|]/g, '')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  private decodeBroadcastText(text: string): string {
+    const withLineBreaks = text
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|section|article|li|h[1-6])>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '\n- ')
+      .replace(/<[^>]+>/g, '');
+
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = withLineBreaks;
+    return textarea.value.replace(/\u00a0/g, ' ');
   }
 
   private getImageEntry(url: string): ImageCacheEntry {

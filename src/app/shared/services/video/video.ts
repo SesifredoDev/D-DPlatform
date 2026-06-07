@@ -23,8 +23,13 @@ import { environment } from '../../../../environments/environment';
 import { ThemeColors } from '../theme/theme.service';
 import { DeviceInfo, DeviceService } from '../device/device';
 import { SharedWindowStateService } from '../window-state/shared-window-state.service';
-import type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant, LiveKitConnectionInfo } from '../../models/video/video.model';
-export type { CallDeviceRole, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
+import type { CallDeviceRole, MobileCallJoinMode, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant, LiveKitConnectionInfo } from '../../models/video/video.model';
+export type { CallDeviceRole, MobileCallJoinMode, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
+
+export interface VideoCallInitOptions {
+  mobileJoinMode?: MobileCallJoinMode;
+}
+
 @Injectable({ providedIn: 'root' })
 export class Video {
   private static readonly overlayTextTopic = 'overlay-text';
@@ -516,7 +521,7 @@ export class Video {
     });
   }
 
-  async initVideoCall(channelId: string, userId: string, character: any) {
+  async initVideoCall(channelId: string, userId: string, character: any, options: VideoCallInitOptions = {}) {
     if (this.room.state === 'connected' && this.currentChannelId === channelId) return;
 
     try {
@@ -525,7 +530,7 @@ export class Video {
       }
 
       const deviceInfo = this.deviceService.getDeviceInfo();
-      const deviceRole = this.resolveDeviceRole(deviceInfo);
+      const deviceRole = this.resolveDeviceRole(deviceInfo, options.mobileJoinMode);
       const identity = this.buildParticipantIdentity(userId, deviceInfo.deviceId);
       const metadata = this.buildParticipantMetadata(userId, deviceInfo, deviceRole, character);
       const data = await this.getLiveKitConnectionInfo(channelId, identity);
@@ -574,7 +579,7 @@ export class Video {
       this.currentParticipantMetadata = this.buildParticipantMetadata(
         this.currentParticipantMetadata.userId,
         deviceInfo,
-        this.resolveDeviceRole(deviceInfo),
+        this.currentParticipantMetadata.deviceRole,
         character
       );
       await this.publishLocalMetadata();
@@ -1233,8 +1238,12 @@ export class Video {
     };
   }
 
-  private resolveDeviceRole(deviceInfo: DeviceInfo): CallDeviceRole {
-    return deviceInfo.deviceType === 'mobile' ? 'phone-camera' : 'desktop-main';
+  private resolveDeviceRole(deviceInfo: DeviceInfo, mobileJoinMode: MobileCallJoinMode = 'companion'): CallDeviceRole {
+    if (deviceInfo.deviceType !== 'mobile') {
+      return 'desktop-main';
+    }
+
+    return mobileJoinMode === 'companion' ? 'phone-camera' : 'phone-caller';
   }
 
   private getDesktopMainParticipantForUser(userId: string): RemoteParticipant | null {

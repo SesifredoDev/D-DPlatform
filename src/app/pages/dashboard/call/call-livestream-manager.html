@@ -1,9 +1,9 @@
 <section class="livestream-manager">
   <header class="livestream-manager-header">
     <div class="header-copy">
-      <span class="eyebrow">Call Broadcast</span>
-      <h2>Live Stream</h2>
-      <p>Configurable call feed with atmosphere, scene main layout, and mixed call audio.</p>
+      <span class="eyebrow">Call Program Output</span>
+      <h2>OBS Output</h2>
+      <p>Packaged local audio/video feed for OBS Media Source.</p>
     </div>
     <div class="stream-status" [class.live]="runtime.isLivestreaming" [class.error]="runtime.error">
       <mat-icon>{{ runtime.isLivestreaming ? 'cast_connected' : (runtime.error ? 'error' : 'cast') }}</mat-icon>
@@ -17,7 +17,7 @@
         <video #livestreamPreviewVideo autoplay playsinline muted></video>
         <div class="preview-empty" *ngIf="!hasLivestreamOutput">
           <mat-icon>cast</mat-icon>
-          <span>Preview starts with the stream</span>
+          <span>Preview starts with the OBS feed</span>
         </div>
       </div>
 
@@ -34,58 +34,11 @@
           <strong>{{ outputPresetLabel }}</strong>
           <span>{{ outputSizeLabel }}</span>
         </div>
-        <div>
-          <strong>{{ settings.videoBitrateKbps }}</strong>
-          <span>video kbps</span>
-        </div>
-        <div>
-          <strong>{{ settings.audioBitrateKbps }}</strong>
-          <span>audio kbps</span>
-        </div>
       </div>
     </div>
 
     <form class="settings-card" (ngSubmit)="start()">
       <div class="settings-grid">
-        <label>
-          <span>Destination</span>
-          <select
-            [ngModel]="settings.destination"
-            name="destination"
-            (ngModelChange)="onDestinationChange($event)"
-            [disabled]="runtime.isLivestreaming || runtime.isStarting"
-          >
-            <option value="youtube">YouTube</option>
-            <option value="twitch">Twitch</option>
-            <option value="custom">Custom RTMP</option>
-          </select>
-        </label>
-
-        <label>
-          <span>{{ serverUrlLabel }}</span>
-          <input
-            type="text"
-            [ngModel]="activeServerUrl"
-            name="serverUrl"
-            (ngModelChange)="setActiveServerUrl($event)"
-            [disabled]="runtime.isLivestreaming || runtime.isStarting"
-            placeholder="rtmps://..."
-          />
-        </label>
-
-        <label class="stream-key">
-          <span>Stream Key</span>
-          <input
-            type="password"
-            autocomplete="off"
-            [ngModel]="settings.streamKey"
-            name="streamKey"
-            (ngModelChange)="setStreamKey($event)"
-            [disabled]="runtime.isLivestreaming || runtime.isStarting"
-            placeholder="Paste stream key"
-          />
-        </label>
-
         <label>
           <span>Video output</span>
           <select
@@ -96,7 +49,7 @@
           >
             @for (option of resolutionOptions; track option.preset) {
               <option [value]="option.preset">
-                {{ option.label }} ({{ option.width }}x{{ option.height }}, {{ option.recommendedVideoBitrateKbps }}v/{{ option.recommendedAudioBitrateKbps }}a kbps)
+                {{ option.label }} ({{ option.width }}x{{ option.height }})
               </option>
             }
             <option value="custom">Custom size</option>
@@ -132,34 +85,6 @@
         </label>
 
         <label>
-          <span>Video bitrate</span>
-          <input
-            type="number"
-            min="800"
-            max="12000"
-            step="100"
-            [ngModel]="settings.videoBitrateKbps"
-            name="videoBitrate"
-            (ngModelChange)="setVideoBitrate($event)"
-            [disabled]="runtime.isLivestreaming || runtime.isStarting"
-          />
-        </label>
-
-        <label>
-          <span>Audio bitrate</span>
-          <input
-            type="number"
-            min="64"
-            max="320"
-            step="16"
-            [ngModel]="settings.audioBitrateKbps"
-            name="audioBitrate"
-            (ngModelChange)="setAudioBitrate($event)"
-            [disabled]="runtime.isLivestreaming || runtime.isStarting"
-          />
-        </label>
-
-        <label>
           <span>FPS</span>
           <input
             type="number"
@@ -181,7 +106,7 @@
       >
         <div class="music-panel-header">
           <div>
-            <span class="music-eyebrow">Stream Music</span>
+            <span class="music-eyebrow">Output Music</span>
             <strong>{{ musicTitle }}</strong>
             <small>{{ musicArtist }}</small>
           </div>
@@ -229,11 +154,11 @@
             <strong>{{ musicLocalVolumePercent }}%</strong>
           </div>
           <div class="music-metric">
-            <span>Stream mix</span>
+            <span>Output mix</span>
             <strong>{{ musicStreamVolumePercent }}%</strong>
           </div>
           <div class="music-metric">
-            <span>Effective stream</span>
+            <span>Effective output</span>
             <strong>{{ musicEffectiveVolumePercent }}%</strong>
           </div>
           <div class="music-metric">
@@ -243,7 +168,7 @@
         </div>
 
         <label class="music-volume">
-          <span>Stream music mix</span>
+          <span>Output music mix</span>
           <div class="music-volume-control">
             <input
               type="range"
@@ -379,7 +304,7 @@
 
       <div class="settings-note">
         <mat-icon>memory</mat-icon>
-        <span>Video output changes automatically update recommended video and audio bitrates for that scale.</span>
+        <span>Add an OBS Media Source with input {{ obsMediaSourceUrl }}. The feed packages compositor video and mixed audio together.</span>
       </div>
 
       <div class="stream-message error" *ngIf="runtime.error">
@@ -398,8 +323,8 @@
           *ngIf="!runtime.isLivestreaming"
           [disabled]="!canStart"
         >
-          <mat-icon>{{ runtime.isStarting ? 'hourglass_empty' : 'podcasts' }}</mat-icon>
-          <span>{{ runtime.isStarting ? 'Starting' : 'Go Live' }}</span>
+          <mat-icon>{{ runtime.isStarting ? 'hourglass_empty' : 'settings_input_antenna' }}</mat-icon>
+          <span>{{ runtime.isStarting ? 'Starting' : 'Start OBS Feed' }}</span>
         </button>
         <button
           type="button"
@@ -409,7 +334,7 @@
           [disabled]="runtime.isStopping"
         >
           <mat-icon>{{ runtime.isStopping ? 'hourglass_empty' : 'stop_circle' }}</mat-icon>
-          <span>{{ runtime.isStopping ? 'Stopping' : 'Stop Stream' }}</span>
+          <span>{{ runtime.isStopping ? 'Stopping' : 'Stop OBS Feed' }}</span>
         </button>
       </div>
     </form>

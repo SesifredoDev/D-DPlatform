@@ -362,6 +362,55 @@
     p { margin-bottom: 12px; font-size: 13px; color: white; font-weight: 500; }
 }
 
+.mobile-join-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.mobile-join-mode-option {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-l);
+  background: rgba(255, 255, 255, 0.06);
+  color: white;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 4px 8px;
+  min-height: 88px;
+  padding: 12px;
+  text-align: left;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+
+  mat-icon {
+    color: var(--brand-blue);
+    grid-row: span 2;
+  }
+
+  strong {
+    font-size: 13px;
+    line-height: 1.15;
+  }
+
+  span {
+    color: var(--on-surface-muted);
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  &.active {
+    background: rgba(var(--brand-blue-rgb), 0.18);
+    border-color: rgba(var(--brand-blue-rgb), 0.78);
+    box-shadow: 0 0 0 1px rgba(var(--brand-blue-rgb), 0.22);
+  }
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: rgba(var(--brand-blue-rgb), 0.5);
+  }
+}
+
 .call-join-error {
   display: flex;
   align-items: center;
@@ -3299,6 +3348,7 @@
 
   .setup-content p,
   .spotify-auth-prompt,
+  .mobile-join-mode-selector,
   .settings-grid,
   .mic-test-panel,
   .mobile-permission-prompt {
@@ -3312,6 +3362,42 @@
 
   .settings-grid {
     gap: 10px;
+  }
+
+  .mobile-join-mode-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .video-container.mobile-standard-caller {
+    .grid {
+      gap: 10px;
+      padding:
+        calc(10px + env(safe-area-inset-top))
+        max(10px, env(safe-area-inset-right))
+        calc(108px + env(safe-area-inset-bottom))
+        max(10px, env(safe-area-inset-left));
+      align-content: start;
+      justify-content: stretch;
+      overflow-y: auto;
+    }
+
+    .grid.count-1 {
+      max-width: none;
+    }
+
+    .video-box {
+      min-height: clamp(190px, 34dvh, 300px);
+      aspect-ratio: 16 / 10 !important;
+      place-self: stretch;
+    }
+
+    .video-box.local {
+      order: 20;
+      min-height: 142px;
+      max-height: 24dvh;
+      aspect-ratio: 16 / 9 !important;
+      border-color: rgba(255, 255, 255, 0.08);
+    }
   }
 
   .device-select {

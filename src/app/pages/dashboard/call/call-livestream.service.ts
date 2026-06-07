@@ -10,7 +10,6 @@ import type {
   CallLivestreamMusicState
 } from './call-livestream-compositor';
 
-export type CallLivestreamDestination = 'youtube' | 'twitch' | 'custom';
 export type CallLivestreamResolutionPreset = '480p' | '720p' | '1080p' | '1440p' | '2160p' | 'custom';
 export type CallLivestreamIntroPhase = 'idle' | 'loading' | 'fading-out' | 'playing' | 'fading-in';
 
@@ -19,28 +18,20 @@ export interface CallLivestreamResolutionOption {
   label: string;
   width: number;
   height: number;
-  recommendedVideoBitrateKbps: number;
-  recommendedAudioBitrateKbps: number;
 }
 
 export const CALL_LIVESTREAM_RESOLUTION_OPTIONS: readonly CallLivestreamResolutionOption[] = [
-  { preset: '480p', label: '480p', width: 854, height: 480, recommendedVideoBitrateKbps: 2500, recommendedAudioBitrateKbps: 128 },
-  { preset: '720p', label: '720p', width: 1280, height: 720, recommendedVideoBitrateKbps: 4500, recommendedAudioBitrateKbps: 160 },
-  { preset: '1080p', label: '1080p', width: 1920, height: 1080, recommendedVideoBitrateKbps: 6000, recommendedAudioBitrateKbps: 192 },
-  { preset: '1440p', label: '1440p', width: 2560, height: 1440, recommendedVideoBitrateKbps: 9000, recommendedAudioBitrateKbps: 256 },
-  { preset: '2160p', label: '4K UHD', width: 3840, height: 2160, recommendedVideoBitrateKbps: 12000, recommendedAudioBitrateKbps: 320 }
+  { preset: '480p', label: '480p', width: 854, height: 480 },
+  { preset: '720p', label: '720p', width: 1280, height: 720 },
+  { preset: '1080p', label: '1080p', width: 1920, height: 1080 },
+  { preset: '1440p', label: '1440p', width: 2560, height: 1440 },
+  { preset: '2160p', label: '4K UHD', width: 3840, height: 2160 }
 ];
 
 export interface CallLivestreamSettings {
-  destination: CallLivestreamDestination;
-  serverUrl: string;
-  customUrl: string;
-  streamKey: string;
   resolutionPreset: CallLivestreamResolutionPreset;
   outputWidth: number;
   outputHeight: number;
-  videoBitrateKbps: number;
-  audioBitrateKbps: number;
   frameRate: number;
   introVideoUrl: string;
   introVideoFileName: string;
@@ -72,15 +63,9 @@ export interface CallLivestreamSourceSnapshot extends CallLivestreamFrameState {
 }
 
 const DEFAULT_SETTINGS: CallLivestreamSettings = {
-  destination: 'youtube',
-  serverUrl: 'rtmps://a.rtmps.youtube.com/live2',
-  customUrl: '',
-  streamKey: '',
   resolutionPreset: '720p',
   outputWidth: 1280,
   outputHeight: 720,
-  videoBitrateKbps: 4500,
-  audioBitrateKbps: 160,
   frameRate: 30,
   introVideoUrl: '',
   introVideoFileName: '',
@@ -88,6 +73,9 @@ const DEFAULT_SETTINGS: CallLivestreamSettings = {
   introVolumePercent: 100,
   musicVolumePercent: 100
 };
+const OBS_OUTPUT_URL = 'udp://127.0.0.1:14000?pkt_size=1316';
+const OBS_INPUT_URL = 'udp://127.0.0.1:14000';
+const OBS_RECORDER_CHUNK_MS = 150;
 
 const DEFAULT_RUNTIME_STATE: CallLivestreamRuntimeState = {
   canUse: false,
@@ -201,34 +189,34 @@ export class CallLivestreamService {
     }
 
     if (state.isStarting) {
-      return 'Starting live stream';
+      return 'Starting OBS media feed';
     }
 
     if (state.isStopping) {
-      return 'Stopping live stream';
+      return 'Stopping OBS media feed';
     }
 
     if (state.isLivestreaming) {
       const musicSuffix = this.hasUncapturableMusic(this.readSourceSnapshot())
         ? ' - music visual only'
         : '';
-      return `Streaming ${this.outputSizeLabel}${musicSuffix}`;
+      return `OBS media feed ${this.outputSizeLabel}${musicSuffix}`;
     }
 
     const source = this.readSourceSnapshot();
     if (!source || (channelId && source.channelId !== channelId)) {
-      return 'Open the live call before streaming';
+      return 'Open the live call before starting OBS media feed';
     }
 
     if (source.isPlaybackMode) {
-      return 'Live streaming only supports the live call';
+      return 'OBS output only supports the live call';
     }
 
     if (!source.hasLiveCall) {
-      return 'Join the call before streaming';
+      return 'Join the call before starting OBS media feed';
     }
 
-    return 'Stream call';
+    return 'Start OBS media feed';
   }
 
   updateSettings(patch: Partial<CallLivestreamSettings>) {
@@ -238,17 +226,6 @@ export class CallLivestreamService {
     });
   }
 
-  setDestination(destination: CallLivestreamDestination) {
-    const nextSettings: Partial<CallLivestreamSettings> = { destination };
-    if (destination === 'youtube') {
-      nextSettings.serverUrl = DEFAULT_SETTINGS.serverUrl;
-    } else if (destination === 'twitch') {
-      nextSettings.serverUrl = 'rtmp://live.twitch.tv/app';
-    }
-
-    this.updateSettings(nextSettings);
-  }
-
   setResolutionPreset(preset: string) {
     const resolutionPreset = this.normalizeResolutionPreset(preset);
     const option = this.findResolutionOption(resolutionPreset);
@@ -256,20 +233,16 @@ export class CallLivestreamService {
       this.updateSettings({
         resolutionPreset: option.preset,
         outputWidth: option.width,
-        outputHeight: option.height,
-        videoBitrateKbps: option.recommendedVideoBitrateKbps,
-        audioBitrateKbps: option.recommendedAudioBitrateKbps
+        outputHeight: option.height
       });
       return;
     }
 
     const dimensions = this.outputDimensions;
-    const recommendedBitrates = this.getRecommendedBitratesForDimensions(dimensions.width, dimensions.height);
     this.updateSettings({
       resolutionPreset: 'custom',
       outputWidth: dimensions.width,
-      outputHeight: dimensions.height,
-      ...recommendedBitrates
+      outputHeight: dimensions.height
     });
   }
 
@@ -279,8 +252,7 @@ export class CallLivestreamService {
     this.updateSettings({
       resolutionPreset: 'custom',
       outputWidth,
-      outputHeight,
-      ...this.getRecommendedBitratesForDimensions(outputWidth, outputHeight)
+      outputHeight
     });
   }
 
@@ -290,8 +262,7 @@ export class CallLivestreamService {
     this.updateSettings({
       resolutionPreset: 'custom',
       outputWidth,
-      outputHeight,
-      ...this.getRecommendedBitratesForDimensions(outputWidth, outputHeight)
+      outputHeight
     });
   }
 
@@ -363,7 +334,7 @@ export class CallLivestreamService {
     }
 
     if (!this.state$.value.isLivestreaming) {
-      this.patchState({ introError: 'Start the livestream before triggering an intro.' });
+      this.patchState({ introError: 'Start the OBS media feed before triggering an intro.' });
       return;
     }
 
@@ -394,7 +365,7 @@ export class CallLivestreamService {
       this.setIntroPhase('fading-out', 'Playing intro');
       this.scheduleIntroPhase(() => this.setIntroPhase('playing', 'Intro playing'), this.getIntroFadeMs());
     } catch (error) {
-      console.warn('Failed to play livestream intro video', error);
+      console.warn('Failed to play OBS output intro video', error);
       this.cleanupIntro(false);
       this.patchState({
         isIntroPlaying: false,
@@ -444,84 +415,91 @@ export class CallLivestreamService {
     const initialSource = this.readSourceSnapshot();
     if (!initialSource || (channelId && initialSource.channelId !== channelId)) {
       this.compositor.stop();
-      this.patchState({ error: 'Open the live call before streaming.' });
+      this.patchState({ error: 'Open the live call before starting OBS media feed.' });
       return;
     }
 
     if (!initialSource.hasLiveCall) {
       this.compositor.stop();
-      this.patchState({ error: 'Join the call before streaming.' });
+      this.patchState({ error: 'Join the call before starting OBS media feed.' });
       return;
     }
 
     if (initialSource.isPlaybackMode) {
       this.compositor.stop();
-      this.patchState({ error: 'Live streaming only supports the live call.' });
+      this.patchState({ error: 'OBS output only supports the live call.' });
       return;
     }
 
-    if (this.state$.value.canUse) {
-      const hasMusicCapture = await this.ensureMusicCaptureForStart(initialSource);
-      if (!hasMusicCapture) {
-        this.compositor.stop();
-        return;
-      }
+    this.patchState({ isStarting: true, status: 'Starting OBS media feed' });
+
+    const hasMusicCapture = await this.ensureMusicCaptureForStart(initialSource);
+    if (!hasMusicCapture) {
+      this.compositor.stop();
+      this.patchState({ isStarting: false });
+      return;
     }
 
     await this.refreshAvailability();
 
     if (!this.state$.value.canUse) {
       this.compositor.stop();
-      this.patchState({ error: 'Live streaming requires the Tauri desktop app.' });
+      this.patchState({
+        isStarting: false,
+        error: 'OBS media output is only available in the Tauri desktop app.'
+      });
       return;
     }
 
     const source = this.readSourceSnapshot();
     if (!source || (channelId && source.channelId !== channelId)) {
       this.compositor.stop();
-      this.patchState({ error: 'Open the live call before streaming.' });
+      this.patchState({
+        isStarting: false,
+        error: 'Open the live call before starting OBS media feed.'
+      });
       return;
     }
 
     if (!source.hasLiveCall) {
       this.compositor.stop();
-      this.patchState({ error: 'Join the call before streaming.' });
+      this.patchState({
+        isStarting: false,
+        error: 'Join the call before starting OBS media feed.'
+      });
       return;
     }
 
     if (source.isPlaybackMode) {
       this.compositor.stop();
-      this.patchState({ error: 'Live streaming only supports the live call.' });
+      this.patchState({
+        isStarting: false,
+        error: 'OBS output only supports the live call.'
+      });
       return;
     }
-
-    const rtmpUrl = this.getRtmpUrl();
-    if (!rtmpUrl) {
-      this.compositor.stop();
-      return;
-    }
-
-    const mimeType = this.getSupportedMimeType();
-    if (!mimeType) {
-      this.compositor.stop();
-      this.patchState({ error: 'This browser cannot encode the livestream feed.' });
-      return;
-    }
-
-    const sessionId = this.createSessionId();
-    this.sessionId = sessionId;
-    this.hasReceivedStreamChunk = false;
-    this.hasWrittenStreamChunk = false;
-    this.recorderDataEventCount = 0;
-    this.recorderEmptyDataEventCount = 0;
-    this.patchState({ isStarting: true });
 
     try {
       const settings = this.settings$.value;
       const frameRate = this.normalizeNumber(settings.frameRate, 15, 60, DEFAULT_SETTINGS.frameRate);
       const outputDimensions = this.getOutputDimensions(settings);
-      const videoBitrateKbps = this.normalizeNumber(settings.videoBitrateKbps, 800, 12000, DEFAULT_SETTINGS.videoBitrateKbps);
-      const audioBitrateKbps = this.normalizeNumber(settings.audioBitrateKbps, 64, 320, DEFAULT_SETTINGS.audioBitrateKbps);
+      const recommendedBitrates = this.getRecommendedBitratesForDimensions(
+        outputDimensions.width,
+        outputDimensions.height
+      );
+      const mimeType = this.getSupportedMimeType();
+      if (!mimeType) {
+        this.compositor.stop();
+        this.patchState({ error: 'This browser cannot encode the OBS media feed.' });
+        return;
+      }
+
+      const sessionId = this.createSessionId();
+      this.sessionId = sessionId;
+      this.hasReceivedStreamChunk = false;
+      this.hasWrittenStreamChunk = false;
+      this.recorderDataEventCount = 0;
+      this.recorderEmptyDataEventCount = 0;
       const outputStream = this.compositor.start(
         () => this.createFrameStateForRender(),
         {
@@ -535,26 +513,28 @@ export class CallLivestreamService {
 
       await this.callStreaming.start({
         sessionId,
-        rtmpUrls: [rtmpUrl],
+        outputUrl: OBS_OUTPUT_URL,
         width: outputDimensions.width,
         height: outputDimensions.height,
         frameRate,
-        videoBitrateKbps,
-        audioBitrateKbps
+        videoBitrateKbps: recommendedBitrates.videoBitrateKbps,
+        audioBitrateKbps: recommendedBitrates.audioBitrateKbps
       });
 
-      const recorder = new MediaRecorder(outputStream, {
+      const recorderOptions: MediaRecorderOptions & { videoKeyFrameIntervalDuration?: number } = {
         mimeType,
-        videoBitsPerSecond: videoBitrateKbps * 1000,
-        audioBitsPerSecond: audioBitrateKbps * 1000
-      });
+        videoBitsPerSecond: recommendedBitrates.videoBitrateKbps * 1000,
+        audioBitsPerSecond: recommendedBitrates.audioBitrateKbps * 1000,
+        videoKeyFrameIntervalDuration: 1000
+      };
+      const recorder = new MediaRecorder(outputStream, recorderOptions);
       recorder.ondataavailable = event => {
         this.recorderDataEventCount += 1;
         if (event.data.size > 0) {
           if (!this.hasReceivedStreamChunk) {
             this.hasReceivedStreamChunk = true;
             this.clearFirstChunkTimeout();
-            this.patchState({ status: `Encoder produced data; forwarding to ${this.destinationLabel}` });
+            this.patchState({ status: `Encoder is packaging audio/video for OBS: ${OBS_INPUT_URL}` });
           }
           this.queueChunk(sessionId, event.data);
           return;
@@ -563,25 +543,25 @@ export class CallLivestreamService {
         this.recorderEmptyDataEventCount += 1;
       };
       recorder.onerror = event => {
-        console.error('Call livestream recorder error', event);
+        console.error('OBS media feed recorder error', event);
         const recorderError = (event as Event & { error?: unknown }).error;
-        void this.fail(this.getErrorMessage(recorderError, 'Live stream encoder failed.'));
+        void this.fail(this.getErrorMessage(recorderError, 'OBS media feed encoder failed.'));
       };
-      recorder.start();
-
+      recorder.start(OBS_RECORDER_CHUNK_MS);
       this.recorder = recorder;
+
       this.patchState({
         isLivestreaming: true,
-        status: `Connecting to ${this.destinationLabel} ingest`
+        status: `OBS media feed active. Add Media Source input: ${OBS_INPUT_URL}`
       });
       this.startRecorderChunkPump(sessionId, frameRate);
       this.scheduleFirstChunkTimeout(sessionId);
     } catch (error) {
-      console.error('Failed to start call livestream', error);
+      console.error('Failed to start OBS media feed', error);
       this.patchState({
-        error: this.getErrorMessage(error, 'Could not start live stream.')
+        error: this.getErrorMessage(error, 'Could not start OBS media feed.')
       });
-      await this.cleanup(sessionId);
+      await this.cleanup();
     } finally {
       this.patchState({ isStarting: false });
     }
@@ -601,13 +581,6 @@ export class CallLivestreamService {
     }
   }
 
-  get destinationLabel(): string {
-    const destination = this.settings$.value.destination;
-    if (destination === 'youtube') return 'YouTube';
-    if (destination === 'twitch') return 'Twitch';
-    return 'Custom';
-  }
-
   get outputDimensions(): { width: number; height: number } {
     return this.getOutputDimensions(this.settings$.value);
   }
@@ -623,22 +596,8 @@ export class CallLivestreamService {
     return `${width}x${height}`;
   }
 
-  get serverUrlLabel(): string {
-    return this.settings$.value.destination === 'custom' ? 'RTMP URL' : 'Server URL';
-  }
-
-  get activeServerUrl(): string {
-    const settings = this.settings$.value;
-    return settings.destination === 'custom' ? settings.customUrl : settings.serverUrl;
-  }
-
-  setActiveServerUrl(value: string) {
-    if (this.settings$.value.destination === 'custom') {
-      this.updateSettings({ customUrl: value });
-      return;
-    }
-
-    this.updateSettings({ serverUrl: value });
+  get obsMediaSourceUrl(): string {
+    return OBS_INPUT_URL;
   }
 
   private createIntroVideoElement(url: string): HTMLVideoElement {
@@ -679,7 +638,7 @@ export class CallLivestreamService {
       this.introAudioDestination = this.introAudioContext.createMediaStreamDestination();
       this.introAudioSource.connect(this.introAudioDestination);
     } catch (error) {
-      console.warn('Failed to capture livestream intro audio', error);
+      console.warn('Failed to capture OBS output intro audio', error);
       this.introAudioContext = null;
       this.introAudioSource = null;
       this.introAudioDestination = null;
@@ -917,7 +876,8 @@ export class CallLivestreamService {
         participants: source.participants,
         music: this.applyMusicStreamSettings(source.music),
         intro: this.getIntroFrameState(),
-        isSceneMainLayoutActive: source.isSceneMainLayoutActive
+        isSceneMainLayoutActive: source.isSceneMainLayoutActive,
+        broadcastOverlay: source.broadcastOverlay
       };
     }
 
@@ -927,7 +887,8 @@ export class CallLivestreamService {
       participants: [],
       music: null,
       intro: this.getIntroFrameState(),
-      isSceneMainLayoutActive: false
+      isSceneMainLayoutActive: false,
+      broadcastOverlay: null
     };
   }
 
@@ -984,7 +945,7 @@ export class CallLivestreamService {
     const captureError = this.soundCloud.livestreamOutputCaptureState$.value.error;
     this.patchState({
       status: '',
-      error: captureError || 'Music audio capture is required before starting the stream.'
+      error: captureError || 'Music audio capture is required before starting OBS media feed.'
     });
     return false;
   }
@@ -992,38 +953,6 @@ export class CallLivestreamService {
   private hasLiveAudioTracks(stream: MediaStream | null): boolean {
     return !!stream?.getAudioTracks()
       .some(track => track.readyState === 'live' && track.enabled);
-  }
-
-  private queueChunk(sessionId: string, blob: Blob) {
-    this.chunkWriteChain = this.chunkWriteChain
-      .catch(() => undefined)
-      .then(() => this.withTimeout(
-        this.callStreaming.writeChunk(sessionId, blob),
-        15000,
-        `Timed out writing stream data to ffmpeg. ${this.getRecorderDiagnostics()}`
-      ))
-      .then(() => {
-        if (this.sessionId !== sessionId) {
-          return;
-        }
-
-        if (!this.hasWrittenStreamChunk) {
-          this.hasWrittenStreamChunk = true;
-          this.clearFirstChunkTimeout();
-          this.patchState({ status: `Sending stream data to ${this.destinationLabel}` });
-        }
-      })
-      .catch(error => {
-        console.error('Failed to write call livestream chunk', error);
-        if (this.sessionId === sessionId && this.state$.value.isLivestreaming) {
-          void this.fail(this.getErrorMessage(error, 'Live stream connection failed.'));
-        }
-      });
-  }
-
-  private async fail(message: string) {
-    this.patchState({ error: message });
-    await this.stop();
   }
 
   private async stopInternal() {
@@ -1056,7 +985,7 @@ export class CallLivestreamService {
 
     await this.chunkWriteChain.catch(() => undefined);
     await this.cleanup(sessionId);
-    this.patchState({ status: this.state$.value.error ? '' : 'Live stream stopped' });
+    this.patchState({ status: this.state$.value.error ? '' : 'OBS media feed stopped' });
   }
 
   private async cleanup(sessionId: string | null = this.sessionId) {
@@ -1064,7 +993,7 @@ export class CallLivestreamService {
     this.stopRecorderChunkPump();
     if (sessionId) {
       await this.callStreaming.stop(sessionId).catch(error => {
-        console.warn('Failed to stop call livestream process', error);
+        console.warn('Failed to stop OBS media feed process', error);
       });
     }
 
@@ -1088,36 +1017,36 @@ export class CallLivestreamService {
     this.patchState({ outputStream: null });
   }
 
-  private getRtmpUrl(): string | null {
-    const settings = this.settings$.value;
-    const serverUrl = this.activeServerUrl.trim();
-    const streamKey = settings.streamKey.trim();
+  private queueChunk(sessionId: string, blob: Blob) {
+    this.chunkWriteChain = this.chunkWriteChain
+      .catch(() => undefined)
+      .then(() => this.withTimeout(
+        this.callStreaming.writeChunk(sessionId, blob),
+        15000,
+        `Timed out writing OBS media data to ffmpeg. ${this.getRecorderDiagnostics()}`
+      ))
+      .then(() => {
+        if (this.sessionId !== sessionId) {
+          return;
+        }
 
-    if (!serverUrl) {
-      this.patchState({ error: 'Enter an RTMP server URL.' });
-      return null;
-    }
+        if (!this.hasWrittenStreamChunk) {
+          this.hasWrittenStreamChunk = true;
+          this.clearFirstChunkTimeout();
+          this.patchState({ status: `Sending packaged audio/video to OBS: ${OBS_INPUT_URL}` });
+        }
+      })
+      .catch(error => {
+        console.error('Failed to write OBS media feed chunk', error);
+        if (this.sessionId === sessionId && this.state$.value.isLivestreaming) {
+          void this.fail(this.getErrorMessage(error, 'OBS media feed connection failed.'));
+        }
+      });
+  }
 
-    if (!/^rtmps?:\/\//i.test(serverUrl)) {
-      this.patchState({ error: 'The stream URL must start with rtmp:// or rtmps://.' });
-      return null;
-    }
-
-    if (/\s/.test(serverUrl) || /\s/.test(streamKey)) {
-      this.patchState({ error: 'The stream URL and key cannot contain whitespace.' });
-      return null;
-    }
-
-    if (settings.destination !== 'custom' && !streamKey) {
-      this.patchState({ error: `Enter your ${this.destinationLabel} stream key.` });
-      return null;
-    }
-
-    if (!streamKey) {
-      return serverUrl;
-    }
-
-    return `${serverUrl.replace(/\/+$/, '')}/${streamKey}`;
+  private async fail(message: string) {
+    this.patchState({ error: message });
+    await this.stop();
   }
 
   private getSupportedMimeType(): string | null {
@@ -1132,6 +1061,70 @@ export class CallLivestreamService {
     ].find(type => MediaRecorder.isTypeSupported(type)) ?? null;
   }
 
+  private scheduleFirstChunkTimeout(sessionId: string) {
+    this.clearFirstChunkTimeout();
+    this.firstChunkTimeout = window.setTimeout(() => {
+      this.firstChunkTimeout = 0;
+      if (
+        this.sessionId === sessionId &&
+        this.state$.value.isLivestreaming &&
+        !this.hasReceivedStreamChunk
+      ) {
+        void this.fail(`OBS media encoder did not produce any data. ${this.getRecorderDiagnostics()}`);
+      }
+    }, 12000);
+  }
+
+  private startRecorderChunkPump(sessionId: string, frameRate: number) {
+    this.stopRecorderChunkPump();
+    const intervalMs = Math.max(OBS_RECORDER_CHUNK_MS, Math.min(250, Math.round(1000 / Math.max(1, frameRate)) * 3));
+    this.recorderChunkPump = window.setInterval(() => {
+      if (this.sessionId !== sessionId) {
+        this.stopRecorderChunkPump();
+        return;
+      }
+
+      this.compositor.requestFrame();
+      const recorder = this.recorder;
+      if (!recorder || recorder.state !== 'recording') {
+        return;
+      }
+
+      try {
+        recorder.requestData();
+      } catch (error) {
+        console.warn('Failed to request OBS media recorder data', error);
+      }
+    }, intervalMs);
+  }
+
+  private stopRecorderChunkPump() {
+    if (!this.recorderChunkPump) {
+      return;
+    }
+
+    window.clearInterval(this.recorderChunkPump);
+    this.recorderChunkPump = 0;
+  }
+
+  private clearFirstChunkTimeout() {
+    if (!this.firstChunkTimeout) {
+      return;
+    }
+
+    window.clearTimeout(this.firstChunkTimeout);
+    this.firstChunkTimeout = 0;
+  }
+
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      promise
+        .then(resolve, reject)
+        .finally(() => window.clearTimeout(timeout));
+    });
+  }
+
   private getOutputDimensions(settings: CallLivestreamSettings): { width: number; height: number } {
     const option = this.findResolutionOption(settings.resolutionPreset);
     if (option) {
@@ -1144,21 +1137,6 @@ export class CallLivestreamService {
     return {
       width: this.normalizeEvenNumber(settings.outputWidth, 640, 3840, DEFAULT_SETTINGS.outputWidth),
       height: this.normalizeEvenNumber(settings.outputHeight, 360, 2160, DEFAULT_SETTINGS.outputHeight)
-    };
-  }
-
-  private getRecommendedBitratesForDimensions(
-    width: number,
-    height: number
-  ): Pick<CallLivestreamSettings, 'videoBitrateKbps' | 'audioBitrateKbps'> {
-    const pixels = width * height;
-    const option = CALL_LIVESTREAM_RESOLUTION_OPTIONS.find(resolution => {
-      return pixels <= resolution.width * resolution.height;
-    }) ?? CALL_LIVESTREAM_RESOLUTION_OPTIONS[CALL_LIVESTREAM_RESOLUTION_OPTIONS.length - 1];
-
-    return {
-      videoBitrateKbps: option.recommendedVideoBitrateKbps,
-      audioBitrateKbps: option.recommendedAudioBitrateKbps
     };
   }
 
@@ -1195,75 +1173,35 @@ export class CallLivestreamService {
     return normalized % 2 === 0 ? normalized : Math.min(max, normalized + 1);
   }
 
+  private getRecommendedBitratesForDimensions(
+    width: number,
+    height: number
+  ): { videoBitrateKbps: number; audioBitrateKbps: number } {
+    const pixels = width * height;
+    if (pixels <= 854 * 480) {
+      return { videoBitrateKbps: 2500, audioBitrateKbps: 128 };
+    }
+
+    if (pixels <= 1280 * 720) {
+      return { videoBitrateKbps: 4500, audioBitrateKbps: 160 };
+    }
+
+    if (pixels <= 1920 * 1080) {
+      return { videoBitrateKbps: 6000, audioBitrateKbps: 192 };
+    }
+
+    if (pixels <= 2560 * 1440) {
+      return { videoBitrateKbps: 9000, audioBitrateKbps: 256 };
+    }
+
+    return { videoBitrateKbps: 12000, audioBitrateKbps: 320 };
+  }
+
   private createSessionId(): string {
     const randomPart = typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
       : Math.random().toString(36).slice(2, 14);
-    return `callstream-${Date.now()}-${randomPart}`;
-  }
-
-  private scheduleFirstChunkTimeout(sessionId: string) {
-    this.clearFirstChunkTimeout();
-    this.firstChunkTimeout = window.setTimeout(() => {
-      this.firstChunkTimeout = 0;
-      if (
-        this.sessionId === sessionId &&
-        this.state$.value.isLivestreaming &&
-        !this.hasReceivedStreamChunk
-      ) {
-        void this.fail(`Live stream encoder did not produce any data. ${this.getRecorderDiagnostics()}`);
-      }
-    }, 12000);
-  }
-
-  private startRecorderChunkPump(sessionId: string, frameRate: number) {
-    this.stopRecorderChunkPump();
-    const intervalMs = Math.max(250, Math.min(1000, Math.round(1000 / Math.max(1, frameRate)) * 6));
-    this.recorderChunkPump = window.setInterval(() => {
-      if (this.sessionId !== sessionId) {
-        this.stopRecorderChunkPump();
-        return;
-      }
-
-      this.compositor.requestFrame();
-      const recorder = this.recorder;
-      if (!recorder || recorder.state !== 'recording') {
-        return;
-      }
-
-      try {
-        recorder.requestData();
-      } catch (error) {
-        console.warn('Failed to request livestream recorder data', error);
-      }
-    }, intervalMs);
-  }
-
-  private stopRecorderChunkPump() {
-    if (!this.recorderChunkPump) {
-      return;
-    }
-
-    window.clearInterval(this.recorderChunkPump);
-    this.recorderChunkPump = 0;
-  }
-
-  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const timeout = window.setTimeout(() => reject(new Error(message)), timeoutMs);
-      promise
-        .then(resolve, reject)
-        .finally(() => window.clearTimeout(timeout));
-    });
-  }
-
-  private clearFirstChunkTimeout() {
-    if (!this.firstChunkTimeout) {
-      return;
-    }
-
-    window.clearTimeout(this.firstChunkTimeout);
-    this.firstChunkTimeout = 0;
+    return `obsfeed-${Date.now()}-${randomPart}`;
   }
 
   private getErrorMessage(error: unknown, fallback: string): string {
