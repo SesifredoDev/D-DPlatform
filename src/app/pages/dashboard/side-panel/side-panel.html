@@ -162,61 +162,6 @@
       </nav>
     </section>
 
-    <!-- NAVIGATION: DM WHISPERS -->
-    <section class="nav-section" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedSectionStyles : null">
-      <div class="section-header" [ngStyle]="collapsed ? collapsedSectionHeaderStyles : null">
-        <span class="title" *ngIf="!collapsed">Direct Whispers</span>
-      </div>
-
-      <nav class="side-nav">
-        <!-- Owner View: List of all users to whisper -->
-        <ng-container *ngIf="isServerOwner">
-          @for (group of groupedMembers; track group) {
-            @for (member of group.members; track member.user._id) {
-              @if (member.user._id !== currentUserId) {
-                <a
-                  class="nav-item whisper-item"
-                  (click)="whisperUser(member)"
-                  [matTooltip]="collapsed ? member.user.username : ''"
-                  matTooltipPosition="right"
-                  [ngStyle]="collapsed ? collapsedNavItemStyles : null">
-                  <img
-                    class="mini-avatar"
-                    [src]="getUserProfileIconUrl(member.user)"
-                    (error)="$any($event.target).src = 'assets/default-avatar.png'"
-                    [ngStyle]="collapsed ? collapsedIconStyles : null">
-                  <span class="item-label" *ngIf="!collapsed">{{ member.user.username }}</span>
-                  @if (getUnreadCountForMember(member) > 0) {
-                    <span class="unread-badge" [class.collapsed-badge]="collapsed">
-                      {{ formatUnreadCount(getUnreadCountForMember(member)) }}
-                    </span>
-                  }
-                </a>
-              }
-            }
-          }
-        </ng-container>
-
-        <!-- Player View: Just the DM -->
-        <ng-container *ngIf="!isServerOwner">
-          <a
-            class="nav-item whisper-item"
-            (click)="whisperDM()"
-            [matTooltip]="collapsed ? 'Whisper the DM' : ''"
-            matTooltipPosition="right"
-            [ngStyle]="collapsed ? collapsedNavItemStyles : null">
-            <mat-icon class="item-icon" [ngStyle]="collapsed ? collapsedIconStyles : null">security</mat-icon>
-            <span class="item-label" *ngIf="!collapsed">Whisper the DM</span>
-            @if (getUnreadCountForDm() > 0) {
-              <span class="unread-badge" [class.collapsed-badge]="collapsed">
-                {{ formatUnreadCount(getUnreadCountForDm()) }}
-              </span>
-            }
-          </a>
-        </ng-container>
-      </nav>
-    </section>
-
     <!-- SOCIAL: MEMBER LIST -->
     <section class="members-section" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedSectionStyles : null">
       <div class="section-header" [ngStyle]="collapsed ? collapsedSectionHeaderStyles : null">
@@ -231,20 +176,37 @@
             @for (member of group.members; track member.user._id) {
               <div
                 class="member-card"
+                [class.whisperable]="canWhisperMember(member)"
+                [class.has-unread]="getUnreadCountForMember(member) > 0"
+                (click)="canWhisperMember(member) ? whisperUser(member) : null"
                 (contextmenu)="onRightClickMember($event, member)"
-                [matTooltip]="collapsed ? member.user.username : ''"
+                [matTooltip]="collapsed ? member.user.username : (canWhisperMember(member) ? 'Whisper ' + member.user.username : '')"
                 matTooltipPosition="right"
                 [ngStyle]="collapsed ? collapsedMemberCardStyles : null">
                 <div class="member-main" [ngStyle]="collapsed ? collapsedMemberMainStyles : null">
                   <img
                     class="member-avatar"
-                    *ngIf="!collapsed"
                     [src]="getUserProfileIconUrl(member.user)"
                     (error)="$any($event.target).src = 'assets/default-avatar.png'">
                   <div class="member-details" *ngIf="!collapsed">
                     <span class="username">{{ member.user.username }}</span>
                     <span class="member-role-badge" *ngIf="isMemberTemporaryDm(member)">Temporary DM</span>
                   </div>
+                  @if (canWhisperMember(member) && getUnreadCountForMember(member) > 0) {
+                    <span class="unread-badge member-unread" [class.collapsed-badge]="collapsed">
+                      {{ formatUnreadCount(getUnreadCountForMember(member)) }}
+                    </span>
+                  }
+                  <button
+                    mat-icon-button
+                    type="button"
+                    class="member-whisper-btn"
+                    *ngIf="canWhisperMember(member) && !collapsed"
+                    (click)="$event.stopPropagation(); whisperUser(member)"
+                    [attr.aria-label]="'Whisper ' + member.user.username"
+                    [matTooltip]="'Whisper ' + member.user.username">
+                    <mat-icon>chat_bubble</mat-icon>
+                  </button>
                 </div>
 
                 <!-- Display Member's Characters as small icons -->

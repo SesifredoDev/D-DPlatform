@@ -135,6 +135,8 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     display: 'flex',
     'align-items': 'center',
     'justify-content': 'center',
+    'flex-direction': 'column',
+    gap: '8px',
     margin: '0 auto 4px',
     padding: '0'
   };
@@ -839,6 +841,17 @@ export class SidePanel implements AfterViewInit, OnDestroy {
 
   getUnreadCountForMember(member: ServerMember): number {
     return this.unreadBadgeService.getWhisperUnreadCount(this.serverService.getMemberUserId(member));
+  }
+
+  canWhisperMember(member: ServerMember | null | undefined): boolean {
+    if (!this.selectedServer || !this.currentUserId || !member) return false;
+
+    const memberId = this.serverService.getMemberUserId(member);
+    if (!memberId || memberId === this.currentUserId) return false;
+
+    if (this.isServerOwner) return true;
+
+    return memberId === this.serverService.getServerOwnerId(this.selectedServer);
   }
 
   getUnreadCountForDm(): number {

@@ -17,6 +17,7 @@
         "width": 1900,
         "height": 1080,
         "resizable": true,
+        "decorations": false,
         "fullscreen": false,
         "useHttpsScheme": true,
         "dragDropEnabled": false

@@ -43,6 +43,16 @@
   }
 }
 
+:host-context(.app-window-shell.tauri-window) {
+  height: 100%;
+  background: transparent;
+
+  &::before,
+  &::after {
+    display: none;
+  }
+}
+
 .astral-background-runner-stack {
   position: fixed;
   top: 18px;

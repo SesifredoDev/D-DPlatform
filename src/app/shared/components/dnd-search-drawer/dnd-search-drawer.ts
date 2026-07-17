@@ -2,10 +2,12 @@ import { CommonModule } from '@angular/common';
 import {
   Component,
   ElementRef,
+  HostBinding,
   HostListener,
   ViewChild,
   computed,
   inject,
+  input,
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -33,6 +35,8 @@ import type { DetailFact, DetailSection, RichTextBlock, RichDetailSection, Searc
 })
 export class DndSearchDrawer {
   @ViewChild('searchInput') private searchInput?: ElementRef<HTMLInputElement>;
+  readonly showHandle = input(true);
+  readonly titlebarMode = input(false);
 
   private readonly open5eApi = inject(Open5eApiService);
   private readonly obsidianVaultService = inject(ObsidianVaultService);
@@ -130,6 +134,11 @@ export class DndSearchDrawer {
   private searchRequestId = 0;
   private detailRequestId = 0;
   private pointerInside = false;
+
+  @HostBinding('class.tauri-titlebar-mode')
+  protected get isTauriTitlebarMode(): boolean {
+    return this.titlebarMode();
+  }
 
   openFromTopEdge(): void {
     // this.open(true);

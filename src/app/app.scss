@@ -1,15 +1,201 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-window-shell {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  background: var(--server-theme-background);
+  color: var(--on-background);
+  isolation: isolate;
+  position: relative;
+}
+
+.app-window-shell.tauri-window {
+  grid-template-rows: 36px minmax(0, 1fr);
+  box-sizing: border-box;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: -24px;
+    z-index: 0;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    pointer-events: none;
+  }
+
+  &::before {
+    background-image:
+      linear-gradient(
+        var(--server-theme-background-image-previous-overlay),
+        var(--server-theme-background-image-previous-overlay)
+      ),
+      var(--server-theme-background-image-previous);
+    filter: blur(var(--server-theme-background-image-previous-blur));
+    opacity: var(--server-theme-background-image-previous-opacity);
+    transform: var(--server-theme-background-image-previous-scale);
+  }
+
+  &::after {
+    background-image:
+      linear-gradient(var(--server-theme-background-overlay), var(--server-theme-background-overlay)),
+      var(--server-theme-background-image);
+    filter: blur(var(--server-theme-background-image-blur));
+    opacity: var(--server-theme-background-image-opacity);
+    transform: var(--server-theme-background-image-scale);
+  }
+}
+
+.app-window-frame {
+  min-width: 0;
+  min-height: 36px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  user-select: none;
+  z-index: 1;
+
+  &::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background: var(--outline);
+    pointer-events: none;
+  }
+}
+
+.app-window-drag-zone {
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+}
+
+.app-window-title {
+  min-width: 0;
+  padding-left: 12px;
+  color: var(--on-surface-variant);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+
+  span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.app-window-mark {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(var(--primary-rgb, 114, 137, 218), 0.55);
+  border-radius: var(--radius-s);
+  background: rgba(var(--primary-rgb, 114, 137, 218), 0.18);
+  color: var(--on-background);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+
+.app-window-controls {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  flex: 0 0 auto;
+}
+
+.window-control {
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid transparent;
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+
+  .material-icons {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    line-height: 18px;
+  }
+
+  &:hover {
+    border-left-color: var(--outline);
+    background: rgba(var(--primary-rgb, 114, 137, 218), 0.16);
+    color: var(--on-background);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+  }
+
+  &.close:hover {
+    border-left-color: rgba(255, 92, 92, 0.5);
+    background: rgba(244, 67, 54, 0.24);
+    color: #ffb4b4;
+  }
+}
+
+.app-window-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.app-window-content > app-dashboard {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
 .resizable-dialog {
   resize: horizontal;
   overflow: auto;
-  min-width: 400px; // Prevent the form from breaking
+  min-width: 400px;
   max-width: 95vw;
 
-  // Customizing the resize handle appearance
   &::-webkit-resizer {
     background-color: var(--mat-sys-primary);
     border-radius: 50% 0 0 0;
   }
-}
-:host{
-  overflow: hidden;
 }

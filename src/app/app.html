@@ -1,6 +1,55 @@
-@if (tabPanelId; as panelId) {
-  <app-dashboard [externalPanelId]="panelId"></app-dashboard>
-} @else {
-  <app-dnd-search-drawer />
-  <router-outlet />
-}
+<div class="app-window-shell" [class.tauri-window]="isTauriWindow()">
+  @if (isTauriWindow()) {
+    <header
+      class="app-window-frame"
+      data-tauri-drag-region
+      (mousedown)="startWindowDrag($event)"
+      (dblclick)="toggleMaximize()">
+      <div class="app-window-drag-zone" data-tauri-drag-region>
+        <div class="app-window-title" data-tauri-drag-region>
+          <span class="app-window-mark" aria-hidden="true">D</span>
+          <span>D-D Platform</span>
+        </div>
+      </div>
+
+      <div class="app-window-controls">
+        @if (!tabPanelId) {
+          <button type="button" class="window-control" title="D&D search" aria-label="Open D&D 5e search" (click)="openDndSearch()">
+            <span class="material-icons" aria-hidden="true">search</span>
+          </button>
+        }
+        <button type="button" class="window-control" title="Shrink" aria-label="Shrink window" (click)="shrinkWindow()">
+          <span class="material-icons" aria-hidden="true">remove</span>
+        </button>
+        <button
+          type="button"
+          class="window-control"
+          [title]="isWindowMaximized() ? 'Restore' : 'Maximise'"
+          [attr.aria-label]="isWindowMaximized() ? 'Restore window' : 'Maximise window'"
+          (click)="toggleMaximize()">
+          <span class="material-icons" aria-hidden="true">{{ isWindowMaximized() ? 'filter_none' : 'crop_square' }}</span>
+        </button>
+        <button
+          type="button"
+          class="window-control"
+          [title]="isWindowFullscreen() ? 'Exit fullscreen' : 'Fullscreen'"
+          [attr.aria-label]="isWindowFullscreen() ? 'Exit fullscreen' : 'Fullscreen'"
+          (click)="toggleFullscreen()">
+          <span class="material-icons" aria-hidden="true">{{ isWindowFullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</span>
+        </button>
+        <button type="button" class="window-control close" title="Close" aria-label="Close window" (click)="closeWindow()">
+          <span class="material-icons" aria-hidden="true">close</span>
+        </button>
+      </div>
+    </header>
+  }
+
+  <div class="app-window-content">
+    @if (tabPanelId; as panelId) {
+      <app-dashboard [externalPanelId]="panelId"></app-dashboard>
+    } @else {
+      <app-dnd-search-drawer [showHandle]="!isTauriWindow()" [titlebarMode]="isTauriWindow()" />
+      <router-outlet />
+    }
+  </div>
+</div>

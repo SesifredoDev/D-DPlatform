@@ -29,7 +29,7 @@ export class TauriTabPanelService {
       minHeight: 320,
       resizable: true,
       focus: true,
-      decorations: true,
+      decorations: false,
       dragDropEnabled: false,
       useHttpsScheme: true,
       parent: 'main'

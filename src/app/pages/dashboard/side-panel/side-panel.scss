@@ -267,6 +267,33 @@
   gap: 4px;
 }
 
+.unread-badge {
+  min-width: 20px;
+  height: 20px;
+  margin-left: 8px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ff4d6d;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(15, 15, 18, 0.95), 0 8px 18px rgba(255, 77, 109, 0.28);
+
+  &.collapsed-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 10px;
+  }
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -293,33 +320,6 @@
     white-space: nowrap;
     font-size: 14px;
     font-weight: 500;
-  }
-
-  .unread-badge {
-    min-width: 20px;
-    height: 20px;
-    margin-left: 8px;
-    padding: 0 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: #ff4d6d;
-    color: #fff;
-    font-size: 11px;
-    font-weight: 900;
-    line-height: 1;
-    box-shadow: 0 0 0 2px rgba(15, 15, 18, 0.95), 0 8px 18px rgba(255, 77, 109, 0.28);
-
-    &.collapsed-badge {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      min-width: 18px;
-      height: 18px;
-      padding: 0 5px;
-      font-size: 10px;
-    }
   }
 
   &:hover {
@@ -358,6 +358,7 @@
 }
 
 .member-card {
+  position: relative;
   padding: 8px var(--space-m);
   margin: 0 8px;
   border-radius: 8px;
@@ -367,18 +368,40 @@
     background: rgba(255, 255, 255, 0.03);
   }
 
+  &.whisperable {
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(var(--primary-rgb, 114, 137, 218), 0.1);
+
+      .member-whisper-btn {
+        opacity: 1;
+      }
+    }
+  }
+
   .member-main {
     display: flex;
     align-items: center;
     gap: 12px;
-    .member-avatar { width: 32px; height: 32px; border-radius: 10px; background: #2a2a2a; }
+    width: 100%;
+    min-width: 0;
+    .member-avatar { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 10px; background: #2a2a2a; object-fit: cover; }
     .member-details {
       display: flex;
       flex-direction: column;
       gap: 3px;
+      flex: 1;
       min-width: 0;
     }
-    .username { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.8); }
+    .username {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.8);
+    }
     .member-role-badge {
       width: fit-content;
       padding: 1px 6px;
@@ -389,6 +412,32 @@
       font-weight: 800;
       letter-spacing: 0.4px;
       text-transform: uppercase;
+    }
+    .member-unread {
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+    .member-whisper-btn {
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 8px;
+      opacity: 0.55;
+      background: rgba(255, 255, 255, 0.04);
+      color: rgba(255, 255, 255, 0.55);
+      transition: all 0.2s ease;
+
+      mat-icon {
+        width: 16px;
+        height: 16px;
+        font-size: 16px;
+      }
+
+      &:hover {
+        background: rgba(var(--primary-rgb, 114, 137, 218), 0.18);
+        color: #fff;
+      }
     }
   }
 
@@ -453,6 +502,30 @@
 .sidebar-container.collapsed {
   .server-dropdown-btn { padding: 0 !important; }
   .nav-item.active { border-left: 0; background: rgba(var(--primary-rgb, 114, 137, 218), 0.18); }
+
+  .member-card {
+    width: 44px;
+    min-height: 44px;
+
+    &.whisperable:hover {
+      background: rgba(var(--primary-rgb, 114, 137, 218), 0.14);
+    }
+  }
+
+  .member-main {
+    width: auto;
+  }
+
+  .member-avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .member-unread.collapsed-badge {
+    top: 0;
+    right: 0;
+  }
 }
 
 /* -----------------------------------------------------------------------------

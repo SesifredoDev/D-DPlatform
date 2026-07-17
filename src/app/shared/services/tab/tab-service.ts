@@ -103,15 +103,21 @@ export class TabService {
   }
 
   moveTab(tabId: string, targetPane: TabPane, targetIndex?: number) {
-    targetPane = this.resolvePaneForCurrentWindow(targetPane);
     const tab = this.tabs.value.find(t => t.id === tabId);
     if (!tab) return;
 
-    const sourcePane = tab.pane;
+    this.moveOrAddTab(tab, targetPane, targetIndex);
+  }
+
+  moveOrAddTab(tab: Tab, targetPane: TabPane, targetIndex?: number) {
+    targetPane = this.resolvePaneForCurrentWindow(targetPane);
+    const existingTab = this.tabs.value.find(t => t.id === tab.id);
+    const sourcePane = existingTab?.pane ?? tab.pane;
+    const baseTab = existingTab ? { ...tab, ...existingTab, data: existingTab.data ?? tab.data } : tab;
     const movingWithinSamePane = sourcePane === targetPane;
-    const movedTab: Tab = { ...tab, pane: targetPane, active: true };
+    const movedTab: Tab = { ...baseTab, pane: targetPane, active: true };
     const remainingTabs = this.tabs.value
-      .filter(t => t.id !== tabId)
+      .filter(t => t.id !== tab.id)
       .map(t => t.pane === targetPane ? { ...t, active: false } : t);
 
     let nextTabs = this.insertTabAtPaneIndex(remainingTabs, movedTab, targetPane, targetIndex);

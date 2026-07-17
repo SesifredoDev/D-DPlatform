@@ -6,6 +6,7 @@ export interface TabDragPayload {
   sourceWindowId: string;
   type: Tab['type'];
   title: string;
+  tab: Tab;
   startedAt: number;
   hasLiveConnection?: boolean;
 }

@@ -15,16 +15,35 @@ export class TabDragTransferService {
   write(event: DragEvent, tab: Tab, options: { hasLiveConnection?: boolean } = {}): TabDragPayload {
     this.removeHandledPayload();
 
-    const payload: TabDragPayload = {
+    let payload: TabDragPayload = {
       tabId: tab.id,
       sourcePane: String(tab.pane),
       sourceWindowId: this.windowId,
       type: tab.type,
       title: tab.title,
+      tab,
       startedAt: Date.now(),
       hasLiveConnection: options.hasLiveConnection
     };
-    const serialized = JSON.stringify(payload);
+    let serialized: string;
+
+    try {
+      serialized = JSON.stringify(payload);
+    } catch {
+      const fallbackTab: Tab = {
+        id: tab.id,
+        title: tab.title,
+        type: tab.type,
+        pane: tab.pane,
+        active: tab.active
+      };
+
+      payload = {
+        ...payload,
+        tab: fallbackTab
+      };
+      serialized = JSON.stringify(payload);
+    }
 
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move';
@@ -216,11 +235,27 @@ export class TabDragTransferService {
         sourceWindowId: payload.sourceWindowId ?? '',
         type: payload.type ?? 'text',
         title: payload.title ?? 'Tab',
+        tab: this.parseTab(payload),
         startedAt: payload.startedAt,
         hasLiveConnection: payload.hasLiveConnection === true
       };
     } catch {
       return null;
     }
+  }
+
+  private parseTab(payload: Partial<TabDragPayload>): Tab {
+    const rawTab = payload.tab as Partial<Tab> | undefined;
+
+    return {
+      id: rawTab?.id ?? payload.tabId ?? '',
+      title: rawTab?.title ?? payload.title ?? 'Tab',
+      type: rawTab?.type ?? payload.type ?? 'text',
+      pane: rawTab?.pane ?? payload.sourcePane ?? 'left',
+      active: rawTab?.active === true,
+      character: rawTab?.character,
+      whisperRecipient: rawTab?.whisperRecipient,
+      data: rawTab?.data
+    };
   }
 }

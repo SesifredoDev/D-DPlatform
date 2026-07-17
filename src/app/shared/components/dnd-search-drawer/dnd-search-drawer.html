@@ -1,14 +1,16 @@
-<div class="top-edge-trigger" (mouseenter)="openFromTopEdge()" aria-hidden="true"></div>
+@if (showHandle()) {
+  <div class="top-edge-trigger" (mouseenter)="openFromTopEdge()" aria-hidden="true"></div>
 
-<button
-  class="search-handle"
-  type="button"
-  [class.open]="isOpen()"
-  (click)="openAndFocus()"
-  aria-label="Open D&D 5e search"
->
-  <span class="material-icons">search</span>
-</button>
+  <button
+    class="search-handle"
+    type="button"
+    [class.open]="isOpen()"
+    (click)="openAndFocus()"
+    aria-label="Open D&D 5e search"
+  >
+    <span class="material-icons">search</span>
+  </button>
+}
 
 <section
   class="search-drawer"

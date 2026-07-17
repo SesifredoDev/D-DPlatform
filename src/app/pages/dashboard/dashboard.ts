@@ -407,7 +407,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     }
 
     const targetIndex = this.resolveNativeDropIndex(event, targetPane, targetTab, payload.tabId);
-    this.tabService.moveTab(payload.tabId, targetPane, targetIndex);
+    this.tabService.moveOrAddTab(payload.tab, targetPane, targetIndex);
     this.tabDragTransfer.clearSoon();
   }
 
@@ -545,7 +545,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
         return;
       }
 
-      this.tabService.moveTab(tabPayload.tabId, this.resolvePaneFromDropPoint(event));
+      this.tabService.moveOrAddTab(tabPayload.tab, this.resolvePaneFromDropPoint(event));
       this.tabDragTransfer.clearSoon();
       return;
     }

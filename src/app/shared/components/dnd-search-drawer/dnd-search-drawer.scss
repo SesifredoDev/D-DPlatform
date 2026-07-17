@@ -66,6 +66,12 @@
   }
 }
 
+:host.tauri-titlebar-mode {
+  .search-drawer {
+    top: 36px;
+  }
+}
+
 .drawer-shell {
   width: min(1180px, calc(100vw - 32px));
   max-height: min(76vh, 760px);
