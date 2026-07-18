@@ -50,5 +50,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure Tauri resource directory exists
+        run: New-Item -ItemType Directory -Path src-tauri/bin -Force | Out-Null
+
       - name: Build Tauri app
         run: npm run tauri build -- --verbose

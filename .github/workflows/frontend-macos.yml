@@ -47,11 +47,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install FFmpeg
-        run: brew install ffmpeg
-
       - name: Install dependencies
         run: npm ci
+
+      - name: Ensure Tauri resource directory exists
+        run: mkdir -p src-tauri/bin
 
       - name: Build Tauri app
         run: npm run tauri build -- --verbose
