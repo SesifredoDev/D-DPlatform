@@ -28,7 +28,6 @@ import {AstralPlaybackDropService} from '../../shared/services/astral-recording/
 import {ServerService} from '../../shared/services/server/server';
 import {AstralOptimizationRunner} from './astral-optimization-runner/astral-optimization-runner';
 import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-runner';
-import {CallLivestreamManager} from './call/call-livestream-manager';
 
 @Component({
   selector: 'app-dashboard',
@@ -48,8 +47,7 @@ import {CallLivestreamManager} from './call/call-livestream-manager';
     MatSnackBarModule,
     ObsidianViewComponent,
     AstralOptimizationRunner,
-    AstralPackagingRunner,
-    CallLivestreamManager
+    AstralPackagingRunner
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',

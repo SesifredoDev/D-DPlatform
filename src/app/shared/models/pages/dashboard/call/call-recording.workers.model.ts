@@ -1,5 +1,4 @@
-import type { CallParticipantMetadata, CallRecordingParticipant } from '../../../video/video.model';
-import type { ICharacter } from '../../../user/character.model';
+import type { CallRecordingParticipant } from '../../../video/video.model';
 import type { SessionRecording } from '../../../session-recording/session-recording.model';
 
 export interface MicTestRecordingWorkerOptions {
@@ -10,8 +9,6 @@ export interface MicTestRecordingWorkerOptions {
   requestChangeDetection: () => void;
 }
 
-export type CallParticipantRecorderStopReason = 'final' | 'idle' | 'tracks-changed' | 'removed';
-
 export interface CallParticipantActivitySample {
   audioLevel: number;
   videoMotion: number;
@@ -21,52 +18,6 @@ export interface CallParticipantActivitySample {
 export interface CallParticipantActivityMonitor {
   getSample: () => CallParticipantActivitySample;
   cleanup: () => void;
-}
-
-export interface CallParticipantRecorder {
-  participantId: string;
-  isLocal: boolean;
-  userData: Partial<ICharacter> | null;
-  participantMeta: CallParticipantMetadata | null;
-  volumePercent: number;
-  stream: MediaStream;
-  recorder: MediaRecorder;
-  chunks: Blob[];
-  mimeType: string;
-  startedAtMs: number;
-  stopping: boolean;
-  astralSegmentIndex: number | null;
-  astralFilePath: string | null;
-  astralFileUrl: string | null;
-  astralSize: number;
-  astralWriteChain: Promise<void>;
-  astralWriteFailed: boolean;
-  stopReason: CallParticipantRecorderStopReason;
-  idleMonitor: CallParticipantActivityMonitor | null;
-  idleMonitorInterval: any;
-  idleLastActivityAt: number;
-  idleTransitionInProgress: boolean;
-  pendingIdleStillFrame: Blob | null;
-  pendingIdleStillMimeType: string | null;
-}
-
-export interface CallParticipantIdleState {
-  participantId: string;
-  isLocal: boolean;
-  userData: Partial<ICharacter> | null;
-  participantMeta: CallParticipantMetadata | null;
-  volumePercent: number;
-  stream: MediaStream;
-  tracksSignature: string;
-  startedAtMs: number;
-  blob: Blob | null;
-  mimeType: string;
-  mediaUrl: string | null;
-  mediaPath: string | null;
-  size: number;
-  activityMonitor: CallParticipantActivityMonitor | null;
-  activityMonitorInterval: any;
-  resuming: boolean;
 }
 
 export interface CallSessionRecordingWorkerOptions {

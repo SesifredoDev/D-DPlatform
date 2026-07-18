@@ -51,4 +51,4 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        run: npm run tauri build
+        run: npm run tauri build -- --verbose

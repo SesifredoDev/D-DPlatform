@@ -84,8 +84,6 @@
               [previewOnly]="tab.data?.previewOnly === true"
               (previewTabRequested)="openObsidianPreviewTab($event, tab)">
             </app-obsidian-view>
-          } @else if (tab.type === 'livestream') {
-            <app-call-livestream-manager [channelId]="tab.data?.channelId ?? ''"></app-call-livestream-manager>
           }
         </div>
       }
@@ -166,8 +164,6 @@
               [previewOnly]="tab.data?.previewOnly === true"
               (previewTabRequested)="openObsidianPreviewTab($event, tab)">
             </app-obsidian-view>
-            } @else if (tab.type === 'livestream') {
-              <app-call-livestream-manager [channelId]="tab.data?.channelId ?? ''"></app-call-livestream-manager>
             }
           </div>
         }

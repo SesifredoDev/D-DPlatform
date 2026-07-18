@@ -7,7 +7,7 @@
     "frontendDist": "../dist/astral-project/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "npm run start",
-    "beforeBuildCommand": "npm run tauri:prepare-ffmpeg && npm run build"
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
