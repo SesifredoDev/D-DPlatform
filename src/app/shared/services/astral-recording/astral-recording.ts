@@ -645,7 +645,7 @@ export class AstralRecordingService {
   }
 
   private isUrlLike(value: string): boolean {
-    return /^(blob:|data:|https?:|asset\.localhost\/|ddplatform:)/i.test(value);
+    return /^(blob:|data:|https?:|asset\.localhost\/|astralproject:)/i.test(value);
   }
 
   private async requireCore(): Promise<TauriCoreApi> {

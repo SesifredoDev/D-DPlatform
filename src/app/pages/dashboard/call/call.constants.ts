@@ -9,7 +9,7 @@ import type {
   RemoteVideoQualityLevel
 } from '../../../shared/models/pages/dashboard/call/call.model';
 
-export const CALL_MEDIA_PREFERENCES_STORAGE_KEY = 'd-d-platform.call.media-preferences';
+export const CALL_MEDIA_PREFERENCES_STORAGE_KEY = 'astral-project.call.media-preferences';
 export const CALL_MIC_TEST_MAX_DURATION_MS = 8000;
 export const CALL_MAX_THEME_SYNC_PAYLOAD_BYTES = 60_000;
 

@@ -16,7 +16,7 @@ import { DndSearchDrawer } from './shared/components/dnd-search-drawer/dnd-searc
 export class App implements OnInit, OnDestroy {
   @ViewChild(DndSearchDrawer) private dndSearchDrawer?: DndSearchDrawer;
 
-  protected readonly title = signal('d-d-platform');
+  protected readonly title = signal('astral-project');
   protected readonly isTauriWindow = signal(false);
   protected readonly isWindowFullscreen = signal(false);
   protected readonly isWindowMaximized = signal(false);

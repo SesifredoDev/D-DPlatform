@@ -7,7 +7,7 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "d-d-platform": {
+    "astral-project": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -24,7 +24,7 @@
             "polyfills": [
               "zone.js"
             ],
-            "outputPath": "dist/d-d-platform",
+            "outputPath": "dist/astral-project",
             "baseHref": "./",
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
@@ -84,10 +84,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "d-d-platform:build:production"
+              "buildTarget": "astral-project:build:production"
             },
             "development": {
-              "buildTarget": "d-d-platform:build:development"
+              "buildTarget": "astral-project:build:development"
             }
           },
           "defaultConfiguration": "development"

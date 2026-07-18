@@ -1,4 +1,4 @@
-# DDPlatform
+# Astral Project
 
 This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.0.0.
 
@@ -50,10 +50,10 @@ npm run tauri:build
 
 ## Production desktop CORS
 
-The installed Tauri bundle serves the Angular app from the custom `ddplatform`
+The installed Tauri bundle serves the Angular app from the custom `astralproject`
 protocol. On Windows and Android the production origin is
-`https://ddplatform.localhost`; on macOS and Linux it is
-`ddplatform://localhost`. The production API must allow the exact desktop origin
+`https://astralproject.localhost`; on macOS and Linux it is
+`astralproject://localhost`. The production API must allow the exact desktop origin
 explicitly because the app sends credentialed requests to
 `https://dissertation.pchaffey.me/api/...`.
 
@@ -64,8 +64,8 @@ For nginx, put the `map` in the `http` block and the `/api/` handling in the
 map $http_origin $cors_origin {
   default "";
   "https://dissertation.pchaffey.me" $http_origin;
-  "https://ddplatform.localhost" $http_origin;
-  "ddplatform://localhost" $http_origin;
+  "https://astralproject.localhost" $http_origin;
+  "astralproject://localhost" $http_origin;
   "http://localhost:4200" $http_origin;
 }
 

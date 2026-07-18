@@ -134,10 +134,35 @@
               }
 
               @if(msg.attachments && msg.attachments.length > 0) {
-                <div class="message-attachments">
+                @let compactAttachments = shouldUseCompactAttachments(msg);
+                <div class="message-attachments" [class.compact-attachments]="compactAttachments">
                   @for(att of msg.attachments; track att.url) {
                     <div class="attachment-item">
-                      @if(isAstralAttachment(att)) {
+                      @if(compactAttachments && !isAstralAttachment(att)) {
+                        <button
+                          type="button"
+                          class="attachment-compact-chip"
+                          [class.previewable]="canPreviewAttachment(att)"
+                          (click)="openAttachmentPreview(att, $event)"
+                          [attr.aria-label]="(canPreviewAttachment(att) ? 'Preview ' : 'Open ') + getAttachmentDisplayName(att)"
+                          [matTooltip]="canPreviewAttachment(att) ? 'Preview media' : 'Open attachment'">
+                          <span class="attachment-compact-icon" aria-hidden="true">
+                            <mat-icon>{{ getAttachmentIcon(att) }}</mat-icon>
+                          </span>
+                          <span class="attachment-file-copy">
+                            <span>{{ getAttachmentDisplayName(att) }}</span>
+                            <small>
+                              {{ formatAttachmentType(att) }}
+                              @if(formatAttachmentSize(att)) {
+                                <span> - {{ formatAttachmentSize(att) }}</span>
+                              }
+                            </small>
+                          </span>
+                          <mat-icon class="attachment-compact-action">
+                            {{ canPreviewAttachment(att) ? 'visibility' : 'open_in_new' }}
+                          </mat-icon>
+                        </button>
+                      } @else if(isAstralAttachment(att)) {
                         <div class="attachment-file attachment-astral">
                           <div class="attachment-astral-mark" aria-hidden="true">
                             <mat-icon>auto_stories</mat-icon>
@@ -148,7 +173,7 @@
                             <small class="attachment-astral-meta">
                               Astral archive
                               @if(formatAttachmentSize(att)) {
-                                <span> · {{ formatAttachmentSize(att) }}</span>
+                                <span> - {{ formatAttachmentSize(att) }}</span>
                               }
                             </small>
                           </span>
@@ -175,16 +200,24 @@
                           </span>
                         </div>
                       } @else if(isImageAttachment(att)) {
-                        <a
-                          [href]="getAttachmentUrl(att)"
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
                           class="attachment-image-link"
-                          (click)="openExternalUrl(getAttachmentUrl(att), $event)">
+                          (click)="openAttachmentPreview(att, $event)"
+                          [attr.aria-label]="'Preview ' + getAttachmentDisplayName(att)"
+                          matTooltip="Preview image">
                           <img [src]="getAttachmentUrl(att)" [alt]="getAttachmentDisplayName(att)" class="attachment-image">
-                        </a>
+                        </button>
                       } @else if(isVideoAttachment(att)) {
                         <div class="attachment-media attachment-video">
+                          <button
+                            type="button"
+                            class="attachment-media-preview-btn"
+                            (click)="openAttachmentPreview(att, $event)"
+                            [attr.aria-label]="'Preview ' + getAttachmentDisplayName(att)"
+                            matTooltip="Preview video">
+                            <mat-icon>visibility</mat-icon>
+                          </button>
                           <video controls preload="metadata" [src]="getAttachmentUrl(att)"></video>
                           <a
                             [href]="getAttachmentUrl(att)"
@@ -198,6 +231,14 @@
                         </div>
                       } @else if(isAudioAttachment(att)) {
                         <div class="attachment-media attachment-audio">
+                          <button
+                            type="button"
+                            class="attachment-media-preview-btn"
+                            (click)="openAttachmentPreview(att, $event)"
+                            [attr.aria-label]="'Preview ' + getAttachmentDisplayName(att)"
+                            matTooltip="Preview audio">
+                            <mat-icon>visibility</mat-icon>
+                          </button>
                           <div class="attachment-audio-header">
                             <mat-icon>graphic_eq</mat-icon>
                             <div>
@@ -376,4 +417,58 @@
       </div>
     </div>
   </div>
+
+  @if(mediaPreview) {
+    <div class="media-preview-backdrop" role="dialog" aria-modal="true" [attr.aria-label]="mediaPreview.title" (click)="closeMediaPreview($event)">
+      <div class="media-preview-shell" (click)="$event.stopPropagation()">
+        <div class="media-preview-toolbar">
+          <span class="media-preview-title">
+            <mat-icon>{{ mediaPreview.icon }}</mat-icon>
+            <span>
+              <strong>{{ mediaPreview.title }}</strong>
+              @if(mediaPreview.subtitle) {
+                <small>{{ mediaPreview.subtitle }}</small>
+              }
+            </span>
+          </span>
+
+          <span class="media-preview-actions">
+            <button
+              mat-icon-button
+              type="button"
+              (click)="openExternalUrl(mediaPreview.url, $event)"
+              aria-label="Open media in new tab"
+              matTooltip="Open in new tab">
+              <mat-icon>open_in_new</mat-icon>
+            </button>
+            <button
+              mat-icon-button
+              type="button"
+              (click)="closeMediaPreview($event)"
+              aria-label="Close preview"
+              matTooltip="Close preview">
+              <mat-icon>close</mat-icon>
+            </button>
+          </span>
+        </div>
+
+        <div class="media-preview-stage">
+          @if(mediaPreview.type === 'image') {
+            <img [src]="mediaPreview.url" [alt]="mediaPreview.title">
+          } @else if(mediaPreview.type === 'video') {
+            <video controls autoplay [src]="mediaPreview.url"></video>
+          } @else if(mediaPreview.type === 'audio') {
+            <div class="media-preview-audio">
+              <mat-icon>{{ mediaPreview.icon }}</mat-icon>
+              <strong>{{ mediaPreview.title }}</strong>
+              @if(mediaPreview.subtitle) {
+                <small>{{ mediaPreview.subtitle }}</small>
+              }
+              <audio controls autoplay [src]="mediaPreview.url"></audio>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  }
 </div>

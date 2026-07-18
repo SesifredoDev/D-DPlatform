@@ -5,10 +5,12 @@
 :host {
   display: block;
   height: 100%;
+  min-height: 0;
 }
 
 .sidebar-container {
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   width: 100%; // Default to full width for mobile or when fixed
   display: flex;
   flex-direction: column;
@@ -109,8 +111,10 @@
    ----------------------------------------------------------------------------- */
 
 .main-content-scroll {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-m) 0;
 
   // Modern scrollbar
@@ -462,6 +466,7 @@
    ----------------------------------------------------------------------------- */
 
 .sidebar-footer {
+  flex: 0 0 auto;
   padding: var(--space-m);
   background: rgba(0, 0, 0, 0.2);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
@@ -500,12 +505,85 @@
 }
 
 .sidebar-container.collapsed {
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+
+  .server-header {
+    flex: 0 0 auto;
+  }
+
   .server-dropdown-btn { padding: 0 !important; }
   .nav-item.active { border-left: 0; background: rgba(var(--primary-rgb, 114, 137, 218), 0.18); }
 
+  .main-content-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 6px 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .sidebar-footer {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
+    padding: 6px 0;
+  }
+
+  .footer-actions {
+    gap: 4px;
+    margin-bottom: 0;
+  }
+
+  .server-icon-mini {
+    width: 26px;
+    height: 26px;
+    margin-right: 0;
+  }
+
+  .collapse-toggle-btn,
+  .sidebar-footer button,
+  .section-header .mini-btn {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    padding: 0;
+    --mdc-icon-button-state-layer-size: 34px;
+    --mat-icon-button-state-layer-size: 34px;
+  }
+
+  .collapse-toggle-btn mat-icon,
+  .sidebar-footer button mat-icon,
+  .section-header .mini-btn mat-icon,
+  .nav-item .item-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    line-height: 18px;
+  }
+
+  .nav-item {
+    height: 38px;
+    margin: 0 6px;
+  }
+
+  .identity-card .identity-avatar,
+  .member-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .identity-card .status-indicator {
+    width: 10px;
+    height: 10px;
+    border-width: 2px;
+  }
+
   .member-card {
-    width: 44px;
-    min-height: 44px;
+    width: 38px;
+    min-height: 34px;
 
     &.whisperable:hover {
       background: rgba(var(--primary-rgb, 114, 137, 218), 0.14);
@@ -516,15 +594,15 @@
     width: auto;
   }
 
-  .member-avatar {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
+  .member-chars .tiny-char-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
   }
 
   .member-unread.collapsed-badge {
-    top: 0;
-    right: 0;
+    top: -2px;
+    right: -2px;
   }
 }
 

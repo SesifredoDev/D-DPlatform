@@ -1,10 +1,10 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "D-D Platform",
+  "productName": "Astral Project",
   "version": "0.0.0",
-  "identifier": "com.ddplatform.desktop",
+  "identifier": "com.astralproject.desktop",
   "build": {
-    "frontendDist": "../dist/d-d-platform/browser",
+    "frontendDist": "../dist/astral-project/browser",
     "devUrl": "http://localhost:4200",
     "beforeDevCommand": "npm run start",
     "beforeBuildCommand": "npm run tauri:prepare-ffmpeg && npm run build"
@@ -12,8 +12,8 @@
   "app": {
     "windows": [
       {
-        "title": "D-D Platform",
-        "url": "ddplatform://localhost/index.html",
+        "title": "Astral Project",
+        "url": "astralproject://localhost/index.html",
         "width": 1900,
         "height": 1080,
         "resizable": true,

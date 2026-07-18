@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tauri::http;
 use tauri::{AppHandle, Emitter, Manager};
 
-const APP_PROTOCOL: &str = "ddplatform";
+const APP_PROTOCOL: &str = "astralproject";
 const USE_HTTPS_SCHEME: bool = true;
 const ASTRAL_MAGIC: &[u8] = b"ASTRAL1\0";
 const RECOVERABLE_MEDIA_EXTENSIONS: &[&str] = &[

@@ -6,7 +6,8 @@ import {
   OnDestroy,
   ViewChild,
   ElementRef,
-  OnInit
+  OnInit,
+  HostListener
 } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { Message, MessageData, Attachment } from '../../../shared/services/message/message';
@@ -31,6 +32,17 @@ import { Tab, TabService } from '../../../shared/services/tab/tab-service';
 import { AstralPlaybackDropService } from '../../../shared/services/astral-recording/astral-playback-drop';
 import { Video } from '../../../shared/services/video/video';
 import type { ChannelAccessPermission, LinkPreviewType, LinkPreviewAspect, LinkPreviewProvider, LinkPreview, PlayableEmbedPreview, ProviderLinkPreview } from '../../../shared/models/pages/dashboard/text-channel/text-channel.model';
+
+type MediaAttachmentPreviewType = 'image' | 'video' | 'audio';
+
+interface MediaAttachmentPreview {
+  type: MediaAttachmentPreviewType;
+  url: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+}
+
 @Component({
   selector: 'app-text-channel',
   templateUrl: 'text-channel.html',
@@ -70,6 +82,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   attachments: Attachment[] = [];
   isUploading = false;
   uploadProgress = 0;
+  mediaPreview: MediaAttachmentPreview | null = null;
   readonly quickReactions = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}'];
 
   private readonly imageExtensions = ['apng', 'avif', 'gif', 'jpg', 'jpeg', 'png', 'svg', 'webp'];
@@ -428,6 +441,56 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     window.open(safeUrl, '_blank', 'noopener,noreferrer');
   }
 
+  shouldUseCompactAttachments(message: MessageData): boolean {
+    return this.hasMediaInText(message.content);
+  }
+
+  hasMediaInText(content: string | null | undefined): boolean {
+    const value = content?.trim() ?? '';
+    if (!value) return false;
+
+    if (this.extractMarkdownImageUrls(value).length > 0) return true;
+
+    return this.getLinkPreviews(value).some(preview => this.isMediaPreviewType(preview.type));
+  }
+
+  canPreviewAttachment(attachment: Attachment): boolean {
+    return this.getAttachmentPreviewType(attachment) !== null;
+  }
+
+  openAttachmentPreview(attachment: Attachment, event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    const type = this.getAttachmentPreviewType(attachment);
+    const url = this.getAttachmentUrl(attachment);
+    if (!type || !url) {
+      this.openExternalUrl(this.getAttachmentUrl(attachment), event);
+      return;
+    }
+
+    this.mediaPreview = {
+      type,
+      url,
+      title: this.getAttachmentDisplayName(attachment),
+      subtitle: this.formatAttachmentSize(attachment) || this.formatAttachmentType(attachment),
+      icon: this.getAttachmentIcon(attachment)
+    };
+  }
+
+  closeMediaPreview(event?: Event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    this.mediaPreview = null;
+  }
+
+  @HostListener('document:keydown.escape')
+  closeMediaPreviewFromEscape() {
+    if (this.mediaPreview) {
+      this.mediaPreview = null;
+    }
+  }
+
   getLinkPreviews(content: string | null | undefined): LinkPreview[] {
     const cacheKey = content ?? '';
     const cached = this.linkPreviewCache.get(cacheKey);
@@ -455,6 +518,13 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
   isAstralAttachment(attachment: Attachment): boolean {
     return this.hasContentType(attachment, this.astralContentType) || this.hasFileExtension(attachment, ['astral']);
+  }
+
+  getAttachmentPreviewType(attachment: Attachment): MediaAttachmentPreviewType | null {
+    if (this.isImageAttachment(attachment)) return 'image';
+    if (this.isVideoAttachment(attachment)) return 'video';
+    if (this.isAudioAttachment(attachment)) return 'audio';
+    return null;
   }
 
   getAttachmentIcon(attachment: Attachment): string {
@@ -583,13 +653,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   }
 
   private extractPreviewUrls(content: string): string[] {
-    const markdownImageUrls = new Set<string>();
-    for (const match of content.matchAll(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      const safeUrl = this.toSafeExternalUrl(this.cleanUrlMatch(match[1]));
-      if (safeUrl) {
-        markdownImageUrls.add(safeUrl);
-      }
-    }
+    const markdownImageUrls = new Set(this.extractMarkdownImageUrls(content));
 
     const matches = content.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? [];
     const urls: string[] = [];
@@ -601,6 +665,23 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     }
 
     return urls;
+  }
+
+  private extractMarkdownImageUrls(content: string): string[] {
+    const urls: string[] = [];
+
+    for (const match of content.matchAll(/!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
+      const safeUrl = this.toSafeExternalUrl(this.cleanUrlMatch(match[1]));
+      if (safeUrl && !urls.includes(safeUrl)) {
+        urls.push(safeUrl);
+      }
+    }
+
+    return urls;
+  }
+
+  private isMediaPreviewType(type: LinkPreviewType): boolean {
+    return type === 'image' || type === 'video' || type === 'audio' || type === 'embed';
   }
 
   private createLinkPreview(url: string): LinkPreview {

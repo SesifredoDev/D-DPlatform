@@ -83,26 +83,26 @@ export class SidePanel implements AfterViewInit, OnDestroy {
   };
   readonly collapsedHeaderStyles: Readonly<Record<string, string>> = {
     height: 'auto',
-    padding: '8px 0',
+    padding: '4px 0',
     'flex-direction': 'column',
     'align-items': 'center',
     'justify-content': 'center'
   };
   readonly collapsedServerButtonStyles: Readonly<Record<string, string>> = {
-    width: '44px',
-    'min-width': '44px',
-    flex: '0 0 44px',
+    width: '36px',
+    'min-width': '36px',
+    flex: '0 0 36px',
     'justify-content': 'center'
   };
   readonly collapsedIconStyles: Readonly<Record<string, string>> = {'margin-right': '0'};
-  readonly collapsedContentStyles: Readonly<Record<string, string>> = {padding: '12px 0'};
+  readonly collapsedContentStyles: Readonly<Record<string, string>> = {padding: '6px 0'};
   readonly collapsedSectionStyles: Readonly<Record<string, string>> = {
-    'margin-bottom': '16px',
+    'margin-bottom': '10px',
     padding: '0'
   };
   readonly collapsedSectionHeaderStyles: Readonly<Record<string, string>> = {
     'justify-content': 'center',
-    padding: '0 0 8px'
+    padding: '0 0 4px'
   };
   readonly collapsedEmptyStateStyles: Readonly<Record<string, string>> = {padding: '0'};
   readonly collapsedEmptyStateContentStyles: Readonly<Record<string, string>> = {
@@ -110,25 +110,25 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     width: '100%'
   };
   readonly collapsedEmptyIconStyles: Readonly<Record<string, string>> = {
-    width: '36px',
-    height: '36px',
-    'font-size': '36px',
-    'margin-bottom': '12px'
+    width: '30px',
+    height: '30px',
+    'font-size': '30px',
+    'margin-bottom': '4px'
   };
   readonly collapsedEmptyButtonStyles: Readonly<Record<string, string>> = {
-    width: '44px',
-    'min-width': '44px',
+    width: '36px',
+    'min-width': '36px',
     padding: '0'
   };
   readonly collapsedIdentityCardStyles: Readonly<Record<string, string>> = {
     'justify-content': 'center',
     gap: '0',
-    margin: '0 8px',
+    margin: '0 6px',
     padding: '0'
   };
   readonly collapsedNavItemStyles: Readonly<Record<string, string>> = {
     'justify-content': 'center',
-    margin: '0 8px',
+    margin: '0 6px',
     padding: '0'
   };
   readonly collapsedMemberCardStyles: Readonly<Record<string, string>> = {
@@ -136,8 +136,8 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     'align-items': 'center',
     'justify-content': 'center',
     'flex-direction': 'column',
-    gap: '8px',
-    margin: '0 auto 4px',
+    gap: '4px',
+    margin: '0 auto 2px',
     padding: '0'
   };
   readonly collapsedMemberMainStyles: Readonly<Record<string, string>> = {
@@ -151,21 +151,21 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     'flex-direction': 'column',
     'align-items': 'center',
     'justify-content': 'center',
-    gap: '10px'
+    gap: '4px'
   };
   readonly collapsedCharacterIconStyles: Readonly<Record<string, string>> = {
-    width: '34px',
-    height: '34px',
+    width: '24px',
+    height: '24px',
     'border-radius': '10px'
   };
   readonly collapsedRoleCategoryStyles: Readonly<Record<string, string>> = {
-    'margin-bottom': '8px'
+    'margin-bottom': '4px'
   };
-  readonly collapsedFooterStyles: Readonly<Record<string, string>> = {padding: '12px 0'};
+  readonly collapsedFooterStyles: Readonly<Record<string, string>> = {padding: '6px 0'};
   readonly collapsedFooterActionsStyles: Readonly<Record<string, string>> = {
     'flex-direction': 'column',
     'align-items': 'center',
-    gap: '8px',
+    gap: '4px',
     'margin-bottom': '0'
   };
 
