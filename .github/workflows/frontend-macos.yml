@@ -1,4 +1,4 @@
-﻿﻿name: Frontend macOS Build
+name: Frontend macOS Build
 
 on:
   push:

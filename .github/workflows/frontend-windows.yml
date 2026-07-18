@@ -1,4 +1,4 @@
-﻿﻿name: Frontend Windows Build
+name: Frontend Windows Build
 
 on:
   push:

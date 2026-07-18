@@ -1,4 +1,4 @@
-﻿﻿name: Frontend Linux Build
+name: Frontend Linux Build
 
 on:
   push:
