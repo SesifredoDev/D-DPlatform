@@ -609,3 +609,94 @@ p.detail-description {
     max-height: 42vh;
   }
 }
+// 1. Update the grid columns from two to three
+.drawer-body {
+  min-height: 380px;
+  display: grid;
+  grid-template-columns: 200px minmax(260px, 0.38fr) minmax(0, 0.62fr);
+  overflow: hidden;
+}
+
+// 2. Add .filter-pane to the existing pane rule
+.filter-pane,
+.results-pane,
+.detail-pane {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+// 3. Add styling for the filter pane itself
+.filter-pane {
+  border-right: 1px solid var(--outline);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.filter-count {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(16, 18, 24, 0.96);
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.filter-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  color: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--on-background);
+  }
+
+  input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--primary);
+  }
+
+  .filter-label {
+    text-transform: capitalize;
+    user-select: none;
+  }
+}
+
+// 4. Update the mobile responsive query to stack the layout correctly
+@media (max-width: 760px) {
+  // ... existing mobile overrides
+
+  .drawer-body {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .filter-pane {
+    max-height: 120px;
+    border-right: 0;
+    border-bottom: 1px solid var(--outline);
+  }
+
+  .results-pane {
+    max-height: 34vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--outline);
+  }
+
+  // ... existing mobile overrides
+}

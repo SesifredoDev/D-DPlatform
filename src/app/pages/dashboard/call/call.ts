@@ -476,8 +476,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private gridContainerRef?: ElementRef<HTMLElement>;
   private gridResizeObserver: ResizeObserver | null = null;
   private readonly recordingAndStreamingEnabled = false;
+  private deviceReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private isLoadingDevices = false;
+  private pendingDeviceReload = false;
+  private readonly deviceReloadDebounceMs = 350;
   private readonly handleDeviceChangeBound = () => {
-    void this.loadDevices();
+    this.scheduleDeviceReload();
   };
 
   constructor(
@@ -665,7 +669,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private async applyIncomingSoundCloudSync(state: any) {
     if (!this.localStream) return;
 
-    const hasVolumeUpdate = state.volumePercent !== undefined && state.volumePercent !== null;
     const isVolumeOnlyCommand = state.command === 'volume';
     if (!state.uri && !isVolumeOnlyCommand) return;
 
@@ -686,10 +689,6 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     const applySequence = ++this.soundCloudSyncApplySequence;
     try {
-      if (hasVolumeUpdate) {
-        await this.spotify.setVolumePercent(state.volumePercent, true);
-      }
-
       const recordedSpotifyState = this.createRecordedSpotifyStateFromSyncPayload(state);
       this.recordMusicAction(state.command ?? 'sync', state, state.source ?? 'remote', recordedSpotifyState);
       if (recordedSpotifyState) {
@@ -817,6 +816,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   private handleLocalSoundCloudAction(action: any) {
     if (!this.localStream) return;
+
+    // Keep volume local-only; do not sync volume across the call.
+    if (action.command === 'volume') {
+      return;
+    }
 
     if (this.isServerOwner) {
       const payload = { ...action.data, hostId: this.character.ownerId };
@@ -1300,12 +1304,75 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     });
   }
 
-  async loadDevices() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      stream.getTracks().forEach(t => t.stop());
+  private scheduleDeviceReload() {
+    if (this.deviceReloadTimer) {
+      clearTimeout(this.deviceReloadTimer);
+    }
 
-      const devices = await navigator.mediaDevices.enumerateDevices();
+    this.deviceReloadTimer = setTimeout(() => {
+      this.deviceReloadTimer = null;
+      void this.loadDevices();
+    }, this.deviceReloadDebounceMs);
+  }
+
+  private async applySelectedSourceBandwidthOptimizations(stream: MediaStream) {
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) {
+      return;
+    }
+
+    const selectedCameraLabel = this.videoDevices.find(device => device.deviceId === this.selectedVideoId)?.label ?? '';
+    const label = `${selectedCameraLabel} ${videoTrack.label || ''}`.toLowerCase();
+    const isObsVirtualCamera = label.includes('obs') && label.includes('virtual');
+    if (!isObsVirtualCamera) {
+      return;
+    }
+
+    const settings = videoTrack.getSettings();
+    const currentWidth = settings.width ?? 0;
+    const currentHeight = settings.height ?? 0;
+    const currentFps = settings.frameRate ?? 0;
+    if (
+      currentWidth > 0 &&
+      currentHeight > 0 &&
+      currentFps > 0 &&
+      currentWidth <= 1280 &&
+      currentHeight <= 720 &&
+      currentFps <= 30
+    ) {
+      return;
+    }
+
+    try {
+      await videoTrack.applyConstraints({
+        width: { ideal: 1280, max: 1280 },
+        height: { ideal: 720, max: 720 },
+        frameRate: { ideal: 24, max: 30 }
+      });
+    } catch (error) {
+      console.warn('Could not apply OBS virtual camera bandwidth optimization constraints', error);
+    }
+  }
+
+  async loadDevices() {
+    if (this.isLoadingDevices) {
+      this.pendingDeviceReload = true;
+      return;
+    }
+
+    this.isLoadingDevices = true;
+    try {
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      const needsPermissionProbe = devices.some(device =>
+        (device.kind === 'audioinput' || device.kind === 'videoinput') && !device.label
+      );
+
+      if (needsPermissionProbe && !this.localStream && !this.previewStream) {
+        const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        permissionStream.getTracks().forEach(track => track.stop());
+        devices = await navigator.mediaDevices.enumerateDevices();
+      }
+
       this.videoDevices = devices.filter(d => d.kind === 'videoinput');
       this.audioDevices = devices.filter(d => d.kind === 'audioinput');
       this.audioOutputDevices = devices.filter(d => d.kind === 'audiooutput');
@@ -1318,6 +1385,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       await this.applyAudioOutputToAllMedia();
     } catch (err) {
       console.warn('Media device access partially or fully denied', err);
+    } finally {
+      this.isLoadingDevices = false;
+      if (this.pendingDeviceReload) {
+        this.pendingDeviceReload = false;
+        this.scheduleDeviceReload();
+      }
     }
   }
 
@@ -1330,6 +1403,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     try {
       this.previewStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+      await this.applySelectedSourceBandwidthOptimizations(this.previewStream);
       this.applyPreviewSetupToStream();
 
       if (this.previewVideo) {
@@ -4228,7 +4302,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       await this.prepareMobileMedia();
     }
 
-    return navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+    const stream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+    await this.applySelectedSourceBandwidthOptimizations(stream);
+    return stream;
   }
 
   private assertActiveLocalStream() {
@@ -4717,6 +4793,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.stopSoundCloudCallSyncTimers();
     this.subscriptions.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
+    if (this.deviceReloadTimer) {
+      clearTimeout(this.deviceReloadTimer);
+      this.deviceReloadTimer = null;
+    }
     if (this.sessionNotesSaveTimer) {
       clearTimeout(this.sessionNotesSaveTimer);
       this.sessionNotesSaveTimer = null;
@@ -5797,6 +5877,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private async replaceActiveMediaStream() {
     this.resetMicTestForCaptureChange();
     const nextStream = await navigator.mediaDevices.getUserMedia(this.buildMediaConstraints());
+    await this.applySelectedSourceBandwidthOptimizations(nextStream);
 
     nextStream.getAudioTracks().forEach(track => (track.enabled = !this.isAudioMuted));
     nextStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));

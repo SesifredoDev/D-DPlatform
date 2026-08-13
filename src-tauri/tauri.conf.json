@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Astral Project",
-  "version": "0.0.0",
+  "version": "1.0.2",
   "identifier": "com.astralproject.desktop",
   "build": {
     "frontendDist": "../dist/astral-project/browser",

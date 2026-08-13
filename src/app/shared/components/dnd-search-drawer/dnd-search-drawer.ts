@@ -103,6 +103,58 @@ export class DndSearchDrawer {
     return this.open5eFacts(result, detail);
   });
 
+
+  // Filter ---------------------------
+  // Add these alongside your existing signals (e.g., under `readonly error = signal<string | null>(null);`)
+  readonly availableFilters = [
+    'ability-scores', 'alignments', 'backgrounds', 'classes', 'conditions',
+    'damage-types', 'equipment', 'equipment-categories', 'feats', 'features',
+    'languages', 'magic-items', 'magic-schools', 'monsters', 'proficiencies',
+    'races', 'rule-sections', 'rules', 'skills', 'spells', 'subclasses',
+    'subraces', 'traits', 'weapon-properties', 'Notes'
+  ];
+
+  readonly activeFilters = signal<Set<string>>(new Set());
+
+// Computed signal that filters the raw results based on the active selection
+  readonly filteredResults = computed(() => {
+    const filters = this.activeFilters();
+    const items = this.results();
+
+    if (filters.size === 0) {
+      return items;
+    }
+
+    return items.filter(item => {
+      // Handle Obsidian vault notes specifically
+      if (item.source === 'vault') {
+        return filters.has('Notes');
+      }
+
+      // Normalize open5e object_model (e.g. "magicitems") to match our filter format
+      const normalizedCategory = (item.category || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      for (const filter of filters) {
+        const normalizedFilter = filter.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (normalizedCategory === normalizedFilter) {
+          return true;
+        }
+      }
+      return false;
+    });
+  });
+
+// Add this helper method to toggle filters
+  toggleFilter(filter: string): void {
+    const current = new Set(this.activeFilters());
+    if (current.has(filter)) {
+      current.delete(filter);
+    } else {
+      current.add(filter);
+    }
+    this.activeFilters.set(current);
+  }
+
   readonly detailSections = computed(() => {
     const selectedItem = this.selectedItem();
     const detail = this.selectedDetail();
@@ -455,7 +507,7 @@ export class DndSearchDrawer {
       id: `open5e:${result.object_pk}`,
       source: 'open5e',
       title: result.object_name,
-      category: result.object_model,
+      category: result.object_model || 'Unknown', // Fallback
       subtitle: result.document?.name ?? 'Open5e',
       snippet: this.compactText(result.highlighted || result.text),
       open5e: result,
@@ -733,7 +785,9 @@ export class DndSearchDrawer {
     return typeof value === 'number' ? `${value}` : '';
   }
 
-  private compactText(value: string): string {
+  private compactText(value: string | undefined | null): string {
+    if (!value) return ''; // Add this early return
+
     return value
       .replace(/<[^>]+>/g, '')
       .replace(/\s+/g, ' ')

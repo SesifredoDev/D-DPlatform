@@ -25,14 +25,14 @@ export class Open5eApiService {
     }
 
     const url = new URL(`${this.apiRoot}/search/`);
-    url.searchParams.set('query', normalizedQuery);
+    // Update this parameter from 'query' to 'text'
+    url.searchParams.set('text', normalizedQuery);
     url.searchParams.set('limit', `${limit}`);
 
     const response = await this.fetchJson<Open5eSearchResponse>(url.toString());
     this.searchCache.set(cacheKey, response.results);
     return response.results;
   }
-
   async getDetail(result: Open5eSearchResult): Promise<Open5eDetail> {
     const url = this.getExternalUrl(result);
     const cached = this.detailCache.get(url);

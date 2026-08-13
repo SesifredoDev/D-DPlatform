@@ -55,6 +55,22 @@
     }
 
     <div class="drawer-body">
+      <aside class="filter-pane">
+        <div class="filter-count">Filters</div>
+        <div class="filter-list">
+          @for (filter of availableFilters; track filter) {
+            <label class="filter-item">
+              <input
+                type="checkbox"
+                [checked]="activeFilters().has(filter)"
+                (change)="toggleFilter(filter)"
+              />
+              <span class="filter-label">{{ filter.replace('-', ' ') }}</span>
+            </label>
+          }
+        </div>
+      </aside>
+
       <div class="results-pane">
         @if (query().trim().length < 2) {
           <div class="state-message">
@@ -67,16 +83,16 @@
             <span class="material-icons loading">progress_activity</span>
             <strong>Searching Open5e...</strong>
           </div>
-        } @else if (results().length === 0) {
+        } @else if (filteredResults().length === 0) {
           <div class="state-message">
             <span class="material-icons">search_off</span>
             <strong>No matching SRD entries.</strong>
           </div>
         } @else {
-          <div class="results-count">{{ results().length }} matches</div>
+          <div class="results-count">{{ filteredResults().length }} matches</div>
 
           <div class="results-list">
-            @for (result of results(); track result.id) {
+            @for (result of filteredResults(); track result.id) {
               <button
                 type="button"
                 class="result-item"

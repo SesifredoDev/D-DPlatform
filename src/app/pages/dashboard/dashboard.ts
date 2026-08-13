@@ -6,7 +6,6 @@ import {SidePanel} from './side-panel/side-panel';
 import {Call, type VttPlaybackEvent, type VttStopEvent} from './call/call';
 import {ChannelService} from '../../shared/services/channel/channel';
 import {TextChannel} from './text-channel/text-channel';
-import {ChannelType, IChannel} from '../../shared/models/server/channel.model';
 import {MatIcon, MatIconModule} from '@angular/material/icon';
 import {Tab, TabPane, TabService} from '../../shared/services/tab/tab-service';
 import {CharacterViewer} from './character-viewer/character-viewer';
@@ -15,7 +14,6 @@ import {SpotifyPlayer} from './call/spotify-player/spotify-player';
 import {Video} from '../../shared/services/video/video';
 import {CommonModule} from '@angular/common';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
-import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {BroadcastDialog} from '../../objects/broadcast-dialog/broadcast-dialog';
 import {ObsidianPreviewTabRequest, ObsidianViewComponent} from './obsidian-view/obsidian-view.component';
 import {VttSync} from '../../shared/services/vttsync/vttsync';
@@ -24,10 +22,7 @@ import {TabDragTransferService, type TabDragPayload} from '../../shared/services
 import {Subscription} from 'rxjs';
 import {AuthService} from '../../shared/services/auth/auth';
 import type {UnlistenFn} from '@tauri-apps/api/event';
-import {AstralPlaybackDropService} from '../../shared/services/astral-recording/astral-playback-drop';
 import {ServerService} from '../../shared/services/server/server';
-import {AstralOptimizationRunner} from './astral-optimization-runner/astral-optimization-runner';
-import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-runner';
 
 @Component({
   selector: 'app-dashboard',
@@ -44,10 +39,7 @@ import {AstralPackagingRunner} from './astral-packaging-runner/astral-packaging-
     VttCanvas,
     SpotifyPlayer,
     MatDialogModule,
-    MatSnackBarModule,
-    ObsidianViewComponent,
-    AstralOptimizationRunner,
-    AstralPackagingRunner
+    ObsidianViewComponent
   ],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
@@ -100,11 +92,9 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     private vttSync: VttSync,
     private tauriTabPanelService: TauriTabPanelService,
     private tabDragTransfer: TabDragTransferService,
-    private astralPlaybackDrop: AstralPlaybackDropService,
     private authService: AuthService,
     private cdr: ChangeDetectorRef,
-    private dialog: MatDialog,
-    private snackBar: MatSnackBar
+    private dialog: MatDialog
   ) {
     this.leftWidth = this.getDefaultSplitWidth(window.innerWidth);
   }
@@ -554,12 +544,6 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     event.stopPropagation();
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
-      const astralFile = this.getDroppedAstralFile(files);
-      if (astralFile) {
-        this.requestAstralPlaybackDrop(astralFile, event);
-        return;
-      }
-
       const file = files[0];
       if (file.type.startsWith('image/')) {
         this.openBroadcastDialog(file);
@@ -854,71 +838,5 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private hasDraggedFiles(event: DragEvent): boolean {
     return Array.from(event.dataTransfer?.types ?? []).includes('Files');
-  }
-
-  private getDroppedAstralFile(files: FileList): File | null {
-    return Array.from(files).find(file => this.isAstralFile(file)) ?? null;
-  }
-
-  private isAstralFile(file: File): boolean {
-    return file.name.toLowerCase().endsWith('.astral');
-  }
-
-  private requestAstralPlaybackDrop(file: File, event: DragEvent) {
-    const callTab = this.resolveOrOpenCallTabForAstralDrop(event);
-    if (!callTab) {
-      this.snackBar.open('No call channel is available for Astral playback.', 'Close', {
-        duration: 4000
-      });
-      return;
-    }
-
-    this.tabService.selectTab(callTab.id);
-    window.setTimeout(() => {
-      this.astralPlaybackDrop.requestPlayback({
-        file,
-        channelId: callTab.id
-      });
-    });
-  }
-
-  private resolveCallTabForAstralDrop(event: DragEvent): Tab | null {
-    const viewTabs = this.getCurrentViewTabs();
-    const targetPane = this.resolvePaneFromDropPoint(event);
-    const connectedCallId = this.videoService.currentChannelId;
-
-    return viewTabs.find(tab => tab.type === 'call' && connectedCallId === tab.id)
-      ?? viewTabs.find(tab => tab.type === 'call' && tab.pane === targetPane && tab.active)
-      ?? viewTabs.find(tab => tab.type === 'call' && tab.active)
-      ?? viewTabs.find(tab => tab.type === 'call')
-      ?? null;
-  }
-
-  private resolveOrOpenCallTabForAstralDrop(event: DragEvent): Tab | null {
-    const existingCallTab = this.resolveCallTabForAstralDrop(event);
-    if (existingCallTab) {
-      return existingCallTab;
-    }
-
-    const callChannel = this.findDefaultCallChannel();
-    if (!callChannel?._id) {
-      return null;
-    }
-
-    const targetPane = this.resolvePaneFromDropPoint(event);
-    this.tabService.openTab(callChannel._id, callChannel.name || 'Call', 'call', targetPane);
-
-    return this.tabService.getTabs().find(tab => tab.id === callChannel._id) ?? {
-      id: callChannel._id,
-      title: callChannel.name || 'Call',
-      type: 'call',
-      pane: targetPane,
-      active: true
-    };
-  }
-
-  private findDefaultCallChannel(): IChannel | null {
-    const currentServer = this.serverService.getCurrentServer();
-    return currentServer?.channels?.find(channel => channel.type === ChannelType.Call && !!channel._id) ?? null;
   }
 }

@@ -65,12 +65,22 @@ export class Video {
   };
   private static readonly fullHdVideoEncoding: VideoEncoding = {
     ...VideoPresets.h1080.encoding,
-    maxBitrate: 2_500_000,
+    maxBitrate: 2_000_000,
     maxFramerate: 30,
+  };
+  private static readonly hdVideoEncoding: VideoEncoding = {
+    ...VideoPresets.h720.encoding,
+    maxBitrate: 1_400_000,
+    maxFramerate: 30,
+  };
+  private static readonly sdVideoEncoding: VideoEncoding = {
+    ...VideoPresets.h360.encoding,
+    maxBitrate: 700_000,
+    maxFramerate: 24,
   };
   private static readonly qhdVideoEncoding: VideoEncoding = {
     ...VideoPresets.h1440.encoding,
-    maxBitrate: 4_000_000,
+    maxBitrate: 3_000_000,
     maxFramerate: 30,
   };
   private static readonly highQualityMonoAudioPreset = AudioPresets.musicHighQuality;
@@ -104,6 +114,18 @@ export class Video {
       maxBitrate: 2_200_000,
       maxFramerate: 30,
     })
+  ];
+  private static readonly hdSimulcastLayers = [
+    VideoPresets.h216,
+    new VideoPreset({
+      width: 640,
+      height: 360,
+      maxBitrate: 700_000,
+      maxFramerate: 30,
+    })
+  ];
+  private static readonly sdSimulcastLayers = [
+    VideoPresets.h216
   ];
 
   private room: Room;
@@ -1395,10 +1417,24 @@ export class Video {
     const width = settings.width ?? 0;
     const height = settings.height ?? 0;
     const useQhdProfile = width >= 2200 || height >= 1200;
-    const videoEncoding = useQhdProfile ? Video.qhdVideoEncoding : Video.fullHdVideoEncoding;
-    const simulcastLayers = useQhdProfile
-      ? Video.qhdSimulcastLayers
-      : Video.fullHdSimulcastLayers;
+    const useFullHdProfile = !useQhdProfile && (width >= 1700 || height >= 900);
+    const useHdProfile = !useQhdProfile && !useFullHdProfile && (width >= 1100 || height >= 620);
+
+    let videoEncoding: VideoEncoding;
+    let simulcastLayers: VideoPreset[];
+    if (useQhdProfile) {
+      videoEncoding = Video.qhdVideoEncoding;
+      simulcastLayers = Video.qhdSimulcastLayers;
+    } else if (useFullHdProfile) {
+      videoEncoding = Video.fullHdVideoEncoding;
+      simulcastLayers = Video.fullHdSimulcastLayers;
+    } else if (useHdProfile) {
+      videoEncoding = Video.hdVideoEncoding;
+      simulcastLayers = Video.hdSimulcastLayers;
+    } else {
+      videoEncoding = Video.sdVideoEncoding;
+      simulcastLayers = Video.sdSimulcastLayers;
+    }
 
     return {
       ...Video.baseCameraPublishOptions,
