@@ -61,7 +61,9 @@ export class Message {
       next: (user) => {
         this.socket.auth = { userId: user._id };
         this.socketAuthReady = true;
-        this.connectSocket();
+        if (this.joinedChannels.size > 0) {
+          this.connectSocket();
+        }
       },
       error: (err) => {
         console.error('Failed to resolve socket user identity', err);
@@ -70,7 +72,7 @@ export class Message {
   }
 
   private connectSocket() {
-    if (!this.socketAuthReady) {
+    if (!this.socketAuthReady || this.joinedChannels.size === 0) {
       return;
     }
 
@@ -85,32 +87,41 @@ export class Message {
     }
     this.olderHistoryLoading.delete(channelId);
     this.olderHistoryExhausted.delete(channelId);
+    const isFirstJoin = !this.joinedChannels.has(channelId);
 
-    this.joinedChannels.add(channelId);
+    if (isFirstJoin) {
+      this.joinedChannels.add(channelId);
 
-    if (this.socket.connected) {
-      this.socket.emit('join_channel', channelId);
-    } else {
-      this.connectSocket();
+      if (this.socket.connected) {
+        this.socket.emit('join_channel', channelId);
+      } else {
+        this.connectSocket();
+      }
+
+      this.getHistory(channelId).subscribe(history => {
+        this.channelMessages.get(channelId)!.next(
+          history
+            .map(message => this.normalizeMessage(message))
+            .reverse()
+        );
+      });
     }
-
-    this.getHistory(channelId).subscribe(history => {
-      this.channelMessages.get(channelId)!.next(
-        history
-          .map(message => this.normalizeMessage(message))
-          .reverse()
-      );
-    });
 
     return this.channelMessages.get(channelId)!.asObservable();
   }
 
   leaveChannel(channelId: string) {
-    this.socket.emit('leave_channel', channelId);
+    if (this.socket.connected) {
+      this.socket.emit('leave_channel', channelId);
+    }
     this.joinedChannels.delete(channelId);
     this.channelMessages.delete(channelId);
     this.olderHistoryLoading.delete(channelId);
     this.olderHistoryExhausted.delete(channelId);
+
+    if (this.joinedChannels.size === 0 && (this.socket.connected || this.socket.active)) {
+      this.socket.disconnect();
+    }
   }
 
   getHistory(channelId: string, before?: string) {

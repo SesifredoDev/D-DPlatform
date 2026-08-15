@@ -6,6 +6,7 @@ import type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/o
 export type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/obsidian-vault-service.model';
 
 export type DndAbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
+type VaultPermissionMode = 'read' | 'readwrite';
 
 export interface DndStatsheetEntry {
   name: string;
@@ -79,16 +80,22 @@ export class ObsidianVaultService {
     return (handle as FileSystemDirectoryHandle) || null;
   }
 
-  async requestPermission(handle: FileSystemHandle): Promise<boolean> {
-    const options = { mode: 'readwrite' };
+  async requestPermission(
+    handle: FileSystemHandle,
+    mode: VaultPermissionMode = 'readwrite'
+  ): Promise<boolean> {
+    const options = { mode };
     return (await (handle as any).requestPermission(options)) === 'granted';
   }
 
-  async hasPermission(serverId: string): Promise<boolean> {
+  async hasPermission(
+    serverId: string,
+    mode: VaultPermissionMode = 'readwrite'
+  ): Promise<boolean> {
     const handle = await this.getVaultHandle(serverId);
     if (!handle) return false;
 
-    const options = { mode: 'readwrite' };
+    const options = { mode };
     if (typeof (handle as any).queryPermission !== 'function') {
       return true;
     }
@@ -296,7 +303,7 @@ export class ObsidianVaultService {
     const normalizedQuery = this.normalizeSearchText(query);
     const terms = normalizedQuery.split(' ').filter(Boolean);
 
-    if (terms.length === 0 || !this.hasVaultAttached(serverId) || !(await this.hasPermission(serverId))) {
+    if (terms.length === 0 || !this.hasVaultAttached(serverId) || !(await this.hasPermission(serverId, 'read'))) {
       return [];
     }
 

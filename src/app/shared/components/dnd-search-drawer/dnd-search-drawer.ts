@@ -507,7 +507,7 @@ export class DndSearchDrawer {
       id: `open5e:${result.object_pk}`,
       source: 'open5e',
       title: result.object_name,
-      category: result.object_model || 'Unknown', // Fallback
+      category: this.searchCategory(result),
       subtitle: result.document?.name ?? 'Open5e',
       snippet: this.compactText(result.highlighted || result.text),
       open5e: result,
@@ -519,7 +519,7 @@ export class DndSearchDrawer {
       id: `vault:${result.serverId}:${result.relativePath}`,
       source: 'vault',
       title: result.name.replace(/\.md$/i, ''),
-      category: 'Vault',
+      category: 'Notes',
       subtitle: vaultName,
       snippet: result.snippet,
       vault: result,
@@ -557,6 +557,47 @@ export class DndSearchDrawer {
       || this.stringValue(detail['language_desc'])
       || this.stringValue(detail['equipment_category'] ?? detail['feature_specific'])
       || '';
+  }
+
+  private searchCategory(result: Open5eSearchResult): string {
+    const routeCategory = this.routeCategory(result.route);
+    if (routeCategory) {
+      return routeCategory;
+    }
+
+    const normalizedModel = (result.object_model || '').trim().toLowerCase();
+    switch (normalizedModel) {
+      case 'spell':
+        return 'spells';
+      case 'creature':
+        return 'monsters';
+      case 'rule':
+        return 'rules';
+      case 'item':
+        return 'equipment';
+      case 'environment':
+        return 'environments';
+      default:
+        return result.object_model || 'Unknown';
+    }
+  }
+
+  private routeCategory(route: string | undefined): string {
+    if (!route) {
+      return '';
+    }
+
+    const parts = route.split('/').filter(Boolean);
+    const endpoint = parts.length >= 2 ? parts[1].toLowerCase() : '';
+
+    switch (endpoint) {
+      case 'creatures':
+        return 'monsters';
+      case 'items':
+        return 'equipment';
+      default:
+        return endpoint;
+    }
   }
 
   private open5eFacts(result: Open5eSearchResult, detail: Open5eDetail): DetailFact[] {

@@ -46,6 +46,8 @@ export class Video {
   private static readonly defaultParticipantVolumePercent = 100;
   private static readonly minParticipantVolumePercent = 0;
   private static readonly maxParticipantVolumePercent = 200;
+  private static readonly participantEmitThrottleMs = 200;
+  private static readonly pingMonitorIntervalMs = 5000;
   private static readonly remoteVideoPreferenceProfiles: Record<RemoteVideoQualityPreference, {
     quality: VideoQuality;
     dimensions: { width: number; height: number };
@@ -158,6 +160,9 @@ export class Video {
   private participantStreams = new Map<string, MediaStream>();
   private effectiveParticipantStreams = new Map<string, MediaStream>();
   private pingInterval: any;
+  private emitParticipantsQueued = false;
+  private emitParticipantsInFlight: Promise<void> | null = null;
+  private lastParticipantsEmitAt = 0;
   private currentParticipantMetadata: CallParticipantMetadata | null = null;
   private currentParticipantIdentity: string | null = null;
   private sceneMainCharacterControllerUserIds = new Set<string>();
@@ -503,7 +508,7 @@ export class Video {
 
   private startPingMonitor() {
     this.stopPingMonitor();
-    this.pingInterval = setInterval(() => void this.emitParticipants(), 3000);
+    this.pingInterval = setInterval(() => void this.emitParticipants(), Video.pingMonitorIntervalMs);
   }
 
   private stopPingMonitor() {
@@ -1097,16 +1102,41 @@ export class Video {
   }
 
   private async emitParticipants() {
-    const timestamp = new Date().toLocaleTimeString();
+    this.emitParticipantsQueued = true;
+
+    if (this.emitParticipantsInFlight) {
+      await this.emitParticipantsInFlight;
+      return;
+    }
+
+    this.emitParticipantsInFlight = (async () => {
+      while (this.emitParticipantsQueued) {
+        this.emitParticipantsQueued = false;
+        const elapsedSinceLastEmit = Date.now() - this.lastParticipantsEmitAt;
+        const delayMs = Video.participantEmitThrottleMs - elapsedSinceLastEmit;
+        if (delayMs > 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, delayMs));
+        }
+
+        await this.emitParticipantsNow();
+        this.lastParticipantsEmitAt = Date.now();
+      }
+    })();
+
+    try {
+      await this.emitParticipantsInFlight;
+    } finally {
+      this.emitParticipantsInFlight = null;
+    }
+  }
+
+  private async emitParticipantsNow() {
     const participants = await Promise.all(Array.from(this.room.remoteParticipants.values()).map(async p => {
       this.updateParticipantStream(p);
 
       const participantMeta = this.parseMetadata(p.metadata);
       const stream = this.buildEffectiveParticipantStream(p.identity, participantMeta);
       const rtt = (p as any).getRTT ? (p as any).getRTT() : (p as any).lastPingRTT;
-      if (rtt !== undefined) {
-        console.log(`[${timestamp}] Ping for ${p.identity}: ${rtt}ms`);
-      }
 
       return {
         id: p.identity,
@@ -1123,10 +1153,6 @@ export class Video {
     this.companionDevices$.next(this.buildCompanionDeviceOptions(participants));
 
     const localRTT = (this.room.localParticipant as any).getRTT ? (this.room.localParticipant as any).getRTT() : (this.room.localParticipant as any).lastPingRTT;
-    if (localRTT !== undefined) {
-      console.log(`[${timestamp}] Local Ping: ${localRTT}ms`);
-    }
-
     this.remoteStreams$.next([{
       id: 'local',
       ping: localRTT,
@@ -1236,6 +1262,9 @@ export class Video {
     this.phoneCompanionTargetIdentity = null;
     this.currentVideoPublicationTrack = null;
     this.currentAudioPublicationTrack = null;
+    this.emitParticipantsQueued = false;
+    this.emitParticipantsInFlight = null;
+    this.lastParticipantsEmitAt = 0;
   }
 
   private buildParticipantIdentity(userId: string, deviceId: string): string {

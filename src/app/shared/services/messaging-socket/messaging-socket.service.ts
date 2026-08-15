@@ -25,6 +25,10 @@ export class MessagingSocketService {
   constructor(private tokenService: TokenService) { }
 
   public connect(): void {
+    if (!this.hasActiveRoomSubscriptions()) {
+      return;
+    }
+
     if (this.socket) {
       if (!this.socket.connected && !this.socket.active) {
         this.socket.connect();
@@ -42,7 +46,6 @@ export class MessagingSocketService {
     });
 
     this.socket.on('connect', () => {
-      console.log('Connected to messaging socket');
       if (this.serverId) {
         this.joinServerRoom(this.serverId);
       }
@@ -51,22 +54,11 @@ export class MessagingSocketService {
       });
     });
 
-    this.socket.on('disconnect', () => {
-      console.log('Disconnected from messaging socket');
-    });
-
     this.socket.on('member_update', (members: any[]) => {
-      console.log('Received member_update:', members);
       this._memberUpdate.next(members);
     });
 
     this.socket.on('character_update', (data: any) => {
-      console.log('Received character_update:', data);
-      // character_update event payload in messaging-service is just the 'data' part of SERVER_UPDATES
-      // but the messaging-service broadcasts to rooms.
-      // Wait, let's look at messaging-service/index.js again.
-      // io.to(`server:${payload.serverId}`).emit('character_update', payload.data);
-      // So character_update gets the payload.data which is the character object or { _id, deleted: true }.
       this._characterUpdate.next({serverId: this.serverId!, data});
     });
 
@@ -97,17 +89,26 @@ export class MessagingSocketService {
       if (previousServerId && previousServerId !== serverId) {
         this.socket.emit('leave_server', previousServerId);
       }
-      this.socket.emit('join_server', serverId);
-      console.log(`Joined server room: ${serverId}`);
+      if (previousServerId !== serverId) {
+        this.socket.emit('join_server', serverId);
+      }
     } else {
       this.connect();
     }
   }
 
   public leaveServerRoom(serverId: string): void {
-    if (this.socket && this.socket.connected && this.serverId === serverId) {
+    if (this.serverId !== serverId) {
+      return;
+    }
+
+    this.serverId = null;
+    if (this.socket && this.socket.connected) {
       this.socket.emit('leave_server', serverId);
-      this.serverId = null;
+    }
+
+    if (!this.hasActiveRoomSubscriptions() && this.socket && (this.socket.connected || this.socket.active)) {
+      this.socket.disconnect();
     }
   }
 
@@ -126,7 +127,16 @@ export class MessagingSocketService {
   public joinChannelRoom(channelId: string): void {
     if (!channelId) return;
 
+    const wasJoined = this.joinedChannelIds.has(channelId);
     this.joinedChannelIds.add(channelId);
+
+    if (wasJoined) {
+      if (!this.socket || (!this.socket.connected && !this.socket.active)) {
+        this.connect();
+      }
+      return;
+    }
+
     if (this.socket && this.socket.connected) {
       this.socket.emit('join_channel', channelId);
     } else {
@@ -141,6 +151,14 @@ export class MessagingSocketService {
     if (this.socket && this.socket.connected) {
       this.socket.emit('leave_channel', channelId);
     }
+
+    if (!this.hasActiveRoomSubscriptions() && this.socket && (this.socket.connected || this.socket.active)) {
+      this.socket.disconnect();
+    }
+  }
+
+  private hasActiveRoomSubscriptions(): boolean {
+    return !!this.serverId || this.joinedChannelIds.size > 0;
   }
 
   private getSocketAuth(): { token: string | null; userId?: string } {

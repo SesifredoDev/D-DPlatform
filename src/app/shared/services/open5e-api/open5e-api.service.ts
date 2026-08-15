@@ -25,8 +25,7 @@ export class Open5eApiService {
     }
 
     const url = new URL(`${this.apiRoot}/search/`);
-    // Update this parameter from 'query' to 'text'
-    url.searchParams.set('text', normalizedQuery);
+    url.searchParams.set('query', normalizedQuery);
     url.searchParams.set('limit', `${limit}`);
 
     const response = await this.fetchJson<Open5eSearchResponse>(url.toString());
