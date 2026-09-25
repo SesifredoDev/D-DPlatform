@@ -99,7 +99,7 @@
   <div class="pane right-pane"
        #rightPane
        [class.empty]="rightTabs.length === 0"
-       *ngIf="!isMobile || rightTabs.length > 0"
+       *ngIf="!isMobile && (rightTabs.length > 0 || showRightDropZone)"
        (dragover)="onNativeTabDragOver($event)"
        (drop)="onNativeTabDrop($event, rightPaneId)">
 

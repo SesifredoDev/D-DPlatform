@@ -45,6 +45,7 @@ export class VttSync implements OnDestroy {
   private localVersion = 0;
   private resyncing = false;
   private hostClaimedAt = 0;
+  private currentHostId: string | null = null;
   private localCharacter: ICharacter | null = null;
   private needsSessionRestore = false;
   private isStopping = false;
@@ -131,6 +132,7 @@ export class VttSync implements OnDestroy {
 
       this.socket.on('host-disconnected', () => {
         console.warn('The DM has disconnected. You can assume hosting.');
+        this.currentHostId = null;
         this.hostDisconnected$.next(true);
       });
 
@@ -141,7 +143,10 @@ export class VttSync implements OnDestroy {
       });
 
       this.socket.on('host-changed', (payload: any) => {
-        if (payload.hostId === this.socket?.id) {
+        const hostId = typeof payload?.hostId === 'string' ? payload.hostId : null;
+        this.currentHostId = hostId;
+
+        if (hostId === this.socket?.id) {
           this.hostDisconnected$.next(false);
           return;
         }
@@ -150,7 +155,7 @@ export class VttSync implements OnDestroy {
           return;
         }
 
-        if (payload.hostId !== this.socket?.id) {
+        if (hostId !== this.socket?.id) {
             this.hostDisconnected$.next(false);
             if (this.isHosting) {
                 this.isHosting = false;
@@ -161,6 +166,7 @@ export class VttSync implements OnDestroy {
 
       this.socket.on('disconnect', () => {
           this.isConnected = false;
+          this.currentHostId = null;
           if (!this.isStopping && this.currentRoomId) {
             this.needsSessionRestore = true;
           }
@@ -482,6 +488,7 @@ export class VttSync implements OnDestroy {
     this.currentRoomId = null;
     this.isHosting = false;
     this.isConnected = false;
+    this.currentHostId = null;
     this.hostDisconnected$.next(false);
     this.clearActiveEngineTarget();
     this.engine = null;
@@ -625,6 +632,16 @@ export class VttSync implements OnDestroy {
     const isOwnEcho = !!sourceId && sourceId === this.socket?.id;
 
     if (version !== undefined) {
+        if (!isOwnEcho) {
+          if (!sourceId || !this.currentHostId || sourceId !== this.currentHostId) {
+            console.warn(
+              `Ignoring versioned VTT action from non-host source. Expected host=${this.currentHostId}, got=${sourceId}. Requesting resync.`
+            );
+            this.requestResync();
+            return;
+          }
+        }
+
         if (isOwnEcho) {
             this.localVersion = Math.max(this.localVersion, version);
             return;

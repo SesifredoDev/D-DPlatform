@@ -1426,11 +1426,16 @@ export class Video {
     const nextSource = this.localStream?.getVideoTracks()[0] || null;
     if (this.currentVideoPublicationTrack === nextSource) return;
 
-    if (this.currentVideoPublicationTrack) {
-      await this.room.localParticipant.unpublishTrack(this.currentVideoPublicationTrack, false);
+    const previousTrack = this.currentVideoPublicationTrack;
+    if (previousTrack) {
+      try {
+        await this.room.localParticipant.unpublishTrack(previousTrack, false);
+      } catch (error) {
+        console.warn('Failed to unpublish previous video track before source switch', error);
+      }
     }
 
-    this.currentVideoPublicationTrack = nextSource;
+    this.currentVideoPublicationTrack = null;
 
     if (nextSource) {
       nextSource.contentHint = 'detail';
@@ -1438,6 +1443,7 @@ export class Video {
         ...this.getCameraPublishOptions(nextSource),
         name: 'video',
       });
+      this.currentVideoPublicationTrack = nextSource;
     }
   }
 
@@ -1476,14 +1482,20 @@ export class Video {
     const nextSource = this.localStream?.getAudioTracks()[0] || null;
     if (this.currentAudioPublicationTrack === nextSource) return;
 
-    if (this.currentAudioPublicationTrack) {
-      await this.room.localParticipant.unpublishTrack(this.currentAudioPublicationTrack, false);
+    const previousTrack = this.currentAudioPublicationTrack;
+    if (previousTrack) {
+      try {
+        await this.room.localParticipant.unpublishTrack(previousTrack, false);
+      } catch (error) {
+        console.warn('Failed to unpublish previous audio track before source switch', error);
+      }
     }
 
-    this.currentAudioPublicationTrack = nextSource;
+    this.currentAudioPublicationTrack = null;
 
     if (nextSource && this.currentParticipantMetadata?.deviceRole !== 'phone-camera') {
       await this.room.localParticipant.publishTrack(nextSource, this.getAudioPublishOptions(nextSource));
+      this.currentAudioPublicationTrack = nextSource;
     }
   }
 

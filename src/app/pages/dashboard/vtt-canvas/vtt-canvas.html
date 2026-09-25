@@ -381,8 +381,26 @@
           </div>
       </div>
 
-      <div class="turn-order-entries" >
-        <div class="turn-entry" *ngFor="let entry of turnOrder.entries; let i = index" [class.active-entry]="turnOrder.isConfirmed && i === turnOrder.activeIndex">
+      <div
+        class="turn-order-entries"
+        cdkDropList
+        [cdkDropListData]="turnOrder.entries"
+        [cdkDropListDisabled]="!syncService.isHosting || !turnOrder.isConfirmed"
+        (cdkDropListDropped)="reorderTurnOrder($event, turnOrder)">
+        <div
+          class="turn-entry"
+          *ngFor="let entry of turnOrder.entries; let i = index"
+          cdkDrag
+          [cdkDragDisabled]="!syncService.isHosting || !turnOrder.isConfirmed"
+          [class.active-entry]="turnOrder.isConfirmed && i === turnOrder.activeIndex">
+          <button
+            mat-icon-button
+            *ngIf="syncService.isHosting && turnOrder.isConfirmed"
+            cdkDragHandle
+            class="small-icon"
+            title="Reorder turn">
+            <mat-icon>drag_indicator</mat-icon>
+          </button>
           <span class="initiative">{{ entry.initiative }}</span>
           <span class="name">{{ entry.name }}</span>
           <button mat-icon-button *ngIf="syncService.isHosting" (click)="removeTurnOrderEntry(entry.id)" class="small-icon">

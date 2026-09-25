@@ -479,6 +479,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   private deviceReloadTimer: ReturnType<typeof setTimeout> | null = null;
   private isLoadingDevices = false;
   private pendingDeviceReload = false;
+  private isApplyingDeviceChange = false;
+  private pendingDeviceChange = false;
   private readonly deviceReloadDebounceMs = 350;
   private readonly handleDeviceChangeBound = () => {
     this.scheduleDeviceReload();
@@ -1429,12 +1431,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   async onDeviceChange() {
     this.persistMediaPreferences();
-    if (this.localStream) {
-      await this.replaceActiveMediaStream();
+    if (this.isApplyingDeviceChange) {
+      this.pendingDeviceChange = true;
       return;
     }
 
-    await this.startPreview();
+    this.isApplyingDeviceChange = true;
+    try {
+      do {
+        this.pendingDeviceChange = false;
+        if (this.localStream) {
+          await this.replaceActiveMediaStream();
+        } else {
+          await this.startPreview();
+        }
+      } while (this.pendingDeviceChange);
+    } finally {
+      this.isApplyingDeviceChange = false;
+    }
   }
 
   async onMicrophoneProcessingChange() {
@@ -5883,10 +5897,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     nextStream.getVideoTracks().forEach(track => (track.enabled = !this.isVideoOff));
 
     if (this.localStream) {
-      this.localStream.getTracks().forEach(track => track.stop());
+      const previousLocalStream = this.localStream;
       this.localStream = nextStream;
-      await this.videoService.startProducing(nextStream);
-      this.updateLocalVideoDisplay();
+      try {
+        await this.videoService.startProducing(nextStream);
+        this.updateLocalVideoDisplay();
+        previousLocalStream.getTracks().forEach(track => track.stop());
+      } catch (error) {
+        this.localStream = previousLocalStream;
+        nextStream.getTracks().forEach(track => track.stop());
+        throw error;
+      }
     } else {
       if (this.previewStream) {
         this.previewStream.getTracks().forEach(track => track.stop());

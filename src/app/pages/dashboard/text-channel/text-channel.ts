@@ -322,17 +322,27 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   }
 
   scrollToBottom(force = false) {
-    setTimeout(() => {
+    const shouldStickToBottom = force || this.justOpened;
+    const maxAttempts = shouldStickToBottom ? 8 : 1;
+    let attempts = 0;
+
+    const applyScroll = () => {
       if (!this.container) return;
+      if (!(force || this.isAtBottom || this.justOpened)) return;
 
-      if (force || this.isAtBottom || this.justOpened) {
-        this.container.nativeElement.scrollTop =
-          this.container.nativeElement.scrollHeight;
+      this.container.nativeElement.scrollTop = this.container.nativeElement.scrollHeight;
+      this.showNewMessageIndicator = false;
 
-        this.showNewMessageIndicator = false;
-        this.justOpened = false;
+      attempts += 1;
+      if (shouldStickToBottom && attempts < maxAttempts) {
+        setTimeout(applyScroll, 50);
+        return;
       }
-    }, 50);
+
+      this.justOpened = false;
+    };
+
+    setTimeout(applyScroll, 0);
   }
 
   setReply(message: MessageData) {

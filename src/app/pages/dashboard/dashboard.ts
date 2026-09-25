@@ -55,6 +55,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   rightTabs: Tab[] = [];
   allTabs: Tab[] = [];
   draggingTabId: string | null = null;
+  showRightDropZone = false;
   leftWidth = 0;
   isResizing = false;
   canUseTauriPanels = false;
@@ -75,6 +76,7 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
   private suppressNextTabClick = false;
   private hasSeenActiveVttSession = false;
+  private readonly rightDropZoneRevealWidth = 96;
   private readonly subscriptions = new Subscription();
   private externalWindowCloseUnlisten?: UnlistenFn;
   private hasSeenOwnedExternalTabs = false;
@@ -365,17 +367,24 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
   }
 
   onNativeTabDragOver(event: DragEvent) {
-    if (this.isMobile || !this.tabDragTransfer.hasPayload(event)) return;
+    if (this.isMobile || !this.tabDragTransfer.hasPayload(event)) {
+      this.showRightDropZone = false;
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
+    this.updateRightDropZoneVisibility(event);
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'move';
     }
   }
 
   onNativeTabDrop(event: DragEvent, targetPane: TabPane, targetTab?: Tab) {
-    if (this.isMobile) return;
+    if (this.isMobile) {
+      this.showRightDropZone = false;
+      return;
+    }
 
     const payload = this.readNativeTabDrop(event);
     if (!payload) return;
@@ -494,11 +503,14 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
     if (this.tabDragTransfer.hasPayload(event)) {
       event.preventDefault();
       event.stopPropagation();
+      this.updateRightDropZoneVisibility(event);
       if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'move';
       }
       return;
     }
+
+    this.showRightDropZone = false;
 
     if (!this.hasDraggedFiles(event)) return;
 
@@ -647,9 +659,28 @@ export class Dashboard implements OnInit, AfterViewInit, OnDestroy {
 
   private finishNativeTabDrag() {
     this.draggingTabId = null;
+    this.showRightDropZone = false;
     window.setTimeout(() => {
       this.suppressNextTabClick = false;
     });
+  }
+
+  private updateRightDropZoneVisibility(event: DragEvent) {
+    if (this.isMobile || this.rightTabs.length > 0) {
+      this.showRightDropZone = false;
+      return;
+    }
+
+    const editorRect = this.editorAreaRef?.nativeElement.getBoundingClientRect();
+    if (!editorRect) {
+      this.showRightDropZone = false;
+      return;
+    }
+
+    const withinVerticalBounds = event.clientY >= editorRect.top && event.clientY <= editorRect.bottom;
+    const nearRightEdge = event.clientX >= editorRect.right - this.rightDropZoneRevealWidth && withinVerticalBounds;
+    const draggingOverRightPane = (event.currentTarget as HTMLElement | null)?.classList?.contains('right-pane') ?? false;
+    this.showRightDropZone = draggingOverRightPane || nearRightEdge;
   }
 
   private isBlockedLiveCallTransfer(payload: TabDragPayload): boolean {

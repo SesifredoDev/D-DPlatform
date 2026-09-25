@@ -14,6 +14,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import {VttEngine} from '../../../shared/modules/vttEngine/VttEngine';
 import {Subscription, Observable, firstValueFrom} from 'rxjs';
 import {TabService} from '../../../shared/services/tab/tab-service';
@@ -83,7 +84,8 @@ export class VttHostTakeoverDialog {
     NgForOf, NgIf, AsyncPipe,
     MatIconButton, MatButton, MatIcon, MatMenuModule,
     FormsModule, MatFormFieldModule, MatInputModule,
-    MatCheckboxModule, MatSelectModule, MatTooltipModule, MatSnackBarModule
+    MatCheckboxModule, MatSelectModule, MatTooltipModule, MatSnackBarModule,
+    DragDropModule
   ],
   templateUrl: './vtt-canvas.html',
   styleUrl: './vtt-canvas.scss',
@@ -1366,6 +1368,26 @@ export class VttCanvas implements AfterViewInit, OnDestroy, OnChanges, OnInit {
 
   removeTurnOrderEntry(entryId: string) {
     this.syncService.removeTurnOrderEntry(entryId);
+  }
+
+  reorderTurnOrder(event: CdkDragDrop<TurnOrderEntry[]>, turnOrder: TurnOrderState) {
+    if (!this.syncService.isHosting || !turnOrder.isConfirmed) return;
+    if (event.previousIndex === event.currentIndex) return;
+
+    const reorderedEntries = [...turnOrder.entries];
+    const activeEntryId = reorderedEntries[turnOrder.activeIndex]?.id ?? null;
+
+    moveItemInArray(reorderedEntries, event.previousIndex, event.currentIndex);
+
+    const nextActiveIndex = activeEntryId
+      ? Math.max(0, reorderedEntries.findIndex(entry => entry.id === activeEntryId))
+      : 0;
+
+    this.syncService.updateTurnOrder({
+      ...turnOrder,
+      entries: reorderedEntries,
+      activeIndex: nextActiveIndex
+    });
   }
 
   toggleTurnOrderMinimize() {
