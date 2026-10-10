@@ -364,11 +364,22 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   async playCurrentSelection() {
-    await this.playMoodFilteredPlaylist(this.selectedMood || '', this.selectedAtmosphere || '');
+    const mood = (this.selectedMood || '').trim();
+    const atmosphere = (this.selectedAtmosphere || '').trim();
+
+    if (!mood && !atmosphere) {
+      this.libraryMessage = 'Select a mood or atmosphere before playing.';
+      return;
+    }
+
+    await this.playMoodFilteredPlaylist(mood, atmosphere);
   }
 
   private async loadMoodPlaylistTracks() {
-    if (!this.selectedMood || !this.selectedAtmosphere) {
+    const mood = (this.selectedMood || '').trim();
+    const atmosphere = (this.selectedAtmosphere || '').trim();
+
+    if (!mood && !atmosphere) {
       this.moodPlaylistTracks = [];
       return;
     }
@@ -376,7 +387,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     this.isLoadingMoodPlaylist = true;
     try {
       const songs = await firstValueFrom(
-        this.playlistService.getSongsByMoodAndAtmosphere(this.selectedMood, this.selectedAtmosphere || '')
+        this.playlistService.getSongsByMoodAndAtmosphere(mood, atmosphere)
       );
       this.moodPlaylistTracks = songs.map(song => this.toTrackMetadata(song));
     } catch {
@@ -393,9 +404,13 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
         this.playlistService.getSongsByMoodAndAtmosphere(mood, atmosphere)
       );
       if (!songs.length) {
-        this.libraryMessage = atmosphere
-          ? 'No songs match that mood and atmosphere.'
-          : 'No songs match that mood.';
+        if (mood && atmosphere) {
+          this.libraryMessage = 'No songs match that mood and atmosphere.';
+        } else if (mood) {
+          this.libraryMessage = 'No songs match that mood.';
+        } else {
+          this.libraryMessage = 'No songs match that atmosphere.';
+        }
         return;
       }
 
