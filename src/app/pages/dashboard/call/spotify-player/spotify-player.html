@@ -4,29 +4,12 @@
     <div class="spotify-header">
       <div class="title-with-icon">
         <svg viewBox="0 0 24 24" width="22" height="22" class="spotify-icon"><path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4C9.11 4 6.6 5.64 5.35 8.04C2.34 8.36 0 10.91 0 14C0 17.31 2.69 20 6 20H19C21.76 20 24 17.76 24 15C24 12.36 21.95 10.22 19.35 10.04Z"/></svg>
-        <h3 (click)="clearSearch()" style="cursor: pointer">SoundCloud</h3>
+        <h3 (click)="clearSearch()" style="cursor: pointer">Music</h3>
       </div>
       <div class="header-actions">
-        <!-- Pinned Pulldown Trigger -->
-        <button *ngIf="!isTab" (click)="showPinnedPulldown = !showPinnedPulldown" class="header-btn" [class.active]="showPinnedPulldown" title="Pinned Items">
-          <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-        </button>
 
         <button *ngIf="!isTab" (click)="openAsTab()" class="header-btn" title="Open in Workspace">
           <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M10,21V19H3V5H10V3H3C1.9,3 1,3.9 1,5V19C1,20.1 1.9,21 3,21H10M11,7L9.6,8.4L12.2,11H5V13H12.2L9.6,15.6L11,17L16,12L11,7M18,3V21H20V3H18Z" /></svg>
-        </button>
-        <button (click)="refreshThumbnails()" class="header-btn" [class.active]="isRefreshingThumbnails" [disabled]="isRefreshingThumbnails" title="Refresh thumbnails">
-          <svg viewBox="0 0 24 24" width="18" class="refresh-icon" [class.spinning]="isRefreshingThumbnails"><path fill="currentColor" d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.82,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z" /></svg>
-        </button>
-        <button (click)="downloadMusicList()" class="header-btn" title="Download music list">
-          <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z" /></svg>
-        </button>
-        <button (click)="musicListInput.click()" class="header-btn" title="Upload music list">
-          <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M5,20H19V18H5M19,13H15V19H9V13H5L12,6L19,13Z" /></svg>
-        </button>
-        <input #musicListInput type="file" accept="application/json,.json" class="file-input" (change)="uploadMusicList($event)">
-        <button (click)="showDevicePicker = !showDevicePicker" class="header-btn" [class.active]="showDevicePicker" title="Available Devices">
-          <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M16 1h-8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2v-14c0-1.1-.9-2-2-2zm-4 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm4-7h-8v-7h8v7zm-9 10v2h10v-2h-10z"/></svg>
         </button>
         <button *ngIf="!isTab" (click)="close.emit()" class="header-btn close-btn">&times;</button>
       </div>
@@ -67,170 +50,152 @@
             </div>
             <div class="device-info">
               <div class="device-name">{{device.name}}</div>
-              <div class="device-status">{{device.is_active ? 'Currently Playing' : 'SoundCloud Player'}}</div>
+              <div class="device-status">{{device.is_active ? 'Currently Playing' : 'Music Player'}}</div>
             </div>
           </div>
-          <div *ngIf="!(spotify.devices$ | async)?.length" class="empty-hint">No SoundCloud player is ready yet.</div>
+          <div *ngIf="!(spotify.devices$ | async)?.length" class="empty-hint">No music player is ready yet.</div>
         </div>
+      </div>
+    </div>
+    <div class="device-picker-overlay" *ngIf="showAttributionInfo" (click)="closeAttributionInfo()">
+      <div class="device-picker" (click)="$event.stopPropagation()">
+        <div class="pulldown-header">
+          <span>Attribution</span>
+          <button class="close-pulldown" (click)="closeAttributionInfo()">&times;</button>
+        </div>
+        <div class="library-message" [innerHTML]="attributionInfoHtml"></div>
       </div>
     </div>
 
     <!-- Main Content Area -->
     <div class="player-content">
 
-      <!-- Sidebar (Library) - Visible in Tab mode -->
-      <aside class="sidebar-nav" *ngIf="isTab">
-        <div class="nav-tabs">
-          <button (click)="activeSidebarTab = 'playlists'" [class.active]="activeSidebarTab === 'playlists'">Library</button>
-          <button (click)="activeSidebarTab = 'tracks'" [class.active]="activeSidebarTab === 'tracks'">Tracks</button>
-          <button (click)="activeSidebarTab = 'pinned'" [class.active]="activeSidebarTab === 'pinned'">Pinned</button>
-        </div>
-
-        <div class="nav-content">
-          <!-- Library Playlists -->
-          <div *ngIf="activeSidebarTab === 'playlists'" class="list-container">
-            <div *ngFor="let pl of spotify.savedPlaylists$ | async" class="nav-item" [class.highlighted]="isHighlighted(pl)">
-              <img [src]="pl.images?.[0]?.url || 'assets/playlist-placeholder.png'" (error)="onImageError($event, 'assets/playlist-placeholder.png')" (click)="playTrack({uri: pl.uri, type: 'playlist'})">
-              <div class="nav-info" (click)="playTrack({uri: pl.uri, type: 'playlist'})">
-                <div class="nav-name">{{pl.name}}</div>
-                <div class="nav-sub">Playlist</div>
-              </div>
-              <button class="pin-btn" (click)="spotify.togglePin(pl)" [class.pinned]="spotify.isPinned(pl.uri)">
-                <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-              </button>
-              <button class="pin-btn remove-btn" (click)="removeSavedItem(pl, $event)" title="Remove">
-                <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z" /></svg>
-              </button>
-            </div>
-            <div *ngIf="(spotify.savedPlaylists$ | async)?.length === 0" class="empty-hint">
-              Paste playlist links to save them here.
-            </div>
-          </div>
-
-          <!-- Saved Tracks -->
-          <div *ngIf="activeSidebarTab === 'tracks'" class="list-container">
-            <div *ngFor="let item of spotify.recentPlays$ | async" class="nav-item" [class.highlighted]="isHighlighted(item)" (click)="playTrack(item)">
-              <img [src]="item.track?.album?.images?.[0]?.url || 'assets/spotify-placeholder.png'" (error)="onImageError($event)">
-              <div class="nav-info">
-                <div class="nav-name">{{item.track?.name}}</div>
-                <div class="nav-sub">{{item.track?.artists?.[0]?.name}}</div>
-              </div>
-              <button class="pin-btn remove-btn" (click)="removeSavedItem(item, $event)" title="Remove">
-                <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z" /></svg>
-              </button>
-            </div>
-            <div *ngIf="(spotify.recentPlays$ | async)?.length === 0" class="empty-hint">
-              Paste track links to save them here.
-            </div>
-          </div>
-
-          <!-- Pinned Items -->
-          <div *ngIf="activeSidebarTab === 'pinned'" class="list-container">
-            <div *ngFor="let p of spotify.pinnedItems$ | async" class="nav-item" [class.highlighted]="isHighlighted(p)">
-              <img [src]="p.image" (error)="onImageError($event, p.type === 'playlist' ? 'assets/playlist-placeholder.png' : 'assets/spotify-placeholder.png')" (click)="playTrack({uri: p.uri})">
-              <div class="nav-info" (click)="playTrack({uri: p.uri})">
-                <div class="nav-name">{{p.name}}</div>
-                <div class="nav-sub">{{p.owner}}</div>
-              </div>
-              <button class="pin-btn pinned" (click)="spotify.togglePin(p)">
-                <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-              </button>
-            </div>
-            <div *ngIf="(spotify.pinnedItems$ | async)?.length === 0" class="empty-hint">
-              Pin items to find them here easily.
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <!-- Search & Results Workspace -->
       <div class="main-workspace">
         <div class="search-section">
-          <div class="search-box">
-            <input type="text" [(ngModel)]="spotifySearch" (ngModelChange)="onSearchInputChange()" placeholder="Paste a SoundCloud track, playlist, or user URL" (keyup.enter)="doSpotifySearch()">
-            <button (click)="doSpotifySearch()" class="btn-search">{{ searchActionLabel }}</button>
-          </div>
+          <section class="mood-browser">
+            <div class="mood-browser-header">
+              <div class="view-mode-toggle">
+                <button
+                  class="mode-btn"
+                  [class.active]="selectionMode === 'mood-first'"
+                  (click)="setSelectionMode('mood-first')">
+                  Mood / Atmosphere
+                </button>
+                <button
+                  class="mode-btn"
+                  [class.active]="selectionMode === 'atmosphere-first'"
+                  (click)="setSelectionMode('atmosphere-first')">
+                  Atmosphere / Mood
+                </button>
+              </div>
+
+              <div class="selection-path selection-path--intro" *ngIf="!selectedMood && !selectedAtmosphere">
+                <h4>{{ selectionMode === 'mood-first' ? 'Select Mood' : 'Select Atmosphere' }}</h4>
+                <p>{{ selectionMode === 'mood-first' ? 'Choose a mood cover to open atmospheres.' : 'Choose an atmosphere cover to open moods.' }}</p>
+              </div>
+              <div class="selection-path" *ngIf="selectedMood || selectedAtmosphere">
+                <ng-container *ngIf="selectionMode === 'mood-first'">
+                  <button class="path-btn" (click)="clearMoodSelection()">Moods</button>
+                  <span *ngIf="selectedMood">/</span>
+                  <span class="path-current" *ngIf="selectedMood">{{ selectedMood }}</span>
+                  <ng-container *ngIf="selectedAtmosphere">
+                    <span>/</span>
+                    <button class="path-btn" (click)="clearAtmosphereSelection()">{{ selectedAtmosphere }}</button>
+                  </ng-container>
+                </ng-container>
+
+                <ng-container *ngIf="selectionMode === 'atmosphere-first'">
+                  <button class="path-btn" (click)="clearAtmosphereSelection()">Atmospheres</button>
+                  <span *ngIf="selectedAtmosphere">/</span>
+                  <span class="path-current" *ngIf="selectedAtmosphere">{{ selectedAtmosphere }}</span>
+                  <ng-container *ngIf="selectedMood">
+                    <span>/</span>
+                    <button class="path-btn" (click)="clearMoodSelection()">{{ selectedMood }}</button>
+                  </ng-container>
+                </ng-container>
+              </div>
+
+              <div class="selection-actions">
+                <button
+                  class="btn-search mood-action mood-action--back"
+                  (click)="goBackSelection()"
+                  [disabled]="!selectedMood && !selectedAtmosphere">
+                  Back
+                </button>
+                <button class="btn-search mood-action mood-action--primary" (click)="playCurrentSelection()">
+                  Play
+                </button>
+              </div>
+            </div>
+
+            <div class="catalog-grid" *ngIf="selectionMode === 'mood-first' && !selectedMood">
+              <button
+                *ngFor="let mood of availableMoodCards"
+                class="catalog-card"
+                (click)="selectMood(mood.name)">
+                <img [src]="mood.cover || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" alt="">
+<!--                <div class="catalog-name">{{ mood.name }}</div>-->
+              </button>
+              <div *ngIf="!availableMoodCards.length" class="empty-hint">No moods available.</div>
+            </div>
+
+            <div class="catalog-grid" *ngIf="selectionMode === 'mood-first' && selectedMood && !selectedAtmosphere">
+              <button
+                *ngFor="let atmosphere of availableAtmosphereCards"
+                class="catalog-card"
+                (click)="selectAtmosphere(atmosphere.name)">
+                <img [src]="atmosphere.cover || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" alt="">
+<!--                <div class="catalog-name">{{ atmosphere.name }}</div>-->
+              </button>
+              <div *ngIf="!availableAtmosphereCards.length" class="empty-hint">No atmospheres available for this mood.</div>
+            </div>
+
+            <div class="catalog-grid" *ngIf="selectionMode === 'atmosphere-first' && !selectedAtmosphere">
+              <button
+                *ngFor="let atmosphere of availableAtmosphereCards"
+                class="catalog-card"
+                (click)="selectAtmosphere(atmosphere.name)">
+                <img [src]="atmosphere.cover || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" alt="">
+<!--                <div class="catalog-name">{{ atmosphere.name }}</div>-->
+              </button>
+              <div *ngIf="!availableAtmosphereCards.length" class="empty-hint">No atmospheres available.</div>
+            </div>
+
+            <div class="catalog-grid" *ngIf="selectionMode === 'atmosphere-first' && selectedAtmosphere && !selectedMood">
+              <button
+                *ngFor="let mood of availableMoodCards"
+                class="catalog-card"
+                (click)="selectMood(mood.name)">
+                <img [src]="mood.cover || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" alt="">
+<!--                <div class="catalog-name">{{ mood.name }}</div>-->
+              </button>
+              <div *ngIf="!availableMoodCards.length" class="empty-hint">No moods available for this atmosphere.</div>
+            </div>
+
+            <div class="playlist-preview" *ngIf="selectedMood && selectedAtmosphere">
+              <div class="preview-header">
+                <h4>Songs to Play</h4>
+                <span class="count-pill">{{ moodPlaylistTracks.length }}</span>
+              </div>
+              <div class="preview-list" *ngIf="!isLoadingMoodPlaylist && moodPlaylistTracks.length">
+                <button *ngFor="let track of moodPlaylistTracks" class="preview-item" (click)="playTrack(track)">
+                  <img [src]="track.image || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" alt="">
+                  <div class="track-info">
+                    <div class="name">{{ track.name }}</div>
+                    <div class="artist">{{ track.artist }}</div>
+                  </div>
+                </button>
+              </div>
+              <div *ngIf="isLoadingMoodPlaylist" class="empty-hint">Loading songs...</div>
+              <div *ngIf="!isLoadingMoodPlaylist && !moodPlaylistTracks.length" class="empty-hint">
+                No songs are available for this mood and atmosphere.
+              </div>
+            </div>
+          </section>
 
           <div *ngIf="libraryMessage" class="library-message">
             {{ libraryMessage }}
           </div>
-
-          <div class="workspace-tabs">
-            <div class="search-categories" *ngIf="!showQueue && !showProfile">
-              <button *ngFor="let cat of categories" [class.active]="activeCategory === cat.id" (click)="activeCategory = cat.id" class="cat-btn">{{cat.label}}</button>
-            </div>
-            <div class="profile-header-tab" *ngIf="showProfile && profileData">
-                <button (click)="showProfile = false" class="back-btn"><svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z" /></svg></button>
-                <img [src]="profileData.images?.[0]?.url || 'assets/spotify-placeholder.png'" (error)="onImageError($event)">
-                <span>{{profileData.name || profileData.display_name}}</span>
-                <button class="pin-profile-btn" (click)="spotify.togglePin({uri: profileData.uri, name: profileData.name || profileData.display_name, type: profileData.type, id: profileData.id, images: profileData.images})" [class.pinned]="spotify.isPinned(profileData.uri)">
-                    <svg viewBox="0 0 24 24" width="16"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-                </button>
-            </div>
-            <button class="queue-toggle-btn" [class.active]="showQueue" (click)="showQueue = !showQueue">
-              <svg viewBox="0 0 24 24" width="18"><path fill="currentColor" d="M15,15H17V11H15V15M11,15H13V11H11V15M7,15H9V11H7V15M3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3H5A2,2 0 0,0 3,5M5,5H19V19H5V5Z" /></svg>
-              <span>Queue</span>
-            </button>
-          </div>
-
-          <!-- Queue View -->
-          <div class="queue-container" *ngIf="showQueue">
-            <h4>Next Up</h4>
-            <div class="results-list">
-              <div *ngFor="let item of spotify.queue$ | async" class="queue-item">
-                <img [src]="item.album?.images?.[0]?.url || 'assets/spotify-placeholder.png'" (error)="onImageError($event)" class="mini-thumb">
-                <div class="track-info">
-                  <div class="name">{{item.name}}</div>
-                  <div class="artist">{{item.artists?.[0]?.name || item.artist}}</div>
-                </div>
-              </div>
-              <div *ngIf="!(spotify.queue$ | async)?.length" class="empty-hint">Your queue is empty.</div>
-            </div>
-          </div>
-
-          <!-- Profile Content -->
-          <div class="results" *ngIf="showProfile && !isLoading && !showQueue">
-             <div *ngFor="let item of profileItems" class="result-item" [class.highlighted]="isHighlighted(item)" (click)="playTrack(item)">
-                <img [src]="item.image || 'assets/spotify-placeholder.png'" (error)="onImageError($event, item.type === 'playlist' ? 'assets/playlist-placeholder.png' : 'assets/spotify-placeholder.png')" class="thumb">
-                <div class="track-info">
-                  <div class="name">{{item.name}}</div>
-                  <div class="artist">{{item.artist || item.owner}}</div>
-                </div>
-                <div class="result-actions">
-                  <div class="type-badge">{{item.type}}</div>
-                  <button (click)="$event.stopPropagation(); spotify.togglePin(item)" [class.pinned]="spotify.isPinned(item.uri)">
-                    <svg viewBox="0 0 24 24" width="14"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-                  </button>
-                  <button class="remove-btn" (click)="removeSavedItem(item, $event)" title="Remove">
-                    <svg viewBox="0 0 24 24" width="14"><path fill="currentColor" d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z" /></svg>
-                  </button>
-                </div>
-             </div>
-          </div>
-
-          <!-- Search Results Grid -->
-          <div class="results" *ngIf="filteredResults.length && !isLoading && !showQueue && !showProfile">
-            <div *ngFor="let item of filteredResults" class="result-item" [class.highlighted]="isHighlighted(item)" (click)="playTrack(item)">
-              <img [src]="item.image || 'assets/spotify-placeholder.png'" (error)="onImageError($event, item.type === 'playlist' ? 'assets/playlist-placeholder.png' : 'assets/spotify-placeholder.png')" class="thumb">
-              <div class="track-info">
-                <div class="name">{{item.name}}</div>
-                <div class="artist">{{item.artist || item.owner}}</div>
-              </div>
-              <div class="result-actions">
-                <div class="type-badge">{{item.type}}</div>
-                <button (click)="$event.stopPropagation(); spotify.togglePin(item)" [class.pinned]="spotify.isPinned(item.uri)">
-                  <svg viewBox="0 0 24 24" width="14"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,23L12.8,16H18V14L16,12Z" /></svg>
-                </button>
-                <button class="remove-btn" (click)="removeSavedItem(item, $event)" title="Remove">
-                  <svg viewBox="0 0 24 24" width="14"><path fill="currentColor" d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z" /></svg>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div *ngIf="isLoading" class="empty-hint">Searching...</div>
-          <div *ngIf="!filteredResults.length && !isLoading && spotifySearch && !showQueue && !showProfile" class="empty-hint">No saved SoundCloud items match "{{spotifySearch}}". Paste a SoundCloud URL and press Add to save it.</div>
-          <div *ngIf="!filteredResults.length && !isLoading && !spotifySearch && !showQueue && !showProfile" class="empty-hint">Paste a SoundCloud track, playlist, or user URL. Search filters your saved library.</div>
         </div>
 
         <!-- Playback Footer -->
@@ -242,6 +207,12 @@
               <div class="details">
                 <div class="title">{{track.name}}</div>
                 <div class="artist">{{track.artists?.[0]?.name || track.artist}}</div>
+                <button
+                  class="track-attribution-btn"
+                  title="View attribution"
+                  (click)="openAttributionInfo(track)">
+                  Attribution
+                </button>
               </div>
             </ng-container>
             <ng-template #noTrack>
@@ -293,7 +264,7 @@
                 (ngModelChange)="seekPlayback($event)"
                 [disabled]="!canControlPlayback || !((spotify.playbackDurationMs$ | async) ?? 0)"
                 [title]="playbackControlTitle"
-                aria-label="SoundCloud playback timeline"
+                aria-label="Music playback timeline"
               >
               <span>{{ formatPlaybackTime((spotify.playbackDurationMs$ | async) ?? 0) }}</span>
             </div>

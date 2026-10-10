@@ -5608,11 +5608,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       await this.spotify.play(request.uri, 0, false, undefined, {
         name: request.name,
         artist: request.artist,
-        image: request.image
+        image: request.image,
+        fileName: request.fileName,
+        moods: request.moods,
+        atmosphere: request.atmosphere
       });
       this.removeRequest(request);
     } catch {
-      this.snackBar.open('Could not play that SoundCloud request.', 'Close', {
+      this.snackBar.open('Could not play that music request.', 'Close', {
         duration: 3000
       });
     }

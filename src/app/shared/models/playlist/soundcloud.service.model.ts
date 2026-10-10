@@ -1,14 +1,29 @@
+export interface Tag {
+  name: string;
+  description: string;
+  cover: string;
+}
+
+export interface MTag extends Tag {}
+export interface ATag extends Tag {}
+
 export interface SoundCloudSearchResult {
   id: string;
   name: string;
   uri: string;
   type: 'track' | 'playlist' | 'album' | 'artist' | 'show' | 'episode' | 'audiobook' | 'user';
   image: string;
+  source?: 'service' | 'external';
   artist?: string;
   artistId?: string;
   owner?: string;
   ownerId?: string;
   publisher?: string;
+  cover?: string;
+  fileName?: string;
+  attribution?: string;
+  moods?: MTag[];
+  atmosphere?: ATag[];
   album?: { images: { url: string }[] };
   artists?: { id?: string; name: string }[];
   images?: { url: string }[];

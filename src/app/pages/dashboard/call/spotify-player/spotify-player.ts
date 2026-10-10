@@ -4,12 +4,22 @@ import {
   SoundCloudSearchResult,
   SoundCloudMusicListImportResult
 } from '../../../../shared/services/playlist/soundcloud.service';
+import { PlaylistService, Song } from '../../../../shared/services/playlist/playlist-service';
 import { TabService } from '../../../../shared/services/tab/tab-service';
 import { Video } from '../../../../shared/services/video/video';
 import { FormsModule } from '@angular/forms';
 import { NgForOf, NgIf, AsyncPipe } from '@angular/common';
-import { Subscription } from 'rxjs';
+import { Subscription, firstValueFrom } from 'rxjs';
 import type { ResultGroup, SidebarTab, SoundCloudPlayerUiState } from '../../../../shared/models/pages/dashboard/call/spotify-player/spotify-player.model';
+
+interface TagGridCard {
+  name: string;
+  cover: string;
+  description: string;
+}
+
+type SelectionMode = 'mood-first' | 'atmosphere-first';
+
 @Component({
   selector: 'app-spotify-player',
   templateUrl: './spotify-player.html',
@@ -18,7 +28,7 @@ import type { ResultGroup, SidebarTab, SoundCloudPlayerUiState } from '../../../
   imports: [FormsModule, NgForOf, NgIf, AsyncPipe]
 })
 export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
-  private static readonly uiStateStorageKey = 'dd-platform.soundcloud-player.tab-ui-state';
+  private static readonly uiStateStorageKey = 'dd-platform.music-player.tab-ui-state';
 
   @Input() isCallActive: boolean = false;
   @Input() isTab: boolean = false;
@@ -37,6 +47,17 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   activeSidebarTab: SidebarTab = 'playlists';
   libraryMessage: string = '';
   highlightedUris = new Set<string>();
+  availableMoods: string[] = [];
+  availableAtmospheres: string[] = [];
+  availableMoodCards: TagGridCard[] = [];
+  availableAtmosphereCards: TagGridCard[] = [];
+  selectionMode: SelectionMode = 'mood-first';
+  selectedMood: string = '';
+  selectedAtmosphere: string = '';
+  moodPlaylistTracks: Array<Partial<SoundCloudSearchResult>> = [];
+  isLoadingMoodPlaylist: boolean = false;
+  showAttributionInfo: boolean = false;
+  attributionInfoHtml: string = '';
 
   // Profile View
   showProfile: boolean = false;
@@ -51,6 +72,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   constructor(
     public spotify: SoundCloudService,
+    private playlistService: PlaylistService,
     private tabService: TabService,
     private videoService: Video
   ) {}
@@ -61,9 +83,13 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   private searchRequestId = 0;
   private loadingRequestId = 0;
   private isDestroyed = false;
+  private songCatalog: Song[] = [];
+  private allMoodCards: TagGridCard[] = [];
+  private allAtmosphereCards: TagGridCard[] = [];
 
   ngOnInit() {
     this.restoreUiState();
+    void this.loadMoodOptions();
     this.savedItemsSub = this.spotify.savedItems$.subscribe(() => {
       void this.refreshSavedSearch().catch(() => undefined);
     });
@@ -82,13 +108,13 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       return;
     }
 
-    if (this.isSoundCloudLink(query) && this.spotify.isUserPlaylistSourceUrl(query)) {
+    if (this.isMediaLink(query) && this.spotify.isUserPlaylistSourceUrl(query)) {
       await this.importUserPlaylists(query);
       return;
     }
 
-    if (this.isSoundCloudLink(query)) {
-      await this.saveSoundCloudLink(query);
+    if (this.isMediaLink(query)) {
+      await this.saveMusicLink(query);
       return;
     }
 
@@ -103,10 +129,10 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
       this.applyResults(results);
       this.activeCategory = 'all';
-      this.libraryMessage = results.length ? '' : `No saved SoundCloud items match "${query}".`;
+      this.libraryMessage = results.length ? '' : `No saved songs match "${query}".`;
     } catch {
       if (this.isCurrentSearchRequest(requestId)) {
-        this.libraryMessage = 'Could not search your saved SoundCloud library.';
+        this.libraryMessage = 'Could not search your saved music library.';
       }
     } finally {
       if (!this.isDestroyed && this.loadingRequestId === requestId) {
@@ -115,7 +141,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     }
   }
 
-  private async saveSoundCloudLink(uri: string) {
+  private async saveMusicLink(uri: string) {
     this.isLoading = true;
     this.showProfile = false;
     this.showQueue = false;
@@ -135,7 +161,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       this.libraryMessage = `Saved ${item.type}: ${item.name}`;
       await this.refreshSavedSearch();
     } catch {
-      this.libraryMessage = 'Could not save that SoundCloud link.';
+      this.libraryMessage = 'Could not save that audio link.';
     } finally {
       this.isLoading = false;
     }
@@ -145,7 +171,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     this.isLoading = true;
     this.showProfile = false;
     this.showQueue = false;
-    this.libraryMessage = 'Importing public SoundCloud playlists...';
+    this.libraryMessage = 'Importing playlists...';
     try {
       const result = await this.spotify.addUserPlaylistsFromUrl(uri);
       this.spotifySearch = '';
@@ -157,7 +183,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       }
 
       if (!result.discoveredCount) {
-        this.libraryMessage = 'No public playlists were found for that SoundCloud user.';
+        this.libraryMessage = 'No playlists were found for that source.';
         return;
       }
 
@@ -168,7 +194,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
       this.libraryMessage = `Added ${result.added.length} playlist${result.added.length === 1 ? '' : 's'}${result.duplicates.length ? ` and highlighted ${result.duplicates.length} duplicate${result.duplicates.length === 1 ? '' : 's'}` : ''}.`;
     } catch {
-      this.libraryMessage = 'Could not import playlists for that SoundCloud user.';
+      this.libraryMessage = 'Could not import playlists from that source.';
     } finally {
       this.isLoading = false;
     }
@@ -176,18 +202,262 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
 
   async refreshSavedSearch() {
     const requestId = ++this.searchRequestId;
-    const query = this.isSoundCloudLink(this.spotifySearch) ? '' : this.spotifySearch.trim();
+    const query = this.isMediaLink(this.spotifySearch) ? '' : this.spotifySearch.trim();
     try {
       const results = await this.spotify.search(query);
       if (!this.isCurrentSearchRequest(requestId)) return;
 
       this.applyResults(results);
       this.activeCategory = 'all';
+      void this.loadMoodOptions();
     } catch {
       if (this.isCurrentSearchRequest(requestId)) {
-        this.libraryMessage = 'Could not refresh your saved SoundCloud library.';
+        this.libraryMessage = 'Could not refresh your saved music library.';
       }
     }
+  }
+
+  async loadMoodOptions() {
+    try {
+      this.songCatalog = await firstValueFrom(this.playlistService.getSongs());
+      this.allMoodCards = this.extractTagGridCards(
+        this.songCatalog.flatMap(song => song.moods ?? [])
+      );
+      this.allAtmosphereCards = this.extractTagGridCards(
+        this.songCatalog.flatMap(song => song.atmosphere ?? [])
+      );
+      this.syncSelectionCards();
+      await this.loadMoodPlaylistTracks();
+    } catch {
+      this.songCatalog = [];
+      this.availableMoods = [];
+      this.availableAtmospheres = [];
+      this.availableMoodCards = [];
+      this.availableAtmosphereCards = [];
+      this.allMoodCards = [];
+      this.allAtmosphereCards = [];
+      this.selectedMood = '';
+      this.selectedAtmosphere = '';
+      this.moodPlaylistTracks = [];
+    }
+  }
+
+  setSelectionMode(mode: SelectionMode) {
+    if (this.selectionMode === mode) return;
+    this.selectionMode = mode;
+    this.selectedMood = '';
+    this.selectedAtmosphere = '';
+    this.moodPlaylistTracks = [];
+    this.syncSelectionCards();
+  }
+
+  async onMoodChange() {
+    this.syncSelectionCards();
+    await this.loadMoodPlaylistTracks();
+  }
+
+  private syncSelectionCards() {
+    if (!this.songCatalog.length) {
+      this.availableMoodCards = [];
+      this.availableAtmosphereCards = [];
+      this.availableMoods = [];
+      this.availableAtmospheres = [];
+      return;
+    }
+
+    if (this.selectionMode === 'mood-first') {
+      this.availableMoodCards = [...this.allMoodCards];
+      this.availableMoods = this.availableMoodCards.map(card => card.name);
+      this.availableAtmosphereCards = this.selectedMood
+        ? this.extractTagGridCards(this.getSongsByMood(this.selectedMood).flatMap(song => song.atmosphere ?? []))
+        : [...this.allAtmosphereCards];
+      this.availableAtmospheres = this.availableAtmosphereCards.map(card => card.name);
+
+      if (this.selectedMood && !this.availableMoods.includes(this.selectedMood)) {
+        this.selectedMood = '';
+      }
+      if (this.selectedAtmosphere && !this.availableAtmospheres.includes(this.selectedAtmosphere)) {
+        this.selectedAtmosphere = '';
+      }
+      return;
+    }
+
+    this.availableAtmosphereCards = [...this.allAtmosphereCards];
+    this.availableAtmospheres = this.availableAtmosphereCards.map(card => card.name);
+    this.availableMoodCards = this.selectedAtmosphere
+      ? this.extractTagGridCards(this.getSongsByAtmosphere(this.selectedAtmosphere).flatMap(song => song.moods ?? []))
+      : [...this.allMoodCards];
+    this.availableMoods = this.availableMoodCards.map(card => card.name);
+
+    if (this.selectedAtmosphere && !this.availableAtmospheres.includes(this.selectedAtmosphere)) {
+      this.selectedAtmosphere = '';
+    }
+    if (this.selectedMood && !this.availableMoods.includes(this.selectedMood)) {
+      this.selectedMood = '';
+    }
+  }
+
+  async selectMood(mood: string) {
+    if (this.selectedMood === mood) return;
+    this.selectedMood = mood;
+
+    if (this.selectionMode === 'mood-first') {
+      this.selectedAtmosphere = '';
+    }
+
+    this.moodPlaylistTracks = [];
+    this.syncSelectionCards();
+    await this.loadMoodPlaylistTracks();
+  }
+
+  async selectAtmosphere(atmosphere: string) {
+    if (this.selectedAtmosphere === atmosphere) return;
+    this.selectedAtmosphere = atmosphere;
+
+    if (this.selectionMode === 'atmosphere-first') {
+      this.selectedMood = '';
+    }
+
+    this.syncSelectionCards();
+    await this.loadMoodPlaylistTracks();
+  }
+
+  clearMoodSelection() {
+    this.selectedMood = '';
+    if (this.selectionMode === 'mood-first') {
+      this.selectedAtmosphere = '';
+    }
+    this.moodPlaylistTracks = [];
+    this.syncSelectionCards();
+  }
+
+  clearAtmosphereSelection() {
+    this.selectedAtmosphere = '';
+    if (this.selectionMode === 'atmosphere-first') {
+      this.selectedMood = '';
+    }
+    this.moodPlaylistTracks = [];
+    this.syncSelectionCards();
+  }
+
+  goBackSelection() {
+    if (this.selectionMode === 'mood-first') {
+      if (this.selectedAtmosphere) {
+        this.clearAtmosphereSelection();
+        return;
+      }
+
+      if (this.selectedMood) {
+        this.clearMoodSelection();
+      }
+      return;
+    }
+
+    if (this.selectedMood) {
+      this.clearMoodSelection();
+      return;
+    }
+
+    if (this.selectedAtmosphere) {
+      this.clearAtmosphereSelection();
+    }
+  }
+
+  async playCurrentSelection() {
+    await this.playMoodFilteredPlaylist(this.selectedMood || '', this.selectedAtmosphere || '');
+  }
+
+  private async loadMoodPlaylistTracks() {
+    if (!this.selectedMood || !this.selectedAtmosphere) {
+      this.moodPlaylistTracks = [];
+      return;
+    }
+
+    this.isLoadingMoodPlaylist = true;
+    try {
+      const songs = await firstValueFrom(
+        this.playlistService.getSongsByMoodAndAtmosphere(this.selectedMood, this.selectedAtmosphere || '')
+      );
+      this.moodPlaylistTracks = songs.map(song => this.toTrackMetadata(song));
+    } catch {
+      this.moodPlaylistTracks = [];
+    } finally {
+      this.isLoadingMoodPlaylist = false;
+    }
+  }
+
+  private async playMoodFilteredPlaylist(mood: string, atmosphere: string) {
+    this.closeAttributionInfo();
+    try {
+      const songs = await firstValueFrom(
+        this.playlistService.getSongsByMoodAndAtmosphere(mood, atmosphere)
+      );
+      if (!songs.length) {
+        this.libraryMessage = atmosphere
+          ? 'No songs match that mood and atmosphere.'
+          : 'No songs match that mood.';
+        return;
+      }
+
+      const shuffledSongs = this.shuffleSongs([...songs]);
+
+      if (!this.isServerOwner && this.isCallActive) {
+        const sent = await this.videoService.sendSoundCloudRequest(this.toPlaylistRequestTrack(shuffledSongs[0]), this.userName);
+        this.libraryMessage = sent
+          ? `Sent "${this.getTrackName(shuffledSongs[0])}" playlist request to the DM.`
+          : 'Could not send the playlist request. Join the call and try again.';
+        return;
+      }
+
+      const [firstSong, ...rest] = shuffledSongs;
+      await this.spotify.play(
+        this.toSongUri(firstSong.fileName),
+        0,
+        false,
+        undefined,
+        this.toTrackMetadata(firstSong)
+      );
+
+      for (const song of rest) {
+        await this.spotify.addToQueue(this.toSongUri(song.fileName));
+      }
+
+      const selectionLabel = this.getSelectionPlaybackLabel(mood, atmosphere);
+      this.libraryMessage = `Playing ${shuffledSongs.length} song${shuffledSongs.length === 1 ? '' : 's'} ${selectionLabel}.`;
+      this.showQueue = false;
+      this.showProfile = false;
+    } catch {
+      this.libraryMessage = 'Could not start that playlist.';
+    }
+  }
+
+  private getSelectionPlaybackLabel(mood: string, atmosphere: string): string {
+    if (mood && atmosphere) return `for ${mood} / ${atmosphere}`;
+    if (mood) return `for ${mood}`;
+    if (atmosphere) return `for ${atmosphere}`;
+    return 'from your full library';
+  }
+
+  private shuffleSongs<T>(items: T[]): T[] {
+    for (let i = items.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [items[i], items[j]] = [items[j], items[i]];
+    }
+    return items;
+  }
+
+  private getSongsByMood(moodName: string): Song[] {
+    const key = moodName.trim().toLowerCase();
+    return this.songCatalog.filter(song =>
+      (song.moods ?? []).some(tag => `${tag?.name ?? ''}`.trim().toLowerCase() === key)
+    );
+  }
+
+  private getSongsByAtmosphere(atmosphereName: string): Song[] {
+    const key = atmosphereName.trim().toLowerCase();
+    return this.songCatalog.filter(song =>
+      (song.atmosphere ?? []).some(tag => `${tag?.name ?? ''}`.trim().toLowerCase() === key)
+    );
   }
 
   onSearchInputChange() {
@@ -214,7 +484,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (!uri) return;
 
     this.spotify.removeSavedItem(uri);
-    this.libraryMessage = 'Removed from saved SoundCloud library.';
+    this.libraryMessage = 'Removed from saved music library.';
     await this.refreshSavedSearch();
   }
 
@@ -251,13 +521,13 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (this.isRefreshingThumbnails) return;
 
     this.isRefreshingThumbnails = true;
-    this.libraryMessage = 'Refreshing SoundCloud thumbnails...';
+    this.libraryMessage = 'Refreshing artwork...';
     try {
       const refreshedCount = await this.spotify.refreshSavedThumbnails();
       await this.refreshSavedSearch();
       this.libraryMessage = refreshedCount
         ? `Refreshed thumbnails for ${refreshedCount} saved item${refreshedCount === 1 ? '' : 's'}.`
-        : 'No saved SoundCloud items to refresh.';
+        : 'No saved songs to refresh.';
     } catch {
       this.libraryMessage = 'Could not refresh thumbnails right now.';
     } finally {
@@ -273,11 +543,11 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     const link = document.createElement('a');
 
     link.href = url;
-    link.download = `soundcloud-music-list-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `music-list-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
 
-    this.libraryMessage = `Downloaded ${musicList.savedItems.length} saved SoundCloud item${musicList.savedItems.length === 1 ? '' : 's'}.`;
+    this.libraryMessage = `Downloaded ${musicList.savedItems.length} saved song${musicList.savedItems.length === 1 ? '' : 's'}.`;
   }
 
   async uploadMusicList(event: Event) {
@@ -296,7 +566,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       this.activeCategory = 'all';
       this.libraryMessage = this.formatMusicListImportMessage(result);
     } catch {
-      this.libraryMessage = 'Could not upload that SoundCloud music list. Choose a valid JSON export.';
+      this.libraryMessage = 'Could not upload that music list. Choose a valid JSON export.';
     } finally {
       this.isLoading = false;
       input.value = '';
@@ -324,7 +594,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       return 'Import';
     }
 
-    return this.isSoundCloudLink(this.spotifySearch.trim()) ? 'Add' : 'Search';
+    return this.isMediaLink(this.spotifySearch.trim()) ? 'Add' : 'Search';
   }
 
   clearSearch() {
@@ -341,13 +611,14 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
   }
 
   openAsTab() {
-    this.tabService.openTab('soundcloud-main', 'SoundCloud', 'spotify', 'right');
+    this.tabService.openTab('music-main', 'Music', 'spotify', 'right');
     this.close.emit();
   }
 
   async playTrack(item: any) {
     const uri = item.uri || item.permalink_url || item.track?.uri || item.track?.permalink_url || item.item?.uri;
     if (!uri) return;
+    this.closeAttributionInfo();
 
     try {
       if (this.isServerOwner || !this.isCallActive) {
@@ -360,8 +631,8 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       }
     } catch {
       this.libraryMessage = this.isServerOwner || !this.isCallActive
-        ? 'Could not start playback for that SoundCloud item.'
-        : 'Could not send the SoundCloud request.';
+        ? 'Could not start playback for that song.'
+        : 'Could not send the music request.';
     }
 
     if (this.spotifySearch) {
@@ -388,8 +659,8 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       }
     } catch {
       this.libraryMessage = this.isServerOwner
-        ? 'Could not add that SoundCloud item to the queue.'
-        : 'Could not send the SoundCloud request.';
+        ? 'Could not add that song to the queue.'
+        : 'Could not send the music request.';
     }
     if (this.spotifySearch) {
       this.spotifySearch = '';
@@ -417,7 +688,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
         this.profileItems = await this.spotify.getUserPlaylists(id);
       }
     } catch {
-      this.libraryMessage = 'Could not load that SoundCloud profile.';
+      this.libraryMessage = 'Could not load that profile.';
       this.showProfile = false;
     } finally {
       this.isLoading = false;
@@ -428,7 +699,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (!this.canControlPlayback) return;
     await this.runPlaybackCommand(
       () => this.spotify.togglePlay(),
-      'Could not toggle SoundCloud playback.'
+      'Could not toggle playback.'
     );
   }
 
@@ -445,7 +716,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (!this.canControlPlayback) return;
     await this.runPlaybackCommand(
       () => this.spotify.nextTrack(),
-      'Could not skip to the next SoundCloud item.'
+      'Could not skip to the next song.'
     );
   }
 
@@ -453,14 +724,14 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (!this.canControlPlayback) return;
     await this.runPlaybackCommand(
       () => this.spotify.previousTrack(),
-      'Could not go back to the previous SoundCloud item.'
+      'Could not go back to the previous song.'
     );
   }
 
   async transferPlayback(deviceId: string) {
     await this.runPlaybackCommand(
       () => this.spotify.transferPlayback(deviceId, true),
-      'Could not transfer SoundCloud playback.'
+      'Could not transfer playback.'
     );
     this.showDevicePicker = false;
   }
@@ -476,8 +747,21 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     if (!this.canControlPlayback) return;
     await this.runPlaybackCommand(
       () => this.spotify.seek(this.normalizePlaybackTime(value)),
-      'Could not seek SoundCloud playback.'
+      'Could not seek playback.'
     );
+  }
+
+  openAttributionInfo(track: Partial<SoundCloudSearchResult> | null | undefined) {
+    const text = `${track?.attribution ?? ''}`.trim();
+    this.attributionInfoHtml = text
+      ? this.formatAttributionText(text)
+      : 'No attribution provided for this track.';
+    this.showAttributionInfo = true;
+  }
+
+  closeAttributionInfo() {
+    this.showAttributionInfo = false;
+    this.attributionInfoHtml = '';
   }
 
   get canControlPlayback(): boolean {
@@ -550,7 +834,7 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
       localStorage.setItem(SpotifyPlayer.uiStateStorageKey, serialized);
       this.lastPersistedUiState = serialized;
     } catch {
-      // Persistence is best effort only; SoundCloud library/playback state is still handled by SoundCloudService.
+      // Persistence is best effort only; library/playback state is still handled by SoundCloudService.
     }
   }
 
@@ -589,12 +873,148 @@ export class SpotifyPlayer implements OnInit, DoCheck, OnDestroy {
     return !!value && typeof value === 'object' && !Array.isArray(value);
   }
 
-  private isSoundCloudLink(value: string): boolean {
-    return value.includes('soundcloud.com/') || value.startsWith('soundcloud:');
+  private isMediaLink(value: string): boolean {
+    return /^https?:\/\//i.test(value.trim()) || value.startsWith('song:');
   }
 
   private normalizePlaybackTime(value: number | string | null | undefined): number {
     const numericValue = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(numericValue) ? Math.max(0, Math.round(numericValue)) : 0;
+  }
+
+  private linkifyText(value: string): string {
+    const escapedText = this.escapeHtml(value);
+    const linkedText = escapedText.replace(/(https?:\/\/[^\s<]+)/gi, (rawUrl) => {
+      const trimmedUrl = rawUrl.replace(/[),.;!?]+$/g, '');
+      const trailingPunctuation = rawUrl.slice(trimmedUrl.length);
+      return `<a href="${trimmedUrl}" target="_blank" rel="noopener noreferrer">${trimmedUrl}</a>${trailingPunctuation}`;
+    });
+    return linkedText.replace(/\n/g, '<br>');
+  }
+
+  private formatAttributionText(value: string): string {
+    const normalizedText = this.decodeHtmlEntities(value).trim();
+    if (!normalizedText) return '';
+
+    if (!/<a\b/i.test(normalizedText)) {
+      return this.linkifyText(normalizedText);
+    }
+
+    const normalizedAnchors = normalizedText.replace(
+      /<a\b[^>]*href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>([\s\S]*?)<\/a>/gi,
+      (_match, hrefDoubleQuoted: string, hrefSingleQuoted: string, hrefBare: string, label: string) => {
+        const href = `${hrefDoubleQuoted ?? hrefSingleQuoted ?? hrefBare ?? ''}`.trim();
+        if (!href) return this.escapeHtml(this.decodeHtmlEntities(label));
+
+        const safeHref = this.escapeHtml(href);
+        const safeLabel = this.escapeHtml(this.decodeHtmlEntities(label).trim() || href);
+        return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
+      }
+    );
+
+    return normalizedAnchors.replace(/\n/g, '<br>');
+  }
+
+  private decodeHtmlEntities(value: string): string {
+    return value
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private toSongUri(fileName: string): string {
+    return `song:${fileName}`;
+  }
+
+  private getTrackName(song: Song): string {
+    const raw = song.fileName.split('/').pop() || song.fileName;
+    return decodeURIComponent(raw).replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim() || 'Custom track';
+  }
+
+  private getTrackArtist(song: Song): string {
+    const mood = song.moods?.[0]?.name;
+    const atmosphere = song.atmosphere?.[0]?.name;
+    if (mood && atmosphere) return `${mood} • ${atmosphere}`;
+    return mood || atmosphere || 'Custom source';
+  }
+
+  private extractTagGridCards(tags: Array<{ name?: string; cover?: string; description?: string }>): TagGridCard[] {
+    const cardsByName = new Map<string, TagGridCard>();
+
+    for (const tag of tags) {
+      const name = `${tag?.name ?? ''}`.trim();
+      if (!name) continue;
+
+      const key = name.toLowerCase();
+      if (cardsByName.has(key)) continue;
+
+      cardsByName.set(key, {
+        name,
+        cover: `${tag?.cover ?? ''}`.trim() || 'assets/spotify-placeholder.png',
+        description: `${tag?.description ?? ''}`.trim()
+      });
+    }
+
+    return Array.from(cardsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private toTrackMetadata(song: Song): Partial<SoundCloudSearchResult> {
+    const name = this.getTrackName(song);
+    const artist = this.getTrackArtist(song);
+    const rawAttribution = (song as any)?.attribution
+      ?? (song as any)?.Attribution
+      ?? (song as any)?.credits
+      ?? '';
+    const attribution = `${rawAttribution}`.trim();
+    return {
+      uri: this.toSongUri(song.fileName),
+      id: this.toSongUri(song.fileName),
+      type: 'track',
+      name,
+      artist,
+      owner: artist,
+      image: song.cover || 'assets/spotify-placeholder.png',
+      fileName: song.fileName,
+      cover: song.cover,
+      attribution,
+      moods: song.moods ?? [],
+      atmosphere: song.atmosphere ?? [],
+      album: { images: [{ url: song.cover || 'assets/spotify-placeholder.png' }] },
+      artists: [{ name: artist }],
+      images: [{ url: song.cover || 'assets/spotify-placeholder.png' }]
+    };
+  }
+
+  private toPlaylistRequestTrack(song: Song) {
+    const uri = this.toSongUri(song.fileName);
+    const name = this.getTrackName(song);
+    const artist = this.getTrackArtist(song);
+    const rawAttribution = (song as any)?.attribution
+      ?? (song as any)?.Attribution
+      ?? (song as any)?.credits
+      ?? '';
+    const attribution = `${rawAttribution}`.trim();
+    return {
+      uri,
+      name,
+      artist,
+      image: song.cover || 'assets/spotify-placeholder.png',
+      fileName: song.fileName,
+      attribution,
+      moods: song.moods ?? [],
+      atmosphere: song.atmosphere ?? [],
+      type: 'track'
+    };
   }
 }
