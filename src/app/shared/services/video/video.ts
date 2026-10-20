@@ -566,7 +566,10 @@ export class Video {
         rtcConfig: { iceServers: this.selectIceServers(data.iceServers) }
       };
 
-      await this.room.connect(environment.livekitUrl, data.token, connectOptions);
+      const livekitUrl = environment.livekitUrl.endsWith('/')
+        ? environment.livekitUrl
+        : `${environment.livekitUrl}/`;
+      await this.room.connect(livekitUrl, data.token, connectOptions);
       this.currentChannelId = channelId;
       this.currentParticipantIdentity = identity;
       this.applyLatestSceneMainCharactersFromMetadata();
