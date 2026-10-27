@@ -80,8 +80,10 @@ jobs:
             throw "Invalid TAURI_SIGNING_PRIVATE_KEY format. Expected minisign secret key starting with 'untrusted comment:'."
           }
 
+          $keyB64 = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($key))
+
           Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY<<EOF"
-          Add-Content -Path $env:GITHUB_ENV -Value $key
+          Add-Content -Path $env:GITHUB_ENV -Value $keyB64
           Add-Content -Path $env:GITHUB_ENV -Value "EOF"
 
       - name: Build Tauri app

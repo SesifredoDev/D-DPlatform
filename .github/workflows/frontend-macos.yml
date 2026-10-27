@@ -79,9 +79,11 @@ jobs:
             exit 1
           fi
 
+          key_b64="$(printf '%s' "$key" | base64 | tr -d '\n')"
+
           {
             echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"
-            printf '%s\n' "$key"
+            printf '%s\n' "$key_b64"
             echo "EOF"
           } >> "$GITHUB_ENV"
 
