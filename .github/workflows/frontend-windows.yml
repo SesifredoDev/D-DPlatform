@@ -31,6 +31,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    environment: Production
 
     defaults:
       run:
