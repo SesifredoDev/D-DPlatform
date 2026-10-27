@@ -25,6 +25,9 @@ on:
       - ".github/workflows/frontend-macos.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -55,6 +58,14 @@ jobs:
 
       - name: Build Tauri app
         run: npm run tauri build -- --verbose
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Resolve app version
+        id: version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
 
       - name: Upload Tauri bundles
         uses: actions/upload-artifact@v4
@@ -62,3 +73,17 @@ jobs:
           name: tauri-macos-bundle
           path: src-tauri/target/release/bundle/**
           if-no-files-found: error
+
+      - name: Publish update assets to GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Astral Project Desktop v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          overwrite_files: true
+          files: |
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.tar.gz
+            src-tauri/target/release/bundle/**/*.sig

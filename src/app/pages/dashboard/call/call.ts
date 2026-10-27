@@ -725,6 +725,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
           adjustedPosition,
           isDifferentTrack,
           isDifferentPosition,
+          isDifferentStatus,
           applySequence
         );
       }
@@ -785,6 +786,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     adjustedPosition: number,
     isDifferentTrack: boolean,
     isDifferentPosition: boolean,
+    isDifferentStatus: boolean,
     applySequence: number
   ) {
     const metadata = {
@@ -795,9 +797,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     };
 
     if (!state.paused) {
-      if (isDifferentTrack || isDifferentPosition) {
+      if (isDifferentTrack) {
         await this.spotify.play(state.uri, adjustedPosition, true, state.contextUri, metadata);
-      } else {
+      } else if (isDifferentStatus) {
         await this.spotify.togglePlay(true);
       }
     } else if (isDifferentTrack) {
@@ -811,8 +813,11 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       await this.spotify.pause(true);
     }
 
-    if (!isDifferentTrack && isDifferentPosition && !state.paused) {
-      await this.spotify.seek(adjustedPosition, true);
+    if (!isDifferentTrack && isDifferentPosition) {
+      const targetPosition = state.paused
+        ? this.normalizeSoundCloudSyncPosition(state.position)
+        : adjustedPosition;
+      await this.spotify.seek(targetPosition, true);
     }
   }
 

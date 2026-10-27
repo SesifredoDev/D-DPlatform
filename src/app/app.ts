@@ -32,6 +32,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit() {
     void this.setupWindowFrame();
+    void this.checkForDesktopUpdate();
   }
 
   ngOnDestroy() {
@@ -130,6 +131,20 @@ export class App implements OnInit, OnDestroy {
         await currentWindow.destroy();
       }
     });
+  }
+
+  private async checkForDesktopUpdate() {
+    if (!this.isTauriRuntime() || this.tabPanelId) return;
+
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (!update) return;
+
+      await update.downloadAndInstall();
+    } catch (error) {
+      console.warn('Auto-update check failed', error);
+    }
   }
 
   private async runWindowAction(

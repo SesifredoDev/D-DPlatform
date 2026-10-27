@@ -50,6 +50,7 @@
     "@milkdown/theme-nord": "^7.20.0",
     "@milkdown/transformer": "^7.20.0",
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-updater": "^2.9.1",
     "electron-json-storage": "^4.6.0",
     "idb-keyval": "^6.2.2",
     "konva": "^10.2.0",
