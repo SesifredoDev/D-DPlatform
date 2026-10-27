@@ -56,10 +56,37 @@ jobs:
       - name: Ensure Tauri resource directory exists
         run: New-Item -ItemType Directory -Path src-tauri/bin -Force | Out-Null
 
+      - name: Normalize updater signing key
+        env:
+          RAW_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $key = "$env:RAW_TAURI_SIGNING_PRIVATE_KEY".Trim()
+          $key = $key -replace "`r", ""
+          $key = $key -replace "\\n", "`n"
+
+          if (-not $key.StartsWith("untrusted comment:")) {
+            try {
+              $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($key))
+              $decoded = $decoded -replace "`r", ""
+              if ($decoded.StartsWith("untrusted comment:")) {
+                $key = $decoded
+              }
+            } catch {
+            }
+          }
+
+          if (-not $key.StartsWith("untrusted comment:")) {
+            throw "Invalid TAURI_SIGNING_PRIVATE_KEY format. Expected minisign secret key starting with 'untrusted comment:'."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "TAURI_SIGNING_PRIVATE_KEY<<EOF"
+          Add-Content -Path $env:GITHUB_ENV -Value $key
+          Add-Content -Path $env:GITHUB_ENV -Value "EOF"
+
       - name: Build Tauri app
         run: npm run tauri build -- --verbose
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Resolve app version

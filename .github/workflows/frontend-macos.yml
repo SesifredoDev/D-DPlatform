@@ -56,10 +56,38 @@ jobs:
       - name: Ensure Tauri resource directory exists
         run: mkdir -p src-tauri/bin
 
+      - name: Normalize updater signing key
+        env:
+          RAW_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          key="${RAW_TAURI_SIGNING_PRIVATE_KEY:-}"
+          key="${key//$'\r'/}"
+          key="${key//\\n/$'\n'}"
+
+          if [[ "$key" != untrusted\ comment:* ]]; then
+            if decoded="$(printf '%s' "$key" | base64 --decode 2>/dev/null)"; then
+              decoded="${decoded//$'\r'/}"
+              if [[ "$decoded" == untrusted\ comment:* ]]; then
+                key="$decoded"
+              fi
+            fi
+          fi
+
+          if [[ "$key" != untrusted\ comment:* ]]; then
+            echo "Invalid TAURI_SIGNING_PRIVATE_KEY format. Expected minisign secret key starting with 'untrusted comment:'." >&2
+            exit 1
+          fi
+
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY<<EOF"
+            printf '%s\n' "$key"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
       - name: Build Tauri app
         run: npm run tauri build -- --verbose
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Resolve app version
