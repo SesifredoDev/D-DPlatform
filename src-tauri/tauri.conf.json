@@ -55,7 +55,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4NzBBOTcxNjdBQzlENEUKUldST25heG5jYWx3cUtKNjhtZTdVWjBkZFVqOXlkRkE5WVNGamhpZ1NaQXB6OXlxeklOQTF3cEIK",
       "endpoints": [
-        "https://dissertation.pchaffey.me/desktop-updates/latest?target={{target}}&arch={{arch}}&current_version={{current_version}}"
+        "https://dissertation.pchaffey.me/api/desktop-updates/latest?target={{target}}&arch={{arch}}&current_version={{current_version}}"
       ]
     }
   }
