@@ -136,14 +136,69 @@ export class App implements OnInit, OnDestroy {
   private async checkForDesktopUpdate() {
     if (!this.isTauriRuntime() || this.tabPanelId) return;
 
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      if (!update) return;
+    const updateLogPrefix = '[desktop-update]';
+    const updateStartedAt = Date.now();
 
-      await update.downloadAndInstall();
+    try {
+      console.log(`${updateLogPrefix} check started`, {
+        at: new Date(updateStartedAt).toISOString(),
+        tabPanelId: this.tabPanelId,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
+      });
+
+      const { check } = await import('@tauri-apps/plugin-updater');
+      console.log(`${updateLogPrefix} updater module loaded`);
+
+      const update = await check();
+      console.log(`${updateLogPrefix} check completed`, {
+        hasUpdate: !!update,
+        elapsedMs: Date.now() - updateStartedAt
+      });
+
+      if (!update) {
+        console.log(`${updateLogPrefix} no update available`);
+        return;
+      }
+
+      console.log(`${updateLogPrefix} update metadata`, {
+        currentVersion: update.currentVersion,
+        targetVersion: update.version,
+        releaseDate: update.date ?? null,
+        releaseNotesLength: update.body?.length ?? 0,
+        rawJson: update.rawJson
+      });
+
+      let downloadedBytes = 0;
+      await update.downloadAndInstall(event => {
+        switch (event.event) {
+          case 'Started':
+            console.log(`${updateLogPrefix} download started`, {
+              contentLength: event.data.contentLength ?? null
+            });
+            break;
+          case 'Progress':
+            downloadedBytes += event.data.chunkLength;
+            console.log(`${updateLogPrefix} download progress`, {
+              chunkLength: event.data.chunkLength,
+              downloadedBytes
+            });
+            break;
+          case 'Finished':
+            console.log(`${updateLogPrefix} download finished`, { downloadedBytes });
+            break;
+        }
+      });
+
+      console.log(`${updateLogPrefix} install triggered (app may close on Windows)`, {
+        elapsedMs: Date.now() - updateStartedAt
+      });
     } catch (error) {
-      console.warn('Auto-update check failed', error);
+      console.warn(`${updateLogPrefix} failed`, {
+        elapsedMs: Date.now() - updateStartedAt,
+        error,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : null
+      });
     }
   }
 
