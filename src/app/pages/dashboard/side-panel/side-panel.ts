@@ -31,6 +31,7 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MessagingSocketService} from '../../../shared/services/messaging-socket/messaging-socket.service';
 import {Subscription} from 'rxjs';
 import {BroadcastDialog} from '../../../objects/broadcast-dialog/broadcast-dialog';
+import {PlayerSettingsDialog} from '../../../objects/player-settings-dialog/player-settings-dialog';
 import {UnreadMessageBadgeService} from '../../../shared/services/unread-message-badge/unread-message-badge.service';
 import { FileService } from '../../../shared/services/file/file';
 import type {
@@ -436,6 +437,18 @@ export class SidePanel implements AfterViewInit, OnDestroy {
       minWidth: '400px',
       minHeight: '500px',
       panelClass: 'custom-dialog-container'
+    });
+    this.actionPerformed.emit();
+  }
+
+  openPlayerSettings() {
+    this.dialog.open(PlayerSettingsDialog, {
+      data: { currentServerId: this.selectedServer?._id ?? null },
+      width: '1100px',
+      maxWidth: '95vw',
+      height: '75vh',
+      maxHeight: '90vh',
+      panelClass: ['glass-dialog-container', 'player-settings-dialog']
     });
     this.actionPerformed.emit();
   }

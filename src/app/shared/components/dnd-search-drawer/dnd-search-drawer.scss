@@ -183,16 +183,167 @@
 .drawer-body {
   min-height: 380px;
   display: grid;
-  grid-template-columns: minmax(280px, 0.42fr) minmax(0, 0.58fr);
+  grid-template-columns: 220px minmax(260px, 0.38fr) minmax(0, 0.62fr);
   overflow: hidden;
 }
 
+.filter-pane,
 .results-pane,
 .detail-pane {
   min-width: 0;
   overflow-y: auto;
 }
 
+/* Filter Pane Layout & Controls */
+.filter-pane {
+  border-right: 1px solid var(--outline);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.filter-count-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(16, 18, 24, 0.96);
+  backdrop-filter: blur(8px);
+}
+
+.filter-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+
+  span:first-child {
+    flex: 1;
+  }
+}
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.clear-filters-btn {
+  border: 0;
+  background: transparent;
+  color: #b8c0ff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.filter-search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-s);
+  background: rgba(0, 0, 0, 0.3);
+
+  .material-icons {
+    color: var(--on-surface-variant);
+    font-size: 16px;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--on-background);
+    font: inherit;
+    font-size: 12px;
+
+    &::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+  }
+}
+
+.clear-query-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--on-surface-variant);
+  cursor: pointer;
+  padding: 2px;
+
+  .material-icons {
+    font-size: 14px;
+  }
+
+  &:hover {
+    color: var(--on-background);
+  }
+}
+
+.filter-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.filter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  color: rgba(255, 255, 255, 0.84);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background var(--transition-fast), color var(--transition-fast);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--on-background);
+  }
+
+  input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--primary);
+  }
+
+  .filter-label {
+    text-transform: capitalize;
+    user-select: none;
+  }
+}
+
+.filter-empty {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+}
+
+/* Results Pane */
 .results-pane {
   border-right: 1px solid var(--outline);
   background: rgba(0, 0, 0, 0.15);
@@ -321,6 +472,7 @@
   }
 }
 
+/* Detail Pane */
 .detail-pane {
   padding: 18px;
 }
@@ -570,6 +722,7 @@ p.detail-description {
   }
 }
 
+/* Mobile Responsive Adjustments */
 @media (max-width: 760px) {
   .search-drawer {
     padding: 0;
@@ -599,6 +752,12 @@ p.detail-description {
     min-height: 0;
   }
 
+  .filter-pane {
+    max-height: 160px;
+    border-right: 0;
+    border-bottom: 1px solid var(--outline);
+  }
+
   .results-pane {
     max-height: 34vh;
     border-right: 0;
@@ -608,95 +767,4 @@ p.detail-description {
   .detail-pane {
     max-height: 42vh;
   }
-}
-// 1. Update the grid columns from two to three
-.drawer-body {
-  min-height: 380px;
-  display: grid;
-  grid-template-columns: 200px minmax(260px, 0.38fr) minmax(0, 0.62fr);
-  overflow: hidden;
-}
-
-// 2. Add .filter-pane to the existing pane rule
-.filter-pane,
-.results-pane,
-.detail-pane {
-  min-width: 0;
-  overflow-y: auto;
-}
-
-// 3. Add styling for the filter pane itself
-.filter-pane {
-  border-right: 1px solid var(--outline);
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.filter-count {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding: 10px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(16, 18, 24, 0.96);
-  color: var(--on-surface-variant);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.filter-list {
-  display: flex;
-  flex-direction: column;
-  padding: 8px 0;
-}
-
-.filter-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  color: rgba(255, 255, 255, 0.84);
-  cursor: pointer;
-  font-size: 13px;
-  transition: background var(--transition-fast), color var(--transition-fast);
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: var(--on-background);
-  }
-
-  input[type="checkbox"] {
-    margin: 0;
-    cursor: pointer;
-    accent-color: var(--primary);
-  }
-
-  .filter-label {
-    text-transform: capitalize;
-    user-select: none;
-  }
-}
-
-// 4. Update the mobile responsive query to stack the layout correctly
-@media (max-width: 760px) {
-  // ... existing mobile overrides
-
-  .drawer-body {
-    grid-template-columns: 1fr;
-    min-height: 0;
-  }
-
-  .filter-pane {
-    max-height: 120px;
-    border-right: 0;
-    border-bottom: 1px solid var(--outline);
-  }
-
-  .results-pane {
-    max-height: 34vh;
-    border-right: 0;
-    border-bottom: 1px solid var(--outline);
-  }
-
-  // ... existing mobile overrides
 }

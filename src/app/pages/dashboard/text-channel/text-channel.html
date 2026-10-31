@@ -138,7 +138,43 @@
                 <div class="message-attachments" [class.compact-attachments]="compactAttachments">
                   @for(att of msg.attachments; track att.url) {
                     <div class="attachment-item">
-                      @if(compactAttachments) {
+                      @if(isAstralPackAttachment(att)) {
+                        <div class="attachment-astral">
+                          <div class="attachment-astral-mark">
+                            <mat-icon>extension</mat-icon>
+                          </div>
+                          <div class="attachment-astral-copy">
+                            <span class="attachment-astral-kicker">Astral Modpack</span>
+                            <span class="attachment-astral-title">{{ getAttachmentDisplayName(att) }}</span>
+                            <small class="attachment-astral-meta">
+                              {{ formatAttachmentType(att) }}
+                              @if(formatAttachmentSize(att)) {
+                                <span> &bull; {{ formatAttachmentSize(att) }}</span>
+                              }
+                            </small>
+                          </div>
+                          <div class="attachment-actions">
+                            <button
+                              type="button"
+                              class="attachment-action attachment-action-primary"
+                              (click)="promptAddAstralPack(att, $event)"
+                              matTooltip="Add or update modpack">
+                              <mat-icon>add</mat-icon>
+                              <span>Add Pack</span>
+                            </button>
+                            <a
+                              [href]="getAttachmentDownloadUrl(att)"
+                              target="_blank"
+                              rel="noreferrer"
+                              class="attachment-action attachment-action-secondary"
+                              (click)="openExternalUrl(getAttachmentDownloadUrl(att), $event)"
+                              matTooltip="Download pack file">
+                              <mat-icon>download</mat-icon>
+                              <span>Download</span>
+                            </a>
+                          </div>
+                        </div>
+                      } @else if(compactAttachments) {
                         <button
                           type="button"
                           class="attachment-compact-chip"

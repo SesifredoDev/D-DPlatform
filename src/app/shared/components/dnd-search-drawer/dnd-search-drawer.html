@@ -27,8 +27,8 @@
       <div class="drawer-title">
         <span class="material-icons">travel_explore</span>
         <div>
-          <h2>5e Search</h2>
-          <span>api.open5e.com</span>
+          <h2>Everything Search</h2>
+          <span>Notes, Game, Homebrew</span>
         </div>
       </div>
 
@@ -56,9 +56,34 @@
 
     <div class="drawer-body">
       <aside class="filter-pane">
-        <div class="filter-count">Filters</div>
+        <div class="filter-count-header">
+          <div class="filter-title-row">
+            <span>Filters</span>
+            @if (activeFilters().size > 0) {
+              <span class="filter-badge">{{ activeFilters().size }}</span>
+              <button type="button" class="clear-filters-btn" (click)="clearFilters()">Clear</button>
+            }
+          </div>
+          <div class="filter-search-field">
+            <span class="material-icons">filter_alt</span>
+            <input
+              type="text"
+              placeholder="Filter list..."
+              [ngModel]="filterQuery()"
+              (ngModelChange)="filterQuery.set($event)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            @if (filterQuery()) {
+              <button type="button" class="clear-query-btn" (click)="filterQuery.set('')" aria-label="Clear filter search">
+                <span class="material-icons">close</span>
+              </button>
+            }
+          </div>
+        </div>
+
         <div class="filter-list">
-          @for (filter of availableFilters; track filter) {
+          @for (filter of filteredAvailableFilters(); track filter) {
             <label class="filter-item">
               <input
                 type="checkbox"
@@ -67,6 +92,8 @@
               />
               <span class="filter-label">{{ filter.replace('-', ' ') }}</span>
             </label>
+          } @empty {
+            <div class="filter-empty">No matching filters</div>
           }
         </div>
       </aside>

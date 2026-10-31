@@ -2,6 +2,9 @@ import { Injectable, signal } from '@angular/core';
 import { invoke } from '@tauri-apps/api/core';
 import { IHomebrewPack, IHomebrewPackItem } from '../../models/homebrew-pack/homebrew-pack.model';
 
+/** Above this many items, packs are saved as compact JSON to keep stringify/IPC cheap. */
+const LARGE_PACK_ITEM_THRESHOLD = 1000;
+
 @Injectable({
   providedIn: 'root',
 })
@@ -10,12 +13,22 @@ export class HomebrewPackService {
 
   readonly packs = this.packsState.asReadonly();
 
+  private loadPromise: Promise<void> | null = null;
+
   constructor() {
     void this.loadPacks();
   }
 
   /** Load all locally stored homebrew packs via Tauri backend */
-  async loadPacks(): Promise<void> {
+  loadPacks(force = false): Promise<void> {
+    // Share one in-flight/completed load so opening dialogs doesn't re-parse huge packs.
+    if (!this.loadPromise || force) {
+      this.loadPromise = this.doLoadPacks();
+    }
+    return this.loadPromise;
+  }
+
+  private async doLoadPacks(): Promise<void> {
     try {
       const rawPacks = await invoke<string[]>('get_homebrew_packs');
       const parsedPacks: IHomebrewPack[] = rawPacks
@@ -30,6 +43,7 @@ export class HomebrewPackService {
 
       this.packsState.set(parsedPacks);
     } catch (error) {
+      this.loadPromise = null; // allow a retry
       console.error('Failed to load homebrew packs:', error);
     }
   }
@@ -42,7 +56,8 @@ export class HomebrewPackService {
       createdAt: pack.createdAt || Date.now(),
     };
 
-    const jsonString = JSON.stringify(updatedPack, null, 2);
+    const pretty = (updatedPack.items?.length ?? 0) <= LARGE_PACK_ITEM_THRESHOLD;
+    const jsonString = JSON.stringify(updatedPack, null, pretty ? 2 : undefined);
     await invoke('save_homebrew_pack', {
       packId: updatedPack.id,
       packJson: jsonString,

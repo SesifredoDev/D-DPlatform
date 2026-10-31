@@ -59,6 +59,10 @@ export class DndSearchDrawer {
   readonly isBroadcasting = signal(false);
   readonly error = signal<string | null>(null);
 
+  // Filter Quick-Search & Management Signals
+  readonly filterQuery = signal('');
+  readonly activeFilters = signal<Set<string>>(new Set());
+
   readonly detailTitle = computed(() => {
     const item = this.selectedItem();
     const detail = this.selectedDetail();
@@ -114,15 +118,49 @@ export class DndSearchDrawer {
     return this.open5eFacts(result, detail);
   });
 
-  readonly availableFilters = [
+  readonly standardFilters = [
     'ability-scores', 'alignments', 'backgrounds', 'classes', 'conditions',
     'damage-types', 'equipment', 'equipment-categories', 'feats', 'features',
     'languages', 'magic-items', 'magic-schools', 'monsters', 'proficiencies',
     'races', 'rule-sections', 'rules', 'skills', 'spells', 'subclasses',
-    'subraces', 'traits', 'weapon-properties', 'Notes', 'Homebrew'
+    'subraces', 'traits', 'weapon-properties', 'Notes'
   ];
 
-  readonly activeFilters = signal<Set<string>>(new Set());
+  readonly homebrewPropertyKeys = computed(() => {
+    const keysSet = new Set<string>();
+    const currentServer = this.serverService.getCurrentServer();
+    if (currentServer) {
+      const serverPacks = this.homebrewPackService.packs().filter(p => p.attachedServerIds?.includes(currentServer._id));
+      for (const pack of serverPacks) {
+        for (const item of pack.items || []) {
+          if (item.properties) {
+            for (const key of Object.keys(item.properties)) {
+              keysSet.add(key.toLowerCase());
+            }
+          }
+        }
+      }
+    }
+    for (const item of this.results()) {
+      if (item.source === 'homebrew' && item.homebrew?.properties) {
+        for (const key of Object.keys(item.homebrew.properties)) {
+          keysSet.add(key.toLowerCase());
+        }
+      }
+    }
+    return Array.from(keysSet);
+  });
+
+  readonly availableFilters = computed(() => {
+    return [...this.standardFilters, ...this.homebrewPropertyKeys()];
+  });
+
+  readonly filteredAvailableFilters = computed(() => {
+    const query = this.filterQuery().toLowerCase().trim();
+    const filters = this.availableFilters();
+    if (!query) return filters;
+    return filters.filter(filter => filter.toLowerCase().replace(/-/g, ' ').includes(query));
+  });
 
   readonly filteredResults = computed(() => {
     const filters = this.activeFilters();
@@ -136,8 +174,15 @@ export class DndSearchDrawer {
       if (item.source === 'vault') {
         return filters.has('Notes');
       }
-      if (item.source === 'homebrew') {
-        return filters.has('Homebrew');
+      if (item.source === 'homebrew' && item.homebrew?.properties) {
+        const propKeys = Object.keys(item.homebrew.properties).map(k => k.toLowerCase());
+        for (const filter of filters) {
+          const lowerFilter = filter.toLowerCase();
+          if (lowerFilter === 'homebrew' || propKeys.includes(lowerFilter)) {
+            return true;
+          }
+        }
+        return false;
       }
 
       const normalizedCategory = (item.category || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -160,6 +205,10 @@ export class DndSearchDrawer {
       current.add(filter);
     }
     this.activeFilters.set(current);
+  }
+
+  clearFilters(): void {
+    this.activeFilters.set(new Set());
   }
 
   readonly detailSections = computed(() => {

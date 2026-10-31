@@ -865,16 +865,31 @@
 
               <mat-divider></mat-divider>
 
-              <div class="editor-section">
+              <div class="editor-section pack-items-section" #packItemsTop>
                 <div class="section-title">
-                  <h3>Pack Items ({{ packItems.length }})</h3>
+                  <h3>Pack Items ({{ packItems.length | number }})</h3>
                   <button mat-stroked-button type="button" (click)="addPackItem()">
                     <mat-icon>add</mat-icon> Add Item
                   </button>
                 </div>
 
+                @if (packItems.length > packPageSizeOptions[0]) {
+                  <div class="items-toolbar">
+                    <mat-form-field appearance="outline" class="items-search">
+                      <mat-label>Filter items</mat-label>
+                      <mat-icon matPrefix>search</mat-icon>
+                      <input matInput [value]="packItemFilter" placeholder="Name, description or tag"
+                             (input)="onPackItemFilterInput($any($event.target).value)">
+                    </mat-form-field>
+                    @if (packItemFilter.trim()) {
+                      <span class="items-count">{{ filteredPackItemCount | number }} of {{ packItems.length | number }} match</span>
+                    }
+                  </div>
+                }
+
                 <div class="pack-items-list">
-                  @for (item of packItems; track item.id; let i = $index) {
+                  @for (i of visiblePackItemIndices; track packItems[i].id) {
+                    @let item = packItems[i];
                     <div class="pack-item-card">
                       <div class="item-card-header">
                         <strong>{{ item.name || 'Unnamed Item' }}</strong>
@@ -921,9 +936,22 @@
                       </div>
                     </div>
                   } @empty {
-                    <div class="empty-list">No items in this pack yet. Click "Add Item" above.</div>
+                    <div class="empty-list">
+                      {{ packItemFilter.trim() ? 'No items match your filter.' : 'No items in this pack yet. Click "Add Item" above.' }}
+                    </div>
                   }
                 </div>
+
+                @if (filteredPackItemCount > packPageSizeOptions[0]) {
+                  <mat-paginator
+                    [length]="filteredPackItemCount"
+                    [pageSize]="packPageSize"
+                    [pageIndex]="packPageIndex"
+                    [pageSizeOptions]="packPageSizeOptions"
+                    showFirstLastButtons
+                    (page)="onPackItemPage($event)">
+                  </mat-paginator>
+                }
               </div>
 
               <footer class="editor-footer">

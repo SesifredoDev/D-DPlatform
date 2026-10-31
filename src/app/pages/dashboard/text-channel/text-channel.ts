@@ -29,6 +29,8 @@ import { IRole } from '../../../shared/models/server/role.model';
 import { FileService } from '../../../shared/services/file/file';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import type { ChannelAccessPermission, LinkPreviewType, LinkPreviewAspect, LinkPreviewProvider, LinkPreview, PlayableEmbedPreview, ProviderLinkPreview } from '../../../shared/models/pages/dashboard/text-channel/text-channel.model';
+import {IHomebrewPack} from '../../../shared/models/homebrew-pack/homebrew-pack.model';
+import {HomebrewPackService} from '../../../shared/services/homebrew-pack/homebrew-pack.service';
 
 type MediaAttachmentPreviewType = 'image' | 'video' | 'audio';
 
@@ -103,7 +105,8 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     private serverService: ServerService,
     private fileService: FileService,
     private sanitizer: DomSanitizer,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private homebrewPackService: HomebrewPackService,
   ) {
     this.userService.getMe().subscribe(user => {
       this.currentUserId = user._id;
@@ -1024,6 +1027,77 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
 
   private toTitleCase(value: string): string {
     return value.replace(/\b\w/g, letter => letter.toUpperCase()).slice(0, 90);
+  }
+
+  isAstralPackAttachment(attachment: Attachment): boolean {
+    const name = (attachment.name || attachment.filename || attachment.url || '').toLowerCase();
+    return name.endsWith('.astralpack') || this.hasContentType(attachment, 'application/json');
+  }
+
+  async promptAddAstralPack(attachment: Attachment, event?: Event): Promise<void> {
+    event?.preventDefault();
+    event?.stopPropagation();
+
+    const url = this.getAttachmentUrl(attachment);
+    if (!url) return;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Failed to download modpack file.');
+
+      const packJson = await response.json() as IHomebrewPack;
+      if (!packJson.name || !Array.isArray(packJson.items)) {
+        throw new Error('Invalid modpack structure.');
+      }
+
+      packJson.id = packJson.id || `pack_${Date.now()}`;
+      const currentServer = this.serverService.getCurrentServer();
+      const serverId = currentServer?._id;
+
+      const existingPacks = this.homebrewPackService.packs();
+      const existingPack = existingPacks.find(p => p.id === packJson.id || p.name.toLowerCase() === packJson.name.toLowerCase());
+
+      if (existingPack) {
+        const compare = this.compareVersions(packJson.version || '1.0.0', existingPack.version || '1.0.0');
+        if (compare < 0) {
+          if (!confirm(`An existing pack "${existingPack.name}" (v${existingPack.version}) is already installed, and this file is an older version (v${packJson.version}). Do you want to overwrite it anyway?`)) {
+            return;
+          }
+        } else if (compare > 0) {
+          if (!confirm(`An update is available for "${existingPack.name}"! Upgrade from v${existingPack.version} to v${packJson.version}?`)) {
+            return;
+          }
+        } else {
+          if (!confirm(`Modpack "${packJson.name}" (v${packJson.version}) is already installed. Do you want to re-import and overwrite it?`)) {
+            return;
+          }
+        }
+        packJson.id = existingPack.id; // preserve ID for updating in place
+        packJson.attachedServerIds = Array.from(new Set([...(existingPack.attachedServerIds || []), ...(serverId ? [serverId] : [])]));
+      } else if (serverId) {
+        packJson.attachedServerIds = Array.from(new Set([...(packJson.attachedServerIds || []), serverId]));
+      }
+
+      await this.homebrewPackService.savePack(packJson);
+      this.snackBar.open(`Successfully added modpack "${packJson.name}" (v${packJson.version || '1.0.0'})!`, 'OK', { duration: 3000 });
+    } catch (err) {
+      console.error('Failed to parse or add astralpack:', err);
+      this.snackBar.open('Failed to add modpack. Invalid file format.', 'Close', { duration: 3000 });
+    }
+  }
+
+  private compareVersions(v1: string, v2: string): number {
+    const cleanV1 = v1.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+    const cleanV2 = v2.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+    const len = Math.max(cleanV1.length, cleanV2.length);
+
+    for (let i = 0; i < len; i++) {
+      const num1 = cleanV1[i] || 0;
+      const num2 = cleanV2[i] || 0;
+      if (num1 > num2) return 1;
+      if (num1 < num2) return -1;
+    }
+    return 0;
   }
 
   ngOnDestroy() {

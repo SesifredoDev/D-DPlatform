@@ -259,6 +259,9 @@
   <!-- 3. FOOTER: USER & SYSTEM CONTROLS -->
   <footer class="sidebar-footer" [ngStyle]="collapsed ? collapsedFooterStyles : null">
     <div class="footer-actions" [ngStyle]="collapsed ? collapsedFooterActionsStyles : null">
+      <button mat-icon-button (click)="openPlayerSettings()" matTooltip="Player Settings">
+        <mat-icon>tune</mat-icon>
+      </button>
       <button mat-icon-button *ngIf="canOpenSettings" (click)="openSettings()" matTooltip="Server Settings">
         <mat-icon>settings</mat-icon>
       </button>

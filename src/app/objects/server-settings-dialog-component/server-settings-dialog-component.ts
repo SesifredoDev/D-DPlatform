@@ -1,4 +1,4 @@
-import { Component, Inject, OnDestroy, OnInit } from '@angular/core';
+import { Component, ElementRef, Inject, OnDestroy, OnInit, viewChild } from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MAT_DIALOG_DATA, MatDialogModule, MatDialogRef } from '@angular/material/dialog';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
@@ -12,6 +12,7 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSelectModule } from '@angular/material/select';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
 import { Subject, finalize, takeUntil } from 'rxjs';
 
 import { ServerService } from '../../shared/services/server/server';
@@ -45,7 +46,8 @@ import { IHomebrewPack, IHomebrewPackItem } from '../../shared/models/homebrew-p
     MatSlideToggleModule,
     MatCheckboxModule,
     MatTooltipModule,
-    MatSelectModule
+    MatSelectModule,
+    MatPaginatorModule
   ],
   templateUrl: './server-settings-dialog-component.html',
   styleUrls: ['./server-settings-dialog-component.scss'],
@@ -117,6 +119,22 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   selectedPack: IHomebrewPack | null = null;
   isCreatingPack = false;
   packItems: IHomebrewPackItem[] = [];
+
+  // Pack item list view state (keeps the DOM small for very large packs)
+  readonly packPageSizeOptions = [10, 25, 50, 100];
+  packPageSize = 25;
+  packPageIndex = 0;
+  packItemFilter = '';
+  /** Absolute indices into packItems for the cards currently rendered. */
+  visiblePackItemIndices: number[] = [];
+  /** Number of items matching the filter (or all items when there is no filter). */
+  filteredPackItemCount = 0;
+
+  private filteredPackItemIndices: number[] | null = null;
+  private packFilterTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Items already copied for editing (copy-on-write; see editablePackItem). */
+  private ownedPackItems = new WeakSet<object>();
+  private readonly packItemsTop = viewChild<ElementRef<HTMLElement>>('packItemsTop');
 
   isCreating = false;
   isCreatingChannel = false;
@@ -348,18 +366,28 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     );
   }
 
-  selectPack(pack: IHomebrewPack) {
+  selectPack(pack: IHomebrewPack, preserveView = false) {
     this.isCreatingPack = false;
     this.selectedPack = pack;
-    this.packItems = structuredClone(pack.items || []);
+    // Shallow copy only: deep-cloning tens of thousands of items up front froze the UI.
+    // Individual items are copied lazily the first time they are edited.
+    this.packItems = [...(pack.items || [])];
+    this.ownedPackItems = new WeakSet();
     this.packForm = this.initPackForm(pack);
+    if (preserveView) {
+      this.applyPackItemFilter(false);
+    } else {
+      this.resetPackItemView();
+    }
   }
 
   createNewPack() {
     this.selectedPack = null;
     this.isCreatingPack = true;
     this.packItems = [];
+    this.ownedPackItems = new WeakSet();
     this.packForm = this.initPackForm();
+    this.resetPackItemView();
   }
 
   cancelPackEdit() {
@@ -387,9 +415,19 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
       updatedAt: Date.now()
     };
 
-    await this.homebrewPackService.savePack(packToSave);
-    this.snackBar.open('Homebrew pack saved locally.', 'OK', { duration: 2000 });
-    this.selectPack(packToSave);
+    this.isLoading = true;
+    // Let the disabled state paint before the (potentially heavy) stringify + IPC call.
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    try {
+      await this.homebrewPackService.savePack(packToSave);
+      this.snackBar.open('Homebrew pack saved locally.', 'OK', { duration: 2000 });
+      this.selectPack(packToSave, true);
+    } catch (error) {
+      console.error('Failed to save homebrew pack', error);
+      this.snackBar.open('Failed to save pack.', 'Close', { duration: 3000 });
+    } finally {
+      this.isLoading = false;
+    }
   }
 
   async onDeletePack(packId: string) {
@@ -426,22 +464,33 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   }
 
   addPackItem() {
-    this.packItems.push({
+    const item: IHomebrewPackItem = {
       id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: 'New Custom Item',
       description: 'Markdown item description...',
       properties: { type: 'item', rarity: 'common' }
-    });
+    };
+    this.ownedPackItems.add(item);
+    this.packItems.push(item);
     this.packForm.markAsDirty();
+
+    // Clear the filter and jump to the last page so the new item is visible.
+    this.packItemFilter = '';
+    this.filteredPackItemIndices = null;
+    this.packPageIndex = Math.floor((this.packItems.length - 1) / this.packPageSize);
+    this.refreshVisiblePackItems();
+    this.scrollPackItemsIntoView();
   }
 
   removePackItem(index: number) {
     this.packItems.splice(index, 1);
     this.packForm.markAsDirty();
+    // Indices shifted, so any cached filter result is stale.
+    this.applyPackItemFilter(false);
   }
 
   updateItemField(index: number, field: keyof IHomebrewPackItem, value: any) {
-    (this.packItems[index] as any)[field] = value;
+    (this.editablePackItem(index) as any)[field] = value;
     this.packForm.markAsDirty();
   }
 
@@ -451,22 +500,20 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   }
 
   addItemProperty(index: number) {
-    if (!this.packItems[index].properties) {
-      this.packItems[index].properties = {};
-    }
-    const propCount = Object.keys(this.packItems[index].properties).length;
-    this.packItems[index].properties[`key_${propCount + 1}`] = 'value';
+    const item = this.editablePackItem(index);
+    const propCount = Object.keys(item.properties).length;
+    item.properties[`key_${propCount + 1}`] = 'value';
     this.packForm.markAsDirty();
   }
 
   removeItemProperty(index: number, key: string) {
-    delete this.packItems[index].properties[key];
+    delete this.editablePackItem(index).properties[key];
     this.packForm.markAsDirty();
   }
 
   updateItemPropertyKey(index: number, oldKey: string, newKey: string) {
     if (!newKey || oldKey === newKey) return;
-    const props = this.packItems[index].properties;
+    const props = this.editablePackItem(index).properties;
     const value = props[oldKey];
     delete props[oldKey];
     props[newKey] = value;
@@ -474,8 +521,88 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   }
 
   updateItemPropertyValue(index: number, key: string, value: string) {
-    this.packItems[index].properties[key] = value;
+    this.editablePackItem(index).properties[key] = value;
     this.packForm.markAsDirty();
+  }
+
+  // --- Pack item paging / filtering ---
+
+  onPackItemFilterInput(value: string) {
+    this.packItemFilter = value;
+    if (this.packFilterTimer) clearTimeout(this.packFilterTimer);
+    // Debounce so typing in a 30k+ item pack doesn't re-scan on every keystroke.
+    this.packFilterTimer = setTimeout(() => this.applyPackItemFilter(true), 200);
+  }
+
+  onPackItemPage(event: PageEvent) {
+    this.packPageSize = event.pageSize;
+    this.packPageIndex = event.pageIndex;
+    this.refreshVisiblePackItems();
+    this.scrollPackItemsIntoView();
+  }
+
+  private resetPackItemView() {
+    this.packItemFilter = '';
+    this.filteredPackItemIndices = null;
+    this.packPageIndex = 0;
+    this.refreshVisiblePackItems();
+  }
+
+  private applyPackItemFilter(resetPage: boolean) {
+    const query = this.normalizeSearch(this.packItemFilter);
+    if (!query) {
+      this.filteredPackItemIndices = null;
+    } else {
+      const matches: number[] = [];
+      for (let i = 0; i < this.packItems.length; i++) {
+        if (this.packItemMatches(this.packItems[i], query)) matches.push(i);
+      }
+      this.filteredPackItemIndices = matches;
+    }
+    if (resetPage) this.packPageIndex = 0;
+    this.refreshVisiblePackItems();
+  }
+
+  private packItemMatches(item: IHomebrewPackItem, query: string): boolean {
+    if (item.name?.toLowerCase().includes(query)) return true;
+    if (item.description?.toLowerCase().includes(query)) return true;
+    for (const [key, value] of Object.entries(item.properties ?? {})) {
+      if (key.toLowerCase().includes(query) || String(value).toLowerCase().includes(query)) return true;
+    }
+    return false;
+  }
+
+  private refreshVisiblePackItems() {
+    const total = this.filteredPackItemIndices ? this.filteredPackItemIndices.length : this.packItems.length;
+    this.filteredPackItemCount = total;
+
+    const pageCount = Math.max(1, Math.ceil(total / this.packPageSize));
+    this.packPageIndex = Math.min(this.packPageIndex, pageCount - 1);
+
+    const start = this.packPageIndex * this.packPageSize;
+    const end = Math.min(start + this.packPageSize, total);
+    const indices: number[] = [];
+    for (let i = start; i < end; i++) {
+      indices.push(this.filteredPackItemIndices ? this.filteredPackItemIndices[i] : i);
+    }
+    this.visiblePackItemIndices = indices;
+  }
+
+  private scrollPackItemsIntoView() {
+    setTimeout(() => this.packItemsTop()?.nativeElement.scrollIntoView({ block: 'start' }));
+  }
+
+  /**
+   * Copy-on-write: the working list shares item objects with the live pack state until an item
+   * is first edited, at which point that single item is cloned so the live state is never mutated.
+   */
+  private editablePackItem(index: number): IHomebrewPackItem {
+    const item = this.packItems[index];
+    if (this.ownedPackItems.has(item)) return item;
+    const copy: IHomebrewPackItem = { ...item, properties: { ...(item.properties ?? {}) } };
+    this.packItems[index] = copy;
+    this.ownedPackItems.add(copy);
+    return copy;
   }
 
   private initPackForm(pack?: IHomebrewPack | null): FormGroup {
