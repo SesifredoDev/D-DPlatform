@@ -87,6 +87,48 @@
       margin-left: 4px;
     }
   }
+  .server-dropdown-btn {
+    width: 100%;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    padding: 0 var(--space-s) !important;
+    border-radius: var(--radius-m);
+    transition: background 0.2s ease;
+
+
+
+    // The actual content wrapper Material injects
+    ::ng-deep .mdc-button__label {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+    }
+
+    .server-icon-mini {
+      flex: 0 0 auto;
+      display: block;      // removes the inline-image baseline gap
+      /* existing styles… */
+    }
+
+    .server-name-text {
+      flex: 1;
+      min-width: 0;
+      line-height: 1;      // stops line-height padding pushing the text down
+      /* existing styles… */
+    }
+
+    .chevron-icon {
+      flex: 0 0 auto;
+      margin-left: 4px;
+      /* existing styles… */
+    }
+  }
+
 
   .empty-server-header {
     width: 100%;
@@ -202,33 +244,60 @@
    ----------------------------------------------------------------------------- */
 
 .identity-section {
-  padding: 0 var(--space-m) var(--space-l);
+  padding: 0 var(--space-m);
 }
 
 .identity-card {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px;
+  align-items: stretch;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 100%);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-l);
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
   position: relative;
+  overflow: hidden;
 
-  &:hover {
-    transform: translateY(-2px);
+  &:hover,
+  &:focus-within,
+  &:has(.identity-main[aria-expanded='true']) {
     border-color: var(--primary);
-    box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-    .edit-hint { opacity: 1; transform: translateX(0); }
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Main clickable area (avatar + info + switch hint) */
+  .identity-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.2s ease;
+
+    &:hover,
+    &:focus-visible { background: rgba(255, 255, 255, 0.05); }
+
+    &[aria-expanded='true'] .switch-hint {
+      color: var(--primary);
+      transform: rotate(180deg);
+    }
   }
 
   .avatar-container {
     position: relative;
+    flex: 0 0 auto;
     .identity-avatar {
+      display: block;
       width: 52px; height: 52px; border-radius: 14px; object-fit: cover;
-      border: 2px solid rgba(255,255,255,0.1);
+      border: 2px solid rgba(255, 255, 255, 0.1);
     }
     .status-indicator {
       position: absolute; bottom: -2px; right: -2px;
@@ -239,26 +308,55 @@
 
   .identity-info {
     flex: 1;
-    .char-name { font-weight: 700; font-size: 16px; color: #fff; margin-bottom: 2px; }
-    .char-race { font-size: 12px; color: rgba(255, 255, 255, 0.5); font-weight: 500; }
+    min-width: 0;
+    .char-name {
+      font-weight: 700; font-size: 16px; color: #fff; margin-bottom: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .char-race {
+      font-size: 12px; color: rgba(255, 255, 255, 0.5); font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
   }
 
-  .edit-hint {
-    font-size: 18px; color: var(--primary); opacity: 0;
-    transform: translateX(-10px); transition: all 0.2s ease;
+  .switch-hint {
+    flex: 0 0 auto;
+    font-size: 20px; width: 20px; height: 20px;
+    color: rgba(255, 255, 255, 0.45);
+    transition: color 0.2s ease, transform 0.2s ease;
+  }
+  .identity-main:hover .switch-hint { color: #fff; }
+
+  /* Manage button: docked on the right edge, separated by a hairline */
+  .identity-settings {
+    flex: 0 0 auto;
+    align-self: stretch;
+    width: 48px;
+    height: auto;
+    padding: 0;
+    border-radius: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    --mdc-icon-button-state-layer-size: 48px;
+    --mat-icon-button-state-layer-size: 48px;
+
+    mat-icon { font-size: 18px; width: 18px; height: 18px; line-height: 18px; }
+    &:hover { color: var(--primary); background: rgba(255, 255, 255, 0.05); }
   }
 }
 
-.char-switcher-row {
-  margin-top: 12px;
-  .char-select-field {
-    width: 100%;
-    ::ng-deep {
-      .mat-mdc-text-field-wrapper { background: rgba(0,0,0,0.2) !important; border-radius: 8px !important; }
-      .mat-mdc-form-field-subscript-wrapper { display: none; }
-      .mat-mdc-select-value { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.7); }
-    }
-  }
+/* Collapsed rail: just the avatar, still opens the switcher */
+.sidebar-container.collapsed .identity-card .identity-main {
+  justify-content: center;
+  gap: 0;
+  padding: 6px;
+}
+
+/* Character switcher menu */
+::ng-deep .character-menu .mat-mdc-menu-item {
+  .menu-icon-img { width: 28px; height: 28px; border-radius: 8px; object-fit: cover; }
+  .menu-check { margin: 0 0 0 auto; color: var(--primary); font-size: 18px; width: 18px; height: 18px; }
+  .mat-mdc-menu-item-text { display: flex; align-items: center; width: 100%; }
 }
 
 /* -----------------------------------------------------------------------------
@@ -509,6 +607,24 @@
   min-width: 76px;
   max-width: 76px;
 
+  .server-dropdown-btn {
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;                 // keeps the button itself centred in the 76px rail
+
+    ::ng-deep .mdc-button__label {
+      justify-content: center;      // centres the icon inside the button
+      width: 100%;
+      padding: 0;
+    }
+
+    .server-icon-mini {
+      margin: 0;                    // drop any leftover side margin
+    }
+  }
+
   .server-header {
     flex: 0 0 auto;
   }
@@ -638,4 +754,14 @@
       span { color: var(--primary); font-weight: 700; }
     }
   }
+}
+
+/* -----------------------------------------------------------------------------
+   DESKTOP (TAURI): SERVER HEADER MATCHES THE TAB BAR HEIGHT / LINE
+   ----------------------------------------------------------------------------- */
+:host-context(.app-window-shell.tauri-window) .server-header {
+  box-sizing: border-box;
+  height: var(--window-bar-height);
+  background: transparent; // sidebar surface already matches --window-bar-bg
+  border-bottom-color: var(--outline);
 }

@@ -5,6 +5,7 @@ import { Dashboard } from './pages/dashboard/dashboard';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import type { Window as TauriWindow } from '@tauri-apps/api/window';
 import { DndSearchDrawer } from './shared/components/dnd-search-drawer/dnd-search-drawer';
+import {environment} from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -32,7 +33,7 @@ export class App implements OnInit, OnDestroy {
 
   ngOnInit() {
     void this.setupWindowFrame();
-    void this.checkForDesktopUpdate();
+    if(environment.production) this.checkForDesktopUpdate().then(r => console.log(r));
   }
 
   ngOnDestroy() {

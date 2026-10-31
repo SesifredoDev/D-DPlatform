@@ -24,8 +24,8 @@
   &::before {
     background-image:
       linear-gradient(
-        var(--server-theme-background-image-previous-overlay),
-        var(--server-theme-background-image-previous-overlay)
+          var(--server-theme-background-image-previous-overlay),
+          var(--server-theme-background-image-previous-overlay)
       ),
       var(--server-theme-background-image-previous);
     filter: blur(var(--server-theme-background-image-previous-blur));
@@ -465,5 +465,24 @@
     .resizer-handle {
       display: none !important;
     }
+  }
+}
+
+/* =================================
+   DESKTOP (TAURI): TABS SHARE THE TOP BAR WITH THE WINDOW CONTROLS
+================================= */
+:host-context(.app-window-shell.tauri-window) .editor-area {
+  .tab-bar {
+    box-sizing: border-box;
+    height: var(--window-bar-height);
+    background: var(--window-bar-bg);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+  }
+
+  /* Right-most pane leaves room for the floating window controls */
+  &:not(.split-active) #left-pane .tab-bar,
+  .right-pane .tab-bar {
+    margin-right: var(--window-controls-width);
   }
 }

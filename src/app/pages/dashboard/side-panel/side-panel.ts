@@ -337,6 +337,12 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     }
   }
 
+  get visibleCharacters(): ICharacter[] {
+    const server = this.selectedServer;
+    if (!server) return this.characters;
+    return this.characters.filter(c => c.servers.includes(server._id) || c.servers[0] === '0');
+  }
+
   onCharacterChange(char: ICharacter) {
     this.debugLog('Character selected', char);
     this.selectedCharacter = char;
@@ -607,13 +613,13 @@ export class SidePanel implements AfterViewInit, OnDestroy {
     const peerId = member.user?._id;
     this.unreadBadgeService.markWhisperRead(peerId);
     this.serverService.getOrCreateWhisperChannel(this.selectedServer._id, member.user._id).subscribe(channel => {
-        if (channel._id) {
-          this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
-          this.unreadBadgeService.markWhisperRead(peerId, channel._id);
-          this.channelService.setChannelObservable(channel);
-          this.tabService.openTab(channel._id, channel.name, 'whisper');
-          this.actionPerformed.emit();
-        }
+      if (channel._id) {
+        this.rememberLastOpenState({ serverId: this.selectedServer?._id, channelId: channel._id });
+        this.unreadBadgeService.markWhisperRead(peerId, channel._id);
+        this.channelService.setChannelObservable(channel);
+        this.tabService.openTab(channel._id, channel.name, 'whisper');
+        this.actionPerformed.emit();
+      }
     });
   }
 

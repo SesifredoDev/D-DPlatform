@@ -1,17 +1,7 @@
-<div class="app-window-shell" [class.tauri-window]="isTauriWindow()">
+<div class="app-window-shell" [class.tauri-window]="isTauriWindow()" [class.panel-window]="!!tabPanelId">
   @if (isTauriWindow()) {
-    <header
-      class="app-window-frame"
-      data-tauri-drag-region
-      (mousedown)="startWindowDrag($event)"
-      (dblclick)="toggleMaximize()">
-      <div class="app-window-drag-zone" data-tauri-drag-region>
-        <div class="app-window-title" data-tauri-drag-region>
-          <span class="app-window-mark" aria-hidden="true">A</span>
-          <span></span>
-        </div>
-      </div>
-
+    <!-- Floats over the right end of the tab bar so window controls and tabs read as one bar -->
+    <header class="app-window-frame">
       <div class="app-window-controls">
         @if (!tabPanelId) {
           <button type="button" class="window-control" title="D&D search" aria-label="Open D&D 5e search" (click)="openDndSearch()">

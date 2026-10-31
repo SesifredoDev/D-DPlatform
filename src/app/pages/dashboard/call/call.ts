@@ -61,6 +61,8 @@ import type { AstralOptimizationJob } from '../../../shared/services/astral-reco
 import { AstralPackagingQueueService } from '../../../shared/services/astral-recording/astral-packaging-queue';
 import type { AstralPackagingJob } from '../../../shared/services/astral-recording/astral-packaging-queue';
 import { VttSync } from '../../../shared/services/vttsync/vttsync';
+import { MessagingSocketService } from '../../../shared/services/messaging-socket/messaging-socket.service';
+import { UserService } from '../../../shared/services/user/user';
 import type { ParticipantStream, VttStopEvent, VttPlaybackEvent, VttSessionState, MicrophoneProcessingMode, RemoteVideoQualityLevel, StoredCallMediaPreferences, RemoteContextMenuState, PriorityGridPlacement, CallPlaybackSource, RecordedCallParticipantSnapshot, RecordedSpotifyState, RecordedCallEnvironmentState } from '../../../shared/models/pages/dashboard/call/call.model';
 import {
   CALL_DEFAULT_PC_SOURCE,
@@ -117,6 +119,18 @@ import {
   normalizeSpotifyVolume
 } from './call-recorded-spotify';
 export type { VttStopEvent, VttPlaybackEvent } from '../../../shared/models/pages/dashboard/call/call.model';
+
+interface CallWhisperToast {
+  id: string;
+  sender: string;
+  content: string;
+  durationMs: number;
+}
+
+const WHISPER_MIN_MS = 5000;
+const WHISPER_MAX_MS = 20000;
+const WHISPER_MS_PER_CHAR = 40; // ~375 chars reaches the 20s cap
+const WHISPER_MAX_VISIBLE = 4;
 
 type CallLivestreamBroadcastOverlayType = 'theme' | 'image' | 'text' | 'atmosphere';
 
@@ -409,6 +423,10 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   dmCharacter: ICharacter = CALL_DM_CHARACTER;
 
   private readonly subscriptions = new Subscription();
+
+  whisperToasts: CallWhisperToast[] = [];
+  private whisperTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private currentUserId: string | null = null;
   private syncDebounceTimer: any = null;
   private isSyncing: boolean = false;
   private pendingSoundCloudSyncState: any = null;
@@ -503,7 +521,9 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     private astralOptimizer: AstralOptimizerService,
     private astralPackagingQueue: AstralPackagingQueueService,
     private astralPlaybackDrop: AstralPlaybackDropService,
-    private vttSync: VttSync
+    private vttSync: VttSync,
+    private messagingSocket: MessagingSocketService,
+    private userService: UserService
   ) {
     this.activeColors = this.themeService.getColors();
     this.rememberValidThemeBackground(this.activeColors);
@@ -511,6 +531,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
   async ngOnInit() {
     this.bindRouteParams();
+    this.bindWhisperState();
     this.bindServerState();
     this.bindCallLivestreamState();
     await this.initializeMediaState();
@@ -1954,12 +1975,12 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     const packagePath = typeof imported.packagePath === 'string' ? imported.packagePath : '';
     const recordingPackage = !imported.remoteMediaUrlTemplate && packagePath.toLowerCase().endsWith('.astral')
       ? {
-          storage: 'astral' as const,
-          path: packagePath,
-          size: imported.packageSize,
-          formatVersion: Number(manifest.formatVersion) || 1,
-          createdAt: manifest.packagedAt ?? new Date().toISOString()
-        }
+        storage: 'astral' as const,
+        path: packagePath,
+        size: imported.packageSize,
+        formatVersion: Number(manifest.formatVersion) || 1,
+        createdAt: manifest.packagedAt ?? new Date().toISOString()
+      }
       : null;
 
     return {
@@ -2133,7 +2154,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     while (
       this.callPlaybackEnvironmentEventIndex < events.length &&
       events[this.callPlaybackEnvironmentEventIndex].timeMs <= state.currentTimeMs
-    ) {
+      ) {
       this.applyCallEnvironmentEvent(events[this.callPlaybackEnvironmentEventIndex]);
       this.callPlaybackEnvironmentEventIndex += 1;
     }
@@ -4802,6 +4823,66 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return null;
   }
 
+  private bindWhisperState(): void {
+    this.subscriptions.add(this.userService.getMe().subscribe({
+      next: user => { this.currentUserId = user?._id ?? null; },
+      error: err => console.error('Failed to resolve user for whisper overlay', err)
+    }));
+
+    this.subscriptions.add(this.messagingSocket.newMessage$.subscribe(message => {
+      this.handleIncomingWhisper(message);
+    }));
+  }
+
+  private handleIncomingWhisper(message: any): void {
+    if (!message?.isWhisper || !this.currentUserId) return;
+
+    const recipientId = this.getEntityId(message.recipient ?? message.recipientId);
+    const authorId = this.getEntityId(message.author);
+    // Only whispers addressed to me, not ones I sent.
+    if (recipientId !== this.currentUserId || authorId === this.currentUserId) return;
+
+    const id = String(message._id ?? `${Date.now()}-${Math.random()}`);
+    if (this.whisperToasts.some(t => t.id === id)) return;
+
+    let content = String(message.content ?? '').trim();
+    if (!content && message.attachments?.length) content = '[Attachment]';
+    if (!content) return;
+
+    const durationMs = Math.min(
+      WHISPER_MAX_MS,
+      Math.max(WHISPER_MIN_MS, WHISPER_MIN_MS + content.length * WHISPER_MS_PER_CHAR)
+    );
+
+    const toast: CallWhisperToast = {
+      id,
+      sender: message.character?.name || message.author?.username || message.author?.name || 'Someone',
+      content,
+      durationMs
+    };
+
+    this.whisperToasts = [...this.whisperToasts, toast];
+    while (this.whisperToasts.length > WHISPER_MAX_VISIBLE) {
+      this.dismissWhisper(this.whisperToasts[0].id);
+    }
+
+    this.whisperTimers.set(id, setTimeout(() => this.dismissWhisper(id), durationMs));
+    this.cdr.detectChanges();
+  }
+
+  dismissWhisper(id: string): void {
+    const timer = this.whisperTimers.get(id);
+    if (timer) clearTimeout(timer);
+    this.whisperTimers.delete(id);
+    this.whisperToasts = this.whisperToasts.filter(t => t.id !== id);
+    this.cdr.detectChanges();
+  }
+
+  private getEntityId(value: any): string | null {
+    if (!value) return null;
+    return typeof value === 'object' ? String(value._id ?? value.id ?? '') || null : String(value);
+  }
+
   ngOnDestroy() {
     this.gridResizeObserver?.disconnect();
     this.gridResizeObserver = null;
@@ -4810,6 +4891,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     this.resetMicTestForCaptureChange();
     this.stopMicInputMonitor();
     this.stopSoundCloudCallSyncTimers();
+    this.whisperTimers.forEach(timer => clearTimeout(timer));
+    this.whisperTimers.clear();
     this.subscriptions.unsubscribe();
     this.teardownAllRemoteAudioOutputs();
     if (this.deviceReloadTimer) {
@@ -5627,8 +5710,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   removeRequest(request: any) {
-      this.spotifyRequests = this.spotifyRequests.filter(r => r !== request);
-      this.recordSpotifyRequestsSnapshot();
+    this.spotifyRequests = this.spotifyRequests.filter(r => r !== request);
+    this.recordSpotifyRequestsSnapshot();
   }
 
   canJoinVttSession(): boolean {

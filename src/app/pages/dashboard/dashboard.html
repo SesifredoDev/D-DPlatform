@@ -24,7 +24,7 @@
        (dragover)="onNativeTabDragOver($event)"
        (drop)="onNativeTabDrop($event, leftPaneId)">
 
-    <div class="tab-bar">
+    <div class="tab-bar" data-tauri-drag-region>
       @for (tab of leftTabs; track tab.id) {
         <div class="tab"
              [class.active]="tab.active"
@@ -104,7 +104,7 @@
        (drop)="onNativeTabDrop($event, rightPaneId)">
 
     @if (rightTabs.length > 0) {
-      <div class="tab-bar">
+      <div class="tab-bar" data-tauri-drag-region>
         @for (tab of rightTabs; track tab.id) {
           <div class="tab"
                [class.active]="tab.active"
@@ -158,12 +158,12 @@
               </app-spotify-player>
             } @else if (tab.type === 'obsidian') {
               <app-obsidian-view
-              [serverId]="tab.data.serverId"
-              [openPath]="tab.data?.openPath ?? null"
-              [openRequestId]="tab.data?.openRequestId ?? null"
-              [previewOnly]="tab.data?.previewOnly === true"
-              (previewTabRequested)="openObsidianPreviewTab($event, tab)">
-            </app-obsidian-view>
+                [serverId]="tab.data.serverId"
+                [openPath]="tab.data?.openPath ?? null"
+                [openRequestId]="tab.data?.openRequestId ?? null"
+                [previewOnly]="tab.data?.previewOnly === true"
+                (previewTabRequested)="openObsidianPreviewTab($event, tab)">
+              </app-obsidian-view>
             }
           </div>
         }
@@ -181,4 +181,3 @@
 
 
 </main>
-

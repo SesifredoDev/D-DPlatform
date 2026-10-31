@@ -4,7 +4,7 @@
   [ngStyle]="collapsed ? collapsedContainerStyles : null">
 
   <!-- 1. SERVER HEADER (Switcher now at top for better UX) -->
-  <header class="server-header" *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
+  <header class="server-header" data-tauri-drag-region *ngIf="selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
     <button
       mat-button
       class="server-dropdown-btn"
@@ -49,7 +49,7 @@
     </mat-menu>
   </header>
 
-  <header class="server-header" *ngIf="!selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
+  <header class="server-header" data-tauri-drag-region *ngIf="!selectedServer" [ngStyle]="collapsed ? collapsedHeaderStyles : null">
     <div class="empty-server-header" *ngIf="!collapsed">
       <span class="server-name-text">No Realms Found</span>
     </div>
@@ -89,42 +89,63 @@
       </div>
     </div>
 
-    <!-- CHARACTER SECTION (Your Identity) -->
+    <!-- CHARACTER SECTION: one unified control (active character + switcher + manage) -->
     <section
       class="identity-section"
       *ngIf="selectedCharacter && servers.length > 0"
       [ngStyle]="collapsed ? collapsedSectionStyles : null">
-      <div
-        class="identity-card"
-        (click)="goToManageCharacters()"
-        matTooltip="Manage Characters"
-        [ngStyle]="collapsed ? collapsedIdentityCardStyles : null">
-        <div class="avatar-container">
-          <img
-            class="identity-avatar"
-            [src]="getCharacterIconUrl(selectedCharacter)"
-            (error)="$any($event.target).src = 'assets/default-avatar.png'">
-          <div class="status-indicator online"></div>
-        </div>
-        <div class="identity-info" *ngIf="!collapsed">
-          <div class="char-name">{{ selectedCharacter.name }}</div>
-          <div class="char-race">{{ selectedCharacter.race }}</div>
-        </div>
-        <mat-icon class="edit-hint" *ngIf="!collapsed">settings</mat-icon>
+      <div class="identity-card" [ngStyle]="collapsed ? collapsedIdentityCardStyles : null">
+
+        <!-- Main area: shows the active character, click opens the switcher -->
+        <button
+          type="button"
+          class="identity-main"
+          [matMenuTriggerFor]="characterMenu"
+          [attr.aria-label]="'Active character: ' + selectedCharacter.name + '. Switch character'"
+          [matTooltip]="collapsed ? selectedCharacter.name + ' (switch character)' : ''"
+          matTooltipPosition="right">
+          <div class="avatar-container">
+            <img
+              class="identity-avatar"
+              [src]="getCharacterIconUrl(selectedCharacter)"
+              (error)="$any($event.target).src = 'assets/default-avatar.png'">
+            <div class="status-indicator online"></div>
+          </div>
+          <div class="identity-info" *ngIf="!collapsed">
+            <div class="char-name">{{ selectedCharacter.name }}</div>
+            <div class="char-race">{{ selectedCharacter.race }}</div>
+          </div>
+          <mat-icon class="switch-hint" *ngIf="!collapsed">unfold_more</mat-icon>
+        </button>
+
+        <!-- Manage button lives inside the same card -->
+        <button
+          mat-icon-button
+          type="button"
+          class="identity-settings"
+          *ngIf="!collapsed"
+          (click)="goToManageCharacters()"
+          aria-label="Manage characters"
+          matTooltip="Manage Characters">
+          <mat-icon>settings</mat-icon>
+        </button>
       </div>
 
-      <!-- Character Switcher -->
-      <div class="char-switcher-row" *ngIf="selectedServer && !collapsed">
-        <mat-form-field appearance="outline" class="char-select-field">
-          <mat-select [value]="selectedCharacter" (selectionChange)="onCharacterChange($event.value)">
-            @for (char of characters; track char) {
-              @if (char.servers.includes(selectedServer._id) || char.servers[0] === '0') {
-                <mat-option [value]="char">{{ char.name }}</mat-option>
-              }
-            }
-          </mat-select>
-        </mat-form-field>
-      </div>
+      <mat-menu #characterMenu="matMenu" xPosition="after" yPosition="below" class="custom-glass-menu character-menu">
+        <div class="menu-label">Switch Character</div>
+        @for (char of visibleCharacters; track char) {
+          <button mat-menu-item (click)="onCharacterChange(char)" [class.active-item]="char._id === selectedCharacter._id">
+            <img class="menu-icon-img" [src]="getCharacterIconUrl(char)" (error)="$any($event.target).src = 'assets/default-avatar.png'">
+            <span>{{ char.name }}</span>
+            <mat-icon class="menu-check" *ngIf="char._id === selectedCharacter._id">check</mat-icon>
+          </button>
+        }
+        <mat-divider></mat-divider>
+        <button mat-menu-item (click)="goToManageCharacters()">
+          <mat-icon>settings</mat-icon>
+          <span>Manage Characters</span>
+        </button>
+      </mat-menu>
     </section>
 
     <!-- NAVIGATION: CHANNELS -->

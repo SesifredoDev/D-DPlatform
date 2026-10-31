@@ -77,33 +77,33 @@
             </div>
           </div>
 
-<!--          <div class="mic-test-panel" [class.disabled]="!hasMicTestSource">-->
-<!--            <div class="mic-test-header">-->
-<!--              <div class="mic-test-title">-->
-<!--                <strong>Mic Test</strong>-->
-<!--                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>-->
-<!--              </div>-->
-<!--              <button-->
-<!--                class="btn-mic-test"-->
-<!--                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"-->
-<!--                [disabled]="!canRunMicTest && !isMicTestRecording"-->
-<!--              >-->
-<!--                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>-->
-<!--                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>-->
-<!--              </button>-->
-<!--            </div>-->
-<!--            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">-->
-<!--              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>-->
-<!--            </div>-->
-<!--            <audio-->
-<!--              #micTestAudio-->
-<!--              *ngIf="micTestPlaybackUrl"-->
-<!--              class="mic-test-playback"-->
-<!--              controls-->
-<!--              preload="auto"-->
-<!--              [src]="micTestPlaybackUrl"-->
-<!--            ></audio>-->
-<!--          </div>-->
+          <!--          <div class="mic-test-panel" [class.disabled]="!hasMicTestSource">-->
+          <!--            <div class="mic-test-header">-->
+          <!--              <div class="mic-test-title">-->
+          <!--                <strong>Mic Test</strong>-->
+          <!--                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>-->
+          <!--              </div>-->
+          <!--              <button-->
+          <!--                class="btn-mic-test"-->
+          <!--                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"-->
+          <!--                [disabled]="!canRunMicTest && !isMicTestRecording"-->
+          <!--              >-->
+          <!--                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>-->
+          <!--                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>-->
+          <!--              </button>-->
+          <!--            </div>-->
+          <!--            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">-->
+          <!--              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>-->
+          <!--            </div>-->
+          <!--            <audio-->
+          <!--              #micTestAudio-->
+          <!--              *ngIf="micTestPlaybackUrl"-->
+          <!--              class="mic-test-playback"-->
+          <!--              controls-->
+          <!--              preload="auto"-->
+          <!--              [src]="micTestPlaybackUrl"-->
+          <!--            ></audio>-->
+          <!--          </div>-->
 
           <div *ngIf="isMobileBrowser" class="mobile-permission-prompt">
             <p>{{ mobileJoinModeDescription }} Mobile video targets 1080p by default. 1440p can be enabled experimentally.</p>
@@ -243,8 +243,8 @@
                 </div>
                 <!-- Local Ping Badge -->
                 <div class="ping-badge" *ngIf="localParticipantPing" [class.laggy]="localParticipantPing > 200">
-                    <mat-icon>sensors</mat-icon>
-                    <span>{{ localParticipantPing }}ms</span>
+                  <mat-icon>sensors</mat-icon>
+                  <span>{{ localParticipantPing }}ms</span>
                 </div>
               </div>
               <div class="sub-row">
@@ -318,9 +318,9 @@
               <div class="portrait-container">
                 <div class="portrait-inner">
                   <ng-container *ngIf="remote.userData.name === 'DM'">
-                      <div class="dm-portrait">
-                        <mat-icon>dvr</mat-icon>
-                      </div>
+                    <div class="dm-portrait">
+                      <mat-icon>dvr</mat-icon>
+                    </div>
                   </ng-container>
                   <ng-container *ngIf="remote.userData.name !== 'DM'">
                     <img [src]="remote.userData.icon || 'https://www.gravatar.com/avatar/'+remote.userData._id+'?d=identicon'" class="char-portrait">
@@ -337,10 +337,10 @@
                   <div *ngIf="remote.diagnostics" [class]="'quality-badge ' + getConnectionQualityClass(remote.diagnostics)">
                     {{ getConnectionQualityLabel(remote.diagnostics) }}
                   </div>
-                   <!-- Remote Ping Badge -->
+                  <!-- Remote Ping Badge -->
                   <div class="ping-badge" *ngIf="remote.ping" [class.laggy]="remote.ping > 200">
-                      <mat-icon>sensors</mat-icon>
-                      <span>{{ remote.ping }}ms</span>
+                    <mat-icon>sensors</mat-icon>
+                    <span>{{ remote.ping }}ms</span>
                   </div>
                 </div>
                 <div class="sub-row">
@@ -680,112 +680,112 @@
 
     <!-- Theme Picker Custom Overlay -->
     <div class="theme-picker-overlay glass call-overlay-content" *ngIf="showThemePicker">
-        <div class="overlay-header">
-            <h3>Atmosphere</h3>
-            <div class="header-actions">
-               <button class="btn-reset-default" (click)="resetToServerDefault()" matTooltip="Reset to Default">
-                  <mat-icon>settings_backup_restore</mat-icon>
-               </button>
-               <button class="btn-close" (click)="cancelTheme()">
-                  <mat-icon>close</mat-icon>
-               </button>
-            </div>
+      <div class="overlay-header">
+        <h3>Atmosphere</h3>
+        <div class="header-actions">
+          <button class="btn-reset-default" (click)="resetToServerDefault()" matTooltip="Reset to Default">
+            <mat-icon>settings_backup_restore</mat-icon>
+          </button>
+          <button class="btn-close" (click)="cancelTheme()">
+            <mat-icon>close</mat-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="color-scroll-area" (click)="$event.stopPropagation()" *ngIf="isServerOwner">
+        <div class="color-field">
+          <label>Theme Color</label>
+          <input type="color" [ngModel]="activeColors.primary" (ngModelChange)="updateThemeLocally('primary', $event)">
+        </div>
+        <div class="color-field">
+          <label>Background</label>
+          <input type="color" [ngModel]="activeColors.background" (ngModelChange)="updateThemeLocally('background', $event)">
         </div>
 
-        <div class="color-scroll-area" (click)="$event.stopPropagation()" *ngIf="isServerOwner">
-           <div class="color-field">
-             <label>Theme Color</label>
-             <input type="color" [ngModel]="activeColors.primary" (ngModelChange)="updateThemeLocally('primary', $event)">
-           </div>
-           <div class="color-field">
-             <label>Background</label>
-             <input type="color" [ngModel]="activeColors.background" (ngModelChange)="updateThemeLocally('background', $event)">
-           </div>
+        <div class="theme-image-field">
+          <div
+            class="theme-image-preview"
+            [class.blurred]="isThemeBackgroundBlurred"
+            [style.background-image]="themeBackgroundImagePreviewStyle">
+            <mat-icon *ngIf="!hasThemeBackgroundImage">image</mat-icon>
+          </div>
 
-           <div class="theme-image-field">
-             <div
-               class="theme-image-preview"
-               [class.blurred]="isThemeBackgroundBlurred"
-               [style.background-image]="themeBackgroundImagePreviewStyle">
-               <mat-icon *ngIf="!hasThemeBackgroundImage">image</mat-icon>
-             </div>
+          <div class="theme-image-controls">
+            <input
+              type="file"
+              #themeBackgroundImageInput
+              hidden
+              accept="image/*"
+              (change)="onThemeBackgroundImageSelected($event)">
 
-             <div class="theme-image-controls">
-               <input
-                 type="file"
-                 #themeBackgroundImageInput
-                 hidden
-                 accept="image/*"
-                 (change)="onThemeBackgroundImageSelected($event)">
+            <button class="btn-image-select" type="button" (click)="themeBackgroundImageInput.click()">
+              <mat-icon>image</mat-icon>
+              <span>{{ hasThemeBackgroundImage ? 'Change Image' : 'Add Image' }}</span>
+            </button>
 
-               <button class="btn-image-select" type="button" (click)="themeBackgroundImageInput.click()">
-                 <mat-icon>image</mat-icon>
-                 <span>{{ hasThemeBackgroundImage ? 'Change Image' : 'Add Image' }}</span>
-               </button>
-
-               <button
-                 *ngIf="hasThemeBackgroundImage"
-                 class="btn-image-remove"
-                 type="button"
-                 (click)="clearThemeBackgroundImage(themeBackgroundImageInput)">
-                 Remove
-               </button>
-
-               <label class="image-blur-toggle" [class.disabled]="!hasThemeBackgroundImage">
-                 <input
-                   type="checkbox"
-                   [ngModel]="!!activeColors.backgroundImageBlur"
-                   (ngModelChange)="updateThemeLocally('backgroundImageBlur', $event)"
-                   [disabled]="!hasThemeBackgroundImage">
-                 <span>Blur image</span>
-               </label>
-             </div>
-           </div>
-
-           <!-- Pinned Themes Section -->
-           <div class="pinned-section">
-              <div class="section-title">
-                <span>Pinned Favorites</span>
-                <button class="btn-add-pin" (click)="showPinNaming = !showPinNaming" matTooltip="Pin Current Colors">
-                  <mat-icon>push_pin</mat-icon>
-                </button>
-              </div>
-
-              <!-- Pin Naming Input -->
-              <div class="pin-naming-box" *ngIf="showPinNaming">
-                <input type="text" [(ngModel)]="newThemeName" placeholder="Theme Name..." (keyup.enter)="pinCurrentTheme()">
-                <button (click)="pinCurrentTheme()"><mat-icon>check</mat-icon></button>
-              </div>
-
-              <div class="pinned-list">
-                 <div *ngFor="let t of pinnedThemes" class="pinned-chip" (click)="selectPinnedTheme(t)">
-                    <div class="chip-preview" [style.background]="getPinnedThemePreview(t)"></div>
-                    <span class="chip-name">{{ t.name }}</span>
-                    <mat-icon class="btn-delete-pin" (click)="$event.stopPropagation(); themeService.removePinnedTheme(t.id)">close</mat-icon>
-                 </div>
-                 <div *ngIf="pinnedThemes.length === 0" class="empty-pinned">No pinned themes.</div>
-              </div>
-           </div>
-
-           <div class="picker-actions">
-              <button class="btn-confirm" (click)="confirmTheme()">
-                <mat-icon>check</mat-icon>
-                <span>Broadcast to All</span>
-              </button>
-           </div>
-        </div>
-
-        <div class="guest-theme-view" *ngIf="!isServerOwner">
-          <p>The Dungeon Master is controlling the atmosphere.</p>
-          <div class="current-swatch-preview">
-            <div [style.background]="activeColors.primary"></div>
-            <div [style.background]="activeColors.background"></div>
-            <div
+            <button
               *ngIf="hasThemeBackgroundImage"
-              [class.blurred]="isThemeBackgroundBlurred"
-              [style.background-image]="themeBackgroundImagePreviewStyle"></div>
+              class="btn-image-remove"
+              type="button"
+              (click)="clearThemeBackgroundImage(themeBackgroundImageInput)">
+              Remove
+            </button>
+
+            <label class="image-blur-toggle" [class.disabled]="!hasThemeBackgroundImage">
+              <input
+                type="checkbox"
+                [ngModel]="!!activeColors.backgroundImageBlur"
+                (ngModelChange)="updateThemeLocally('backgroundImageBlur', $event)"
+                [disabled]="!hasThemeBackgroundImage">
+              <span>Blur image</span>
+            </label>
           </div>
         </div>
+
+        <!-- Pinned Themes Section -->
+        <div class="pinned-section">
+          <div class="section-title">
+            <span>Pinned Favorites</span>
+            <button class="btn-add-pin" (click)="showPinNaming = !showPinNaming" matTooltip="Pin Current Colors">
+              <mat-icon>push_pin</mat-icon>
+            </button>
+          </div>
+
+          <!-- Pin Naming Input -->
+          <div class="pin-naming-box" *ngIf="showPinNaming">
+            <input type="text" [(ngModel)]="newThemeName" placeholder="Theme Name..." (keyup.enter)="pinCurrentTheme()">
+            <button (click)="pinCurrentTheme()"><mat-icon>check</mat-icon></button>
+          </div>
+
+          <div class="pinned-list">
+            <div *ngFor="let t of pinnedThemes" class="pinned-chip" (click)="selectPinnedTheme(t)">
+              <div class="chip-preview" [style.background]="getPinnedThemePreview(t)"></div>
+              <span class="chip-name">{{ t.name }}</span>
+              <mat-icon class="btn-delete-pin" (click)="$event.stopPropagation(); themeService.removePinnedTheme(t.id)">close</mat-icon>
+            </div>
+            <div *ngIf="pinnedThemes.length === 0" class="empty-pinned">No pinned themes.</div>
+          </div>
+        </div>
+
+        <div class="picker-actions">
+          <button class="btn-confirm" (click)="confirmTheme()">
+            <mat-icon>check</mat-icon>
+            <span>Broadcast to All</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="guest-theme-view" *ngIf="!isServerOwner">
+        <p>The Dungeon Master is controlling the atmosphere.</p>
+        <div class="current-swatch-preview">
+          <div [style.background]="activeColors.primary"></div>
+          <div [style.background]="activeColors.background"></div>
+          <div
+            *ngIf="hasThemeBackgroundImage"
+            [class.blurred]="isThemeBackgroundBlurred"
+            [style.background-image]="themeBackgroundImagePreviewStyle"></div>
+        </div>
+      </div>
     </div>
 
     <div class="device-routing-overlay glass call-overlay-content" *ngIf="showDeviceRouting && !isMobileBrowser">
@@ -884,36 +884,36 @@
           </div>
         </div>
 
-<!--        <div class="device-routing-section">-->
-<!--          <div class="section-title">Mic Test</div>-->
-<!--          <div class="mic-test-panel compact" [class.disabled]="!hasMicTestSource">-->
-<!--            <div class="mic-test-header">-->
-<!--              <div class="mic-test-title">-->
-<!--                <strong>Local Sample</strong>-->
-<!--                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>-->
-<!--              </div>-->
-<!--              <button-->
-<!--                class="btn-mic-test"-->
-<!--                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"-->
-<!--                [disabled]="!canRunMicTest && !isMicTestRecording"-->
-<!--              >-->
-<!--                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>-->
-<!--                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>-->
-<!--              </button>-->
-<!--            </div>-->
-<!--            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">-->
-<!--              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>-->
-<!--            </div>-->
-<!--            <audio-->
-<!--              #micTestAudio-->
-<!--              *ngIf="micTestPlaybackUrl"-->
-<!--              class="mic-test-playback"-->
-<!--              controls-->
-<!--              preload="auto"-->
-<!--              [src]="micTestPlaybackUrl"-->
-<!--            ></audio>-->
-<!--          </div>-->
-<!--        </div>-->
+        <!--        <div class="device-routing-section">-->
+        <!--          <div class="section-title">Mic Test</div>-->
+        <!--          <div class="mic-test-panel compact" [class.disabled]="!hasMicTestSource">-->
+        <!--            <div class="mic-test-header">-->
+        <!--              <div class="mic-test-title">-->
+        <!--                <strong>Local Sample</strong>-->
+        <!--                <span [class.error]="!!micTestError">{{ micTestStatusText }}</span>-->
+        <!--              </div>-->
+        <!--              <button-->
+        <!--                class="btn-mic-test"-->
+        <!--                (click)="isMicTestRecording ? stopMicTestRecording() : startMicTestRecording()"-->
+        <!--                [disabled]="!canRunMicTest && !isMicTestRecording"-->
+        <!--              >-->
+        <!--                <mat-icon>{{ isMicTestRecording ? 'stop_circle' : 'radio_button_checked' }}</mat-icon>-->
+        <!--                <span>{{ isMicTestRecording ? 'Stop' : 'Record Test' }}</span>-->
+        <!--              </button>-->
+        <!--            </div>-->
+        <!--            <div class="mic-level-meter" [class.inactive]="!canRunMicTest && !isMicTestRecording">-->
+        <!--              <div class="mic-level-fill" [style.width.%]="micInputLevelPercent"></div>-->
+        <!--            </div>-->
+        <!--            <audio-->
+        <!--              #micTestAudio-->
+        <!--              *ngIf="micTestPlaybackUrl"-->
+        <!--              class="mic-test-playback"-->
+        <!--              controls-->
+        <!--              preload="auto"-->
+        <!--              [src]="micTestPlaybackUrl"-->
+        <!--            ></audio>-->
+        <!--          </div>-->
+        <!--        </div>-->
       </div>
     </div>
 
@@ -1286,5 +1286,23 @@
       <markdown [data]="activeOverlayText"></markdown>
     </div>
   </div>
+
+  <!-- WHISPER OVERLAY -->
+  @if (whisperToasts.length) {
+    <div class="whisper-overlay" aria-live="polite">
+      @for (toast of whisperToasts; track toast.id) {
+        <div class="whisper-toast glass call-overlay-content"
+             [style.--whisper-duration.ms]="toast.durationMs"
+             (click)="dismissWhisper(toast.id)">
+          <div class="whisper-header">
+            <mat-icon>visibility_off</mat-icon>
+            <strong>Whisper from {{ toast.sender }}</strong>
+          </div>
+          <p class="whisper-body">{{ toast.content }}</p>
+          <div class="whisper-progress"></div>
+        </div>
+      }
+    </div>
+  }
 
 </div>
