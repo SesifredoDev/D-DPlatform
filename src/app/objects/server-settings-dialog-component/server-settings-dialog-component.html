@@ -24,6 +24,10 @@
           @if (tab.id === 'channels') {
             <span class="nav-count">{{ manageableChannels.length }}</span>
           }
+
+          @if (tab.id === 'homebrew-packs') {
+            <span class="nav-count">{{ attachedModpacksCount }}</span>
+          }
         </button>
       }
     </nav>
@@ -106,8 +110,6 @@
                 <h2>{{ settingsForm.get('name')?.value || serverDetails?.name || server.name }}</h2>
                 <p>{{ selectedFile ? 'New icon selected' : 'Icon and name shown across the dashboard.' }}</p>
               </div>
-
-
             </section>
 
             <section class="server-details-card">
@@ -764,6 +766,197 @@
               <mat-icon>tag</mat-icon>
               <h3>Select a channel</h3>
               <p>Pick a channel from the list or create a new one.</p>
+            </div>
+          }
+        </section>
+      </section>
+    }
+
+    @if (activeTab === 'homebrew-packs') {
+      <section class="manager-shell">
+        <aside class="list-panel">
+          <div class="list-header">
+            <div>
+              <span class="eyebrow">Local Modpacks</span>
+              <strong>{{ allModpacks.length }}</strong>
+            </div>
+
+            <div class="list-actions">
+              <input
+                type="file"
+                #packFileInput
+                hidden
+                accept=".json"
+                (change)="onImportPackFile($event)">
+              <button mat-icon-button type="button" (click)="packFileInput.click()" matTooltip="Import Pack JSON">
+                <mat-icon>file_upload</mat-icon>
+              </button>
+              <button mat-icon-button type="button" (click)="createNewPack()" matTooltip="Create Modpack">
+                <mat-icon>add</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <div class="list-scroll">
+            @for (pack of allModpacks; track pack.id) {
+              <div
+                class="list-item pack-item"
+                [class.active]="selectedPack?.id === pack.id && !isCreatingPack"
+                (click)="selectPack(pack)">
+                <span class="item-main">
+                  <span class="item-name">{{ pack.name }}</span>
+                  <span class="item-meta">v{{ pack.version || '1.0.0' }} - {{ pack.items.length }} items</span>
+                </span>
+
+                <mat-slide-toggle
+                  [checked]="isPackAttached(pack)"
+                  (click)="$event.stopPropagation()"
+                  (change)="togglePackAttachment(pack, $event.checked)"
+                  matTooltip="Attach to this server">
+                </mat-slide-toggle>
+              </div>
+            } @empty {
+              <div class="empty-list">No local modpacks found.</div>
+            }
+          </div>
+        </aside>
+
+        <section class="editor-panel">
+          @if (selectedPack || isCreatingPack) {
+            <form [formGroup]="packForm" (ngSubmit)="onSavePack()" class="editor-form">
+              <header class="editor-header">
+                <div>
+                  <span class="eyebrow">{{ isCreatingPack ? 'New Modpack' : 'Modpack Settings' }}</span>
+                  <h1>{{ isCreatingPack ? 'Create Homebrew Pack' : selectedPack?.name }}</h1>
+                </div>
+
+                @if (!isCreatingPack && selectedPack) {
+                  <button
+                    mat-stroked-button
+                    type="button"
+                    (click)="togglePackAttachment(selectedPack, !isPackAttached(selectedPack))">
+                    <mat-icon>{{ isPackAttached(selectedPack) ? 'link_off' : 'link' }}</mat-icon>
+                    <span>{{ isPackAttached(selectedPack) ? 'Detach from Server' : 'Attach to Server' }}</span>
+                  </button>
+                }
+              </header>
+
+              <div class="editor-section compact-grid">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Pack Name</mat-label>
+                  <input matInput formControlName="name" placeholder="Eldritch Spells & Items">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline">
+                  <mat-label>Version</mat-label>
+                  <input matInput formControlName="version" placeholder="1.0.0">
+                </mat-form-field>
+
+                <mat-form-field appearance="outline">
+                  <mat-label>Author</mat-label>
+                  <input matInput formControlName="author" placeholder="DM Paolo">
+                </mat-form-field>
+              </div>
+
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Description</mat-label>
+                <textarea matInput formControlName="description" rows="2" placeholder="Brief summary of this homebrew collection..."></textarea>
+              </mat-form-field>
+
+              <mat-divider></mat-divider>
+
+              <div class="editor-section">
+                <div class="section-title">
+                  <h3>Pack Items ({{ packItems.length }})</h3>
+                  <button mat-stroked-button type="button" (click)="addPackItem()">
+                    <mat-icon>add</mat-icon> Add Item
+                  </button>
+                </div>
+
+                <div class="pack-items-list">
+                  @for (item of packItems; track item.id; let i = $index) {
+                    <div class="pack-item-card">
+                      <div class="item-card-header">
+                        <strong>{{ item.name || 'Unnamed Item' }}</strong>
+                        <button mat-icon-button type="button" color="warn" (click)="removePackItem(i)">
+                          <mat-icon>delete</mat-icon>
+                        </button>
+                      </div>
+
+                      <div class="item-card-body">
+                        <mat-form-field appearance="outline" class="full-width">
+                          <mat-label>Item Name</mat-label>
+                          <input matInput [value]="item.name" (input)="updateItemField(i, 'name', $any($event.target).value)">
+                        </mat-form-field>
+
+                        <mat-form-field appearance="outline" class="full-width">
+                          <mat-label>Description (Markdown)</mat-label>
+                          <textarea matInput rows="3" [value]="item.description" (input)="updateItemField(i, 'description', $any($event.target).value)"></textarea>
+                        </mat-form-field>
+
+                        <div class="properties-block">
+                          <div class="properties-header">
+                            <span>Fluid Properties</span>
+                            <button mat-button type="button" (click)="addItemProperty(i)">+ Add Tag</button>
+                          </div>
+
+                          @for (prop of getItemPropertiesArray(i); track prop.key) {
+                            <div class="property-row">
+                              <input
+                                class="prop-input"
+                                placeholder="Key (e.g. rarity)"
+                                [value]="prop.key"
+                                (change)="updateItemPropertyKey(i, prop.key, $any($event.target).value)">
+                              <input
+                                class="prop-input"
+                                placeholder="Value (e.g. legendary)"
+                                [value]="prop.value"
+                                (input)="updateItemPropertyValue(i, prop.key, $any($event.target).value)">
+                              <button mat-icon-button type="button" (click)="removeItemProperty(i, prop.key)">
+                                <mat-icon>close</mat-icon>
+                              </button>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  } @empty {
+                    <div class="empty-list">No items in this pack yet. Click "Add Item" above.</div>
+                  }
+                </div>
+              </div>
+
+              <footer class="editor-footer">
+                @if (!isCreatingPack && selectedPack) {
+                  <button
+                    mat-button
+                    color="warn"
+                    type="button"
+                    (click)="onDeletePack(selectedPack.id)">
+                    Delete Pack
+                  </button>
+                }
+
+                <div class="save-bar inline">
+                  <span>{{ packForm.dirty ? 'Unsaved changes' : 'Ready' }}</span>
+                  <div class="save-actions">
+                    <button mat-button type="button" (click)="cancelPackEdit()">Discard</button>
+                    <button
+                      mat-raised-button
+                      color="primary"
+                      type="submit"
+                      [disabled]="packForm.invalid || isLoading">
+                      {{ isCreatingPack ? 'Create Pack' : 'Save Pack' }}
+                    </button>
+                  </div>
+                </div>
+              </footer>
+            </form>
+          } @else {
+            <div class="empty-state">
+              <mat-icon>extension</mat-icon>
+              <h3>Select a local modpack</h3>
+              <p>Attach existing modpacks to this server or create a new locally hosted pack.</p>
             </div>
           }
         </section>

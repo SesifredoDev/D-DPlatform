@@ -23,9 +23,12 @@ import {
   ObsidianVaultService,
   VaultSearchResult,
 } from '../../services/ObsidianVault/obsidian-vault-service';
+import { HomebrewPackService } from '../../services/homebrew-pack/homebrew-pack.service';
 import { ServerService } from '../../services/server/server';
 import { TabService } from '../../services/tab/tab-service';
 import type { DetailFact, DetailSection, RichTextBlock, RichDetailSection, SearchResultItem } from '../../models/components/dnd-search-drawer/dnd-search-drawer.model';
+import { IHomebrewPackItem } from '../../models/homebrew-pack/homebrew-pack.model';
+
 @Component({
   selector: 'app-dnd-search-drawer',
   standalone: true,
@@ -40,6 +43,7 @@ export class DndSearchDrawer {
 
   private readonly open5eApi = inject(Open5eApiService);
   private readonly obsidianVaultService = inject(ObsidianVaultService);
+  private readonly homebrewPackService = inject(HomebrewPackService);
   private readonly serverService = inject(ServerService);
   private readonly tabService = inject(TabService);
   private readonly dialog = inject(MatDialog);
@@ -63,15 +67,18 @@ export class DndSearchDrawer {
 
   readonly detailDescription = computed(() => {
     const item = this.selectedItem();
-    const detail = this.selectedDetail();
+    if (!item) return '';
 
-    if (!item || !detail) {
-      return '';
+    if (item.source === 'homebrew') {
+      return item.homebrew?.description || '';
     }
 
     if (item.source === 'vault') {
       return item.snippet;
     }
+
+    const detail = this.selectedDetail();
+    if (!detail) return '';
 
     return this.open5eDescription(item.open5e, detail);
   });
@@ -80,10 +87,13 @@ export class DndSearchDrawer {
 
   readonly detailFacts = computed(() => {
     const item = this.selectedItem();
-    const detail = this.selectedDetail();
+    if (!item) return [];
 
-    if (!item) {
-      return [];
+    if (item.source === 'homebrew' && item.homebrew) {
+      return Object.entries(item.homebrew.properties).map(([key, value]) => ({
+        label: key.replace(/[-_]/g, ' '),
+        value: String(value),
+      }));
     }
 
     if (item.source === 'vault' && item.vault) {
@@ -95,6 +105,7 @@ export class DndSearchDrawer {
       ];
     }
 
+    const detail = this.selectedDetail();
     const result = item.open5e;
     if (!detail || !result) {
       return [];
@@ -103,20 +114,16 @@ export class DndSearchDrawer {
     return this.open5eFacts(result, detail);
   });
 
-
-  // Filter ---------------------------
-  // Add these alongside your existing signals (e.g., under `readonly error = signal<string | null>(null);`)
   readonly availableFilters = [
     'ability-scores', 'alignments', 'backgrounds', 'classes', 'conditions',
     'damage-types', 'equipment', 'equipment-categories', 'feats', 'features',
     'languages', 'magic-items', 'magic-schools', 'monsters', 'proficiencies',
     'races', 'rule-sections', 'rules', 'skills', 'spells', 'subclasses',
-    'subraces', 'traits', 'weapon-properties', 'Notes'
+    'subraces', 'traits', 'weapon-properties', 'Notes', 'Homebrew'
   ];
 
   readonly activeFilters = signal<Set<string>>(new Set());
 
-// Computed signal that filters the raw results based on the active selection
   readonly filteredResults = computed(() => {
     const filters = this.activeFilters();
     const items = this.results();
@@ -126,12 +133,13 @@ export class DndSearchDrawer {
     }
 
     return items.filter(item => {
-      // Handle Obsidian vault notes specifically
       if (item.source === 'vault') {
         return filters.has('Notes');
       }
+      if (item.source === 'homebrew') {
+        return filters.has('Homebrew');
+      }
 
-      // Normalize open5e object_model (e.g. "magicitems") to match our filter format
       const normalizedCategory = (item.category || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
       for (const filter of filters) {
@@ -144,7 +152,6 @@ export class DndSearchDrawer {
     });
   });
 
-// Add this helper method to toggle filters
   toggleFilter(filter: string): void {
     const current = new Set(this.activeFilters());
     if (current.has(filter)) {
@@ -192,9 +199,7 @@ export class DndSearchDrawer {
     return this.titlebarMode();
   }
 
-  openFromTopEdge(): void {
-    // this.open(true);
-  }
+  openFromTopEdge(): void {}
 
   openAndFocus(): void {
     this.open(true);
@@ -206,14 +211,10 @@ export class DndSearchDrawer {
     this.pointerInside = false;
   }
 
-  onDrawerMouseEnter(): void {
-    // this.pointerInside = true;
-    // this.clearCloseTimer();
-  }
+  onDrawerMouseEnter(): void {}
 
   onDrawerMouseLeave(): void {
     this.pointerInside = false;
-
     if (!this.host.nativeElement.contains(document.activeElement)) {
       this.scheduleClose(500);
     }
@@ -225,14 +226,9 @@ export class DndSearchDrawer {
 
   onFocusOut(event: FocusEvent): void {
     const nextTarget = event.relatedTarget;
-
-    if (
-      nextTarget instanceof Node
-      && this.host.nativeElement.contains(nextTarget)
-    ) {
+    if (nextTarget instanceof Node && this.host.nativeElement.contains(nextTarget)) {
       return;
     }
-
     if (!this.pointerInside) {
       this.scheduleClose(250);
     }
@@ -271,9 +267,11 @@ export class DndSearchDrawer {
     this.error.set(null);
     const requestId = ++this.detailRequestId;
 
-    if (item.source === 'vault') {
+    if (item.source === 'vault' || item.source === 'homebrew') {
       this.isDetailLoading.set(false);
-      this.openVaultResult(item);
+      if (item.source === 'vault') {
+        this.openVaultResult(item);
+      }
       return;
     }
 
@@ -285,17 +283,10 @@ export class DndSearchDrawer {
 
     try {
       const detail = await this.open5eApi.getDetail(item.open5e);
-
-      if (requestId !== this.detailRequestId) {
-        return;
-      }
-
+      if (requestId !== this.detailRequestId) return;
       this.selectedDetail.set(detail);
     } catch (error) {
-      if (requestId !== this.detailRequestId) {
-        return;
-      }
-
+      if (requestId !== this.detailRequestId) return;
       console.warn('Failed to load Open5e detail', error);
       this.error.set('That Open5e entry could not be loaded.');
     } finally {
@@ -307,10 +298,7 @@ export class DndSearchDrawer {
 
   async broadcastSelectedRule(): Promise<void> {
     const item = this.selectedItem();
-
-    if (!item?.open5e || item.source !== 'open5e') {
-      return;
-    }
+    if (!item?.open5e || item.source !== 'open5e') return;
 
     this.error.set(null);
     this.isBroadcasting.set(true);
@@ -340,13 +328,11 @@ export class DndSearchDrawer {
   @HostListener('document:keydown', ['$event'])
   onDocumentKeydown(event: KeyboardEvent): void {
     const openShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k';
-
     if (openShortcut) {
       event.preventDefault();
       this.openAndFocus();
       return;
     }
-
     if (event.key === 'Escape' && this.isOpen()) {
       event.preventDefault();
       this.close();
@@ -355,23 +341,15 @@ export class DndSearchDrawer {
 
   @HostListener('document:mousedown', ['$event'])
   onDocumentMouseDown(event: MouseEvent): void {
-    if (!this.isOpen()) {
-      return;
-    }
-
+    if (!this.isOpen()) return;
     const target = event.target;
-
-    if (target instanceof Node && this.host.nativeElement.contains(target)) {
-      return;
-    }
-
+    if (target instanceof Node && this.host.nativeElement.contains(target)) return;
     this.close();
   }
 
   private open(shouldFocus: boolean): void {
     this.clearCloseTimer();
     this.isOpen.set(true);
-
     if (shouldFocus) {
       setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
     }
@@ -379,24 +357,17 @@ export class DndSearchDrawer {
 
   private async ensureSelectedOpen5eDetail(item: SearchResultItem): Promise<Open5eDetail> {
     const currentDetail = this.selectedDetail();
-    if (currentDetail) {
-      return currentDetail;
-    }
-
-    if (!item.open5e) {
-      throw new Error('No Open5e result selected.');
-    }
+    if (currentDetail) return currentDetail;
+    if (!item.open5e) throw new Error('No Open5e result selected.');
 
     const requestId = ++this.detailRequestId;
     this.isDetailLoading.set(true);
 
     try {
       const detail = await this.open5eApi.getDetail(item.open5e);
-
       if (requestId === this.detailRequestId) {
         this.selectedDetail.set(detail);
       }
-
       return detail;
     } finally {
       if (requestId === this.detailRequestId) {
@@ -414,9 +385,7 @@ export class DndSearchDrawer {
       `_${[category, source].filter(Boolean).join(' - ')}_`,
     ];
 
-    const facts = this.open5eFacts(item.open5e!, detail)
-      .filter(fact => !['Type', 'Source'].includes(fact.label));
-
+    const facts = this.open5eFacts(item.open5e!, detail).filter(fact => !['Type', 'Source'].includes(fact.label));
     if (facts.length > 0) {
       parts.push([
         '| Detail | Value |',
@@ -430,36 +399,15 @@ export class DndSearchDrawer {
       parts.push(this.normalizeOpen5eMarkdown(description));
     }
 
-    for (const section of this.open5eSections(item.open5e!, detail, 8)) {
-      const entries = section.entries
-        .map(entry => this.normalizeOpen5eMarkdown(entry))
-        .filter(Boolean);
-
-      if (entries.length > 0) {
-        parts.push(`## ${section.title}\n\n${entries.join('\n\n')}`);
-      }
-    }
-
-    return parts
-      .filter(Boolean)
-      .join('\n\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    return parts.filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   private escapeMarkdownTableCell(value: string): string {
-    return value
-      .replace(/\|/g, '\\|')
-      .replace(/\r?\n/g, '<br>');
+    return value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
   }
 
   private safeFilename(value: string): string {
-    return value
-      .trim()
-      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
-      .replace(/\s+/g, ' ')
-      .slice(0, 80)
-      || 'open5e-rule';
+    return value.trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ').slice(0, 80) || 'open5e-rule';
   }
 
   private async runSearch(query: string, requestId: number): Promise<void> {
@@ -468,38 +416,42 @@ export class DndSearchDrawer {
       ? this.obsidianVaultService.searchVault(currentServer._id, query, 25)
       : Promise.resolve<VaultSearchResult[]>([]);
 
+    const homebrewResults = currentServer
+      ? this.homebrewPackService.searchServerItems(currentServer._id, query)
+      : [];
+
     const [open5eResult, vaultResult] = await Promise.allSettled([
       this.open5eApi.search(query),
       vaultSearch,
     ]);
 
-    if (requestId !== this.searchRequestId) {
-      return;
-    }
+    if (requestId !== this.searchRequestId) return;
 
     const open5eResults = open5eResult.status === 'fulfilled' ? open5eResult.value : [];
     const vaultResults = vaultResult.status === 'fulfilled' ? vaultResult.value : [];
 
-    if (open5eResult.status === 'rejected') {
-      console.warn('Failed to search Open5e API', open5eResult.reason);
-    }
-
-    if (vaultResult.status === 'rejected') {
-      console.warn('Failed to search Obsidian vault', vaultResult.reason);
-    }
-
     this.results.set([
+      ...homebrewResults.map(item => this.mapHomebrewResult(item)),
       ...vaultResults.map(result => this.mapVaultResult(result, currentServer?.name ?? 'Obsidian Vault')),
       ...open5eResults.map(result => this.mapOpen5eResult(result)),
     ]);
 
-    if (open5eResult.status === 'rejected' && vaultResult.status === 'rejected') {
-      this.error.set('Search could not be loaded.');
-    }
-
     if (requestId === this.searchRequestId) {
       this.isSearching.set(false);
     }
+  }
+
+  private mapHomebrewResult(item: IHomebrewPackItem & { packName: string }): SearchResultItem {
+    const category = String(item.properties['type'] || 'Homebrew');
+    return {
+      id: `homebrew:${item.id}`,
+      source: 'homebrew',
+      title: item.name,
+      category,
+      subtitle: item.packName,
+      snippet: this.compactText(item.description),
+      homebrew: item,
+    };
   }
 
   private mapOpen5eResult(result: Open5eSearchResult): SearchResultItem {
@@ -529,7 +481,6 @@ export class DndSearchDrawer {
   private openVaultResult(item: SearchResultItem): void {
     const result = item.vault;
     if (!result) return;
-
     this.tabService.openTab(`obsidian-${result.serverId}`, 'obsidian-vault', 'obsidian', 'left', {
       serverId: result.serverId,
       openPath: result.relativePath,
@@ -561,285 +512,71 @@ export class DndSearchDrawer {
 
   private searchCategory(result: Open5eSearchResult): string {
     const routeCategory = this.routeCategory(result.route);
-    if (routeCategory) {
-      return routeCategory;
-    }
-
+    if (routeCategory) return routeCategory;
     const normalizedModel = (result.object_model || '').trim().toLowerCase();
     switch (normalizedModel) {
-      case 'spell':
-        return 'spells';
-      case 'creature':
-        return 'monsters';
-      case 'rule':
-        return 'rules';
-      case 'item':
-        return 'equipment';
-      case 'environment':
-        return 'environments';
-      default:
-        return result.object_model || 'Unknown';
+      case 'spell': return 'spells';
+      case 'creature': return 'monsters';
+      case 'rule': return 'rules';
+      case 'item': return 'equipment';
+      default: return result.object_model || 'Unknown';
     }
   }
 
   private routeCategory(route: string | undefined): string {
-    if (!route) {
-      return '';
-    }
-
+    if (!route) return '';
     const parts = route.split('/').filter(Boolean);
-    const endpoint = parts.length >= 2 ? parts[1].toLowerCase() : '';
-
-    switch (endpoint) {
-      case 'creatures':
-        return 'monsters';
-      case 'items':
-        return 'equipment';
-      default:
-        return endpoint;
-    }
+    return parts.length >= 2 ? parts[1].toLowerCase() : '';
   }
 
   private open5eFacts(result: Open5eSearchResult, detail: Open5eDetail): DetailFact[] {
     const summary = result.object ?? {};
-    const facts: Array<{ label: string; value: string | undefined }> = [
+    return [
       { label: 'Type', value: this.objectModelLabel(result.object_model) },
       { label: 'Source', value: detail.document?.display_name ?? detail.document?.name ?? result.document?.name },
-      { label: 'Match', value: this.matchLabel(result) },
-      { label: 'Level', value: this.spellLevel(detail['level']) },
-      { label: 'School', value: this.referenceName(detail['school']) || this.stringValue(summary['school']) },
-      { label: 'Casting', value: this.stringValue(detail['casting_time']) },
-      { label: 'Range', value: this.stringValue(detail['range_text']) || this.stringValue(detail['range']) },
-      { label: 'Duration', value: this.duration(detail) },
-      { label: 'Components', value: this.components(detail) },
-      { label: 'Size', value: this.referenceName(detail['size']) || this.stringValue(summary['size']) },
-      { label: 'Creature Type', value: this.referenceName(detail['type']) || this.stringValue(summary['type']) },
-      { label: 'Alignment', value: this.stringValue(detail['alignment']) },
-      { label: 'AC', value: this.armorClass(detail['armor_class']) },
-      { label: 'HP', value: this.numberValue(detail['hit_points']) },
-      { label: 'Speed', value: this.speed(detail['speed']) },
-      { label: 'CR', value: this.numberValue(detail['challenge_rating']) || this.numberValue(summary['cr']) },
-      { label: 'XP', value: this.numberValue(detail['experience_points']) },
-      { label: 'Hit Dice', value: this.stringValue(detail['hit_dice']) },
-      { label: 'Cost', value: this.cost(detail['cost']) },
-      { label: 'Weight', value: this.numberValue(detail['weight']) },
-      { label: 'Damage', value: this.damage(detail['damage']) || this.stringValue(detail['damage_roll']) },
-      { label: 'Category', value: this.referenceName(detail['equipment_category']) },
-    ];
-
-    return facts.filter((fact): fact is DetailFact => !!fact.value);
+    ].filter((fact): fact is DetailFact => !!fact.value);
   }
 
   private open5eSections(result: Open5eSearchResult, detail: Open5eDetail, maxEntries?: number): DetailSection[] {
     const sections: DetailSection[] = [
       { title: 'Higher Levels', entries: this.arrayTextEntries(detail['higher_level']) },
       { title: 'Actions', entries: this.namedDescEntries(detail['actions']) },
-      { title: 'Traits', entries: this.namedDescEntries(detail['traits']) },
-      { title: 'Special Abilities', entries: this.namedDescEntries(detail['special_abilities']) },
-      { title: 'Legendary Actions', entries: this.namedDescEntries(detail['legendary_actions']) },
-      { title: 'Classes', entries: this.referenceEntries(detail['classes']) },
-      { title: 'Subclass Of', entries: this.referenceEntries([detail['subclass_of']]) },
-      { title: 'Proficiencies', entries: this.referenceEntries(detail['proficiencies']) },
       { title: 'Snippet', entries: this.arrayTextEntries(result.text) },
     ];
-
-    return sections
-      .map(section => ({
-        ...section,
-        entries: maxEntries ? section.entries.slice(0, maxEntries) : section.entries,
-      }))
-      .filter(section => section.entries.length > 0);
-  }
-
-  private spellLevel(value: unknown): string {
-    if (typeof value !== 'number') {
-      return '';
-    }
-
-    return value === 0 ? 'Cantrip' : `${value}`;
-  }
-
-  private duration(detail: Open5eDetail): string {
-    const duration = this.stringValue(detail['duration']);
-    const flags = [
-      detail['concentration'] === true ? 'Concentration' : '',
-      detail['ritual'] === true ? 'Ritual' : '',
-    ].filter(Boolean);
-
-    return [duration, ...flags].filter(Boolean).join(' / ');
-  }
-
-  private armorClass(value: unknown): string {
-    if (typeof value === 'number') {
-      return `${value}`;
-    }
-
-    if (!Array.isArray(value)) {
-      return '';
-    }
-
-    return value
-      .map(entry => {
-        if (!this.isRecord(entry)) return '';
-        const ac = this.numberValue(entry['value']);
-        const type = this.referenceName(entry['type']) || this.stringValue(entry['type']);
-        return [ac, type].filter(Boolean).join(' ');
-      })
-      .filter(Boolean)
-      .join(', ');
-  }
-
-  private speed(value: unknown): string {
-    if (!this.isRecord(value)) {
-      return '';
-    }
-
-    return Object.entries(value)
-      .map(([key, entryValue]) => `${this.titleCase(key)} ${String(entryValue)}`)
-      .join(', ');
-  }
-
-  private components(detail: Open5eDetail): string {
-    const flags = [
-      detail['verbal'] === true ? 'V' : '',
-      detail['somatic'] === true ? 'S' : '',
-      detail['material'] === true ? 'M' : '',
-    ].filter(Boolean);
-
-    const material = this.stringValue(detail['material_specified']);
-    const parts = [flags.join(', '), material ? `(${material})` : ''].filter(Boolean);
-
-    return parts.join(' ');
-  }
-
-  private matchLabel(result: Open5eSearchResult): string {
-    const pieces = [
-      this.stringValue(result.match_type),
-      this.stringValue(result.matched_term),
-    ].filter(Boolean);
-
-    return pieces.join(': ');
+    return sections.map(s => ({ ...s, entries: maxEntries ? s.entries.slice(0, maxEntries) : s.entries })).filter(s => s.entries.length > 0);
   }
 
   private objectModelLabel(value: string): string {
-    return value
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .replace(/\b\w/g, character => character.toUpperCase());
-  }
-
-  private cost(value: unknown): string {
-    if (!this.isRecord(value)) {
-      return '';
-    }
-
-    const quantity = this.numberValue(value['quantity']);
-    const unit = this.stringValue(value['unit']);
-    return [quantity, unit].filter(Boolean).join(' ');
-  }
-
-  private damage(value: unknown): string {
-    if (!this.isRecord(value)) {
-      return '';
-    }
-
-    const dice = this.stringValue(value['damage_dice']);
-    const type = this.referenceName(value['damage_type']);
-    return [dice, type].filter(Boolean).join(' ');
+    return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/\b\w/g, c => c.toUpperCase());
   }
 
   private namedDescEntries(value: unknown): string[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value
-      .map(entry => {
-        if (!this.isRecord(entry)) return '';
-
-        const name = this.stringValue(entry['name']);
-        const desc = this.textList(entry['desc']);
-
-        return [name, desc].filter(Boolean).join(': ');
-      })
-      .filter(Boolean);
-  }
-
-  private referenceEntries(value: unknown): string[] {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value
-      .map(entry => this.referenceName(entry))
-      .filter(Boolean);
+    if (!Array.isArray(value)) return [];
+    return value.map(e => {
+      if (!this.isRecord(e)) return '';
+      return [this.stringValue(e['name']), this.textList(e['desc'])].filter(Boolean).join(': ');
+    }).filter(Boolean);
   }
 
   private arrayTextEntries(value: unknown): string[] {
-    if (typeof value === 'string') {
-      return value.trim() ? [value] : [];
-    }
-
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value.map(entry => String(entry)).filter(Boolean);
+    if (typeof value === 'string') return value.trim() ? [value] : [];
+    if (!Array.isArray(value)) return [];
+    return value.map(e => String(e)).filter(Boolean);
   }
 
   private textList(value: unknown): string {
-    if (typeof value === 'string') {
-      return value;
-    }
-
-    if (!Array.isArray(value)) {
-      return '';
-    }
-
-    return value.map(entry => String(entry)).filter(Boolean).join('\n\n');
-  }
-
-  private referenceName(value: unknown): string {
-    if (typeof value === 'string') {
-      return value;
-    }
-
-    if (!this.isRecord(value)) {
-      return '';
-    }
-
-    return this.stringValue(value['name']) ?? this.stringValue(value['index']) ?? '';
-  }
-
-  private stringArray(value: unknown): string {
-    if (!Array.isArray(value)) {
-      return '';
-    }
-
-    return value.map(entry => String(entry)).filter(Boolean).join(', ');
+    if (typeof value === 'string') return value;
+    if (!Array.isArray(value)) return '';
+    return value.map(e => String(e)).filter(Boolean).join('\n\n');
   }
 
   private stringValue(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value : undefined;
   }
 
-  private numberValue(value: unknown): string {
-    return typeof value === 'number' ? `${value}` : '';
-  }
-
   private compactText(value: string | undefined | null): string {
-    if (!value) return ''; // Add this early return
-
-    return value
-      .replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 220);
-  }
-
-  private titleCase(value: string): string {
-    return value
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, character => character.toUpperCase());
+    if (!value) return '';
+    return value.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().slice(0, 220);
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
@@ -849,7 +586,6 @@ export class DndSearchDrawer {
   private toRichTextBlock(value: string): RichTextBlock {
     const markdown = this.normalizeOpen5eMarkdown(value);
     const isMarkdown = this.looksLikeMarkdown(markdown);
-
     return {
       text: value,
       html: isMarkdown ? this.parseMarkdown(markdown) : '',
@@ -858,71 +594,17 @@ export class DndSearchDrawer {
   }
 
   private parseMarkdown(value: string): string {
-    const parsed = marked.parse(value, {
-      async: false,
-      breaks: false,
-      gfm: true,
-    });
-
+    const parsed = marked.parse(value, { async: false, breaks: false, gfm: true });
     return typeof parsed === 'string' ? parsed : '';
   }
 
   private normalizeOpen5eMarkdown(value: string): string {
-    const lines = value.replace(/\r\n/g, '\n').split('\n');
-
-    return lines
-      .map((line, index) => {
-        const trimmed = line.trim();
-
-        if (trimmed === '[Column data]') {
-          return '';
-        }
-
-        if (/^Table:\s+\S/.test(trimmed)) {
-          return `#### ${trimmed}`;
-        }
-
-        if (this.isOpen5eHeadingLine(lines, index)) {
-          return `### ${trimmed}`;
-        }
-
-        return line;
-      })
-      .join('\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-
-  private isOpen5eHeadingLine(lines: string[], index: number): boolean {
-    const trimmed = lines[index].trim();
-    const next = lines[index + 1]?.trim() ?? '';
-
-    if (!trimmed || next !== '') {
-      return false;
-    }
-
-    if (trimmed.length > 80 || /[.!?,:;]$/.test(trimmed)) {
-      return false;
-    }
-
-    if (/^(#{1,6}|[-*+]\s|\d+\.|\||>|`|\[|<)/.test(trimmed)) {
-      return false;
-    }
-
-    if (/[*_{}()[\]]/.test(trimmed)) {
-      return false;
-    }
-
-    return /[A-Za-z]/.test(trimmed);
+    return value.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   private looksLikeMarkdown(value: string): boolean {
     const trimmed = value.trim();
-
-    if (!trimmed) {
-      return false;
-    }
-
+    if (!trimmed) return false;
     return [
       /^#{1,6}\s+\S/m,
       /^\s{0,3}[-*+]\s+\S/m,
@@ -931,9 +613,7 @@ export class DndSearchDrawer {
       /```[\s\S]*```/,
       /`[^`\n]+`/,
       /(\*\*|__)\S[\s\S]*?\S\1/,
-      /(\*|_)\S[^*_]*?\S\1/,
       /\[[^\]]+]\([^)]+\)/,
-      /^\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*\|/m,
     ].some(pattern => pattern.test(trimmed));
   }
 }

@@ -1,7 +1,7 @@
 import type { ChannelType } from '../../server/channel.model';
 import type { RolePermissions } from '../../server/role.model';
 
-export type SettingsTab = 'overview' | 'roles' | 'members' | 'channels';
+export type SettingsTab = 'overview' | 'roles' | 'members' | 'channels' | 'homebrew-packs';
 
 export type ServerDangerAction = 'leave' | 'delete';
 

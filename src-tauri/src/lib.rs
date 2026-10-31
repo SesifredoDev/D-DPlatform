@@ -1,6 +1,7 @@
 use std::borrow::Cow;
-
-use tauri::http;
+use std::fs;
+use std::path::PathBuf;
+use tauri::{http, Manager};
 
 const APP_PROTOCOL: &str = "astralproject";
 const USE_HTTPS_SCHEME: bool = true;
@@ -39,11 +40,62 @@ fn recording_and_streaming_disabled() -> bool {
     true
 }
 
+// Helper to resolve and ensure the homebrew-packs storage directory exists
+fn get_homebrew_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let homebrew_dir = app_dir.join("homebrew-packs");
+    if !homebrew_dir.exists() {
+        fs::create_dir_all(&homebrew_dir).map_err(|e| e.to_string())?;
+    }
+    Ok(homebrew_dir)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_homebrew_packs(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = get_homebrew_dir(&app)?;
+    let mut packs = Vec::new();
+
+    if dir.exists() {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("json") {
+                let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+                packs.push(content);
+            }
+        }
+    }
+    Ok(packs)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn save_homebrew_pack(app: tauri::AppHandle, pack_id: String, pack_json: String) -> Result<(), String> {
+    let dir = get_homebrew_dir(&app)?;
+    let file_path = dir.join(format!("{}.json", pack_id));
+    fs::write(file_path, pack_json).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn delete_homebrew_pack(app: tauri::AppHandle, pack_id: String) -> Result<(), String> {
+    let dir = get_homebrew_dir(&app)?;
+    let file_path = dir.join(format!("{}.json", pack_id));
+    if file_path.exists() {
+        fs::remove_file(file_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .register_uri_scheme_protocol(APP_PROTOCOL, serve_app_asset)
-        .invoke_handler(tauri::generate_handler![recording_and_streaming_disabled])
+        .invoke_handler(tauri::generate_handler![
+            recording_and_streaming_disabled,
+            get_homebrew_packs,
+            save_homebrew_pack,
+            delete_homebrew_pack
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

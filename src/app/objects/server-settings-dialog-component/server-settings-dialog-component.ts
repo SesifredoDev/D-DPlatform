@@ -16,6 +16,7 @@ import { Subject, finalize, takeUntil } from 'rxjs';
 
 import { ServerService } from '../../shared/services/server/server';
 import { ChannelService } from '../../shared/services/channel/channel';
+import { HomebrewPackService } from '../../shared/services/homebrew-pack/homebrew-pack.service';
 import { IServer, IServerTheme, ServerMember } from '../../shared/models/server/server.model';
 import { ChannelType, IChannel, PermissionOverwrite } from '../../shared/models/server/channel.model';
 import { IRole, RolePermissions } from '../../shared/models/server/role.model';
@@ -26,6 +27,8 @@ import {
   normalizeServerTheme
 } from '../../shared/services/theme/theme.service';
 import type { SettingsTab, ServerDangerAction, EditableChannelType, ChannelPermissionKey, ChannelPermissionState, PermissionControl, ChannelTypeOption, ChannelPermissionControl } from '../../shared/models/objects/server-settings-dialog-component/server-settings-dialog-component.model';
+import { IHomebrewPack, IHomebrewPackItem } from '../../shared/models/homebrew-pack/homebrew-pack.model';
+
 @Component({
   selector: 'app-server-settings-dialog',
   standalone: true,
@@ -52,90 +55,29 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     { id: 'overview', label: 'Overview', icon: 'settings' },
     { id: 'roles', label: 'Roles', icon: 'security' },
     { id: 'members', label: 'Members', icon: 'group' },
-    { id: 'channels', label: 'Channels', icon: 'tag' }
+    { id: 'channels', label: 'Channels', icon: 'tag' },
+    { id: 'homebrew-packs', label: 'Modpacks', icon: 'extension' }
   ];
 
   readonly permissionControls: PermissionControl[] = [
-    {
-      key: 'ADMINISTRATOR',
-      label: 'Administrator',
-      description: 'Bypasses channel and role restrictions.',
-      defaultValue: false
-    },
-    {
-      key: 'MANAGE_SERVER',
-      label: 'Manage Server',
-      description: 'Can edit server overview settings.',
-      defaultValue: false
-    },
-    {
-      key: 'MANAGE_ROLES',
-      label: 'Manage Roles',
-      description: 'Can create, edit, and delete roles.',
-      defaultValue: false
-    },
-    {
-      key: 'MANAGE_CHANNELS',
-      label: 'Manage Channels',
-      description: 'Can create, edit, and delete channels.',
-      defaultValue: false
-    },
-    {
-      key: 'SEND_MESSAGES',
-      label: 'Send Messages',
-      description: 'Can post in text channels.',
-      defaultValue: true
-    },
-    {
-      key: 'READ_MESSAGE_HISTORY',
-      label: 'Read Message History',
-      description: 'Can read earlier channel messages.',
-      defaultValue: true
-    },
-    {
-      key: 'CONNECT',
-      label: 'Connect',
-      description: 'Can join voice channels.',
-      defaultValue: true
-    }
+    { key: 'ADMINISTRATOR', label: 'Administrator', description: 'Bypasses channel and role restrictions.', defaultValue: false },
+    { key: 'MANAGE_SERVER', label: 'Manage Server', description: 'Can edit server overview settings.', defaultValue: false },
+    { key: 'MANAGE_ROLES', label: 'Manage Roles', description: 'Can create, edit, and delete roles.', defaultValue: false },
+    { key: 'MANAGE_CHANNELS', label: 'Manage Channels', description: 'Can create, edit, and delete channels.', defaultValue: false },
+    { key: 'SEND_MESSAGES', label: 'Send Messages', description: 'Can post in text channels.', defaultValue: true },
+    { key: 'READ_MESSAGE_HISTORY', label: 'Read Message History', description: 'Can read earlier channel messages.', defaultValue: true },
+    { key: 'CONNECT', label: 'Connect', description: 'Can join voice channels.', defaultValue: true }
   ];
 
   readonly channelTypeOptions: ChannelTypeOption[] = [
-    {
-      value: ChannelType.Text,
-      label: 'Text',
-      icon: 'tag',
-      description: 'Messages, rolls, notes, and table chat.',
-      defaultIcon: 'tag'
-    },
-    {
-      value: ChannelType.Call,
-      label: 'Voice',
-      icon: 'volume_up',
-      description: 'Live party voice and video sessions.',
-      defaultIcon: 'volume_up'
-    }
+    { value: ChannelType.Text, label: 'Text', icon: 'tag', description: 'Messages, rolls, notes, and table chat.', defaultIcon: 'tag' },
+    { value: ChannelType.Call, label: 'Voice', icon: 'volume_up', description: 'Live party voice and video sessions.', defaultIcon: 'volume_up' }
   ];
 
   readonly channelPermissionControls: ChannelPermissionControl[] = [
-    {
-      key: 'READ_MESSAGE_HISTORY',
-      label: 'View',
-      icon: 'visibility',
-      description: 'Can see the channel and read previous messages.'
-    },
-    {
-      key: 'SEND_MESSAGES',
-      label: 'Send',
-      icon: 'chat',
-      description: 'Can send messages in text channels.'
-    },
-    {
-      key: 'CONNECT',
-      label: 'Connect',
-      icon: 'settings_voice',
-      description: 'Can join voice channels.'
-    }
+    { key: 'READ_MESSAGE_HISTORY', label: 'View', icon: 'visibility', description: 'Can see the channel and read previous messages.' },
+    { key: 'SEND_MESSAGES', label: 'Send', icon: 'chat', description: 'Can send messages in text channels.' },
+    { key: 'CONNECT', label: 'Connect', icon: 'settings_voice', description: 'Can join voice channels.' }
   ];
 
   readonly channelPermissionStates: Array<{ value: ChannelPermissionState; label: string; icon: string }> = [
@@ -149,30 +91,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   readonly iconSearchLimit = 96;
   readonly unassignedRoleFilterId = '__unassigned__';
   readonly defaultMaterialIconNames = [
-    'tag',
-    'forum',
-    'campaign',
-    'auto_stories',
-    'map',
-    'shield',
-    'casino',
-    'volume_up',
-    'lock',
-    'announcement',
-    'groups',
-    'sports_esports',
-    'menu_book',
-    'explore',
-    'travel_explore',
-    'castle',
-    'local_fire_department',
-    'bolt',
-    'pets',
-    'psychology',
-    'inventory_2',
-    'event',
-    'theater_comedy',
-    'tips_and_updates'
+    'tag', 'forum', 'campaign', 'auto_stories', 'map', 'shield', 'casino', 'volume_up', 'lock'
   ];
 
   activeTab: SettingsTab = 'overview';
@@ -182,6 +101,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   settingsForm: FormGroup;
   roleForm: FormGroup;
   channelForm: FormGroup;
+  packForm: FormGroup;
 
   serverDetails: IServer | null = null;
   isLoading = false;
@@ -192,6 +112,11 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   selectedBackgroundImageFile: File | null = null;
   selectedRole: IRole | null = null;
   selectedChannel: IChannel | null = null;
+
+  // Homebrew Pack state
+  selectedPack: IHomebrewPack | null = null;
+  isCreatingPack = false;
+  packItems: IHomebrewPackItem[] = [];
 
   isCreating = false;
   isCreatingChannel = false;
@@ -212,6 +137,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     private serverService: ServerService,
     private roleService: Role,
     private channelService: ChannelService,
+    public homebrewPackService: HomebrewPackService,
     private snackBar: MatSnackBar,
     protected dialogRef: MatDialogRef<ServerSettingsDialogComponent>
   ) {
@@ -226,6 +152,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     });
     this.roleForm = this.initRoleForm();
     this.channelForm = this.initChannelForm();
+    this.packForm = this.initPackForm();
     this.iconPreview = server.icon || null;
     this.backgroundImagePreview = initialTheme.backgroundImage;
   }
@@ -235,7 +162,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe(data => {
         if (data?._id !== this.server._id) return;
-
         this.serverDetails = data;
         this.syncOverviewForm(data);
         this.reconcileRoleSelection(data);
@@ -250,16 +176,16 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  get allModpacks(): IHomebrewPack[] {
+    return this.homebrewPackService.packs();
+  }
+
+  get attachedModpacksCount(): number {
+    return this.allModpacks.filter(p => p.attachedServerIds?.includes(this.server._id)).length;
+  }
+
   get manageableChannels(): IChannel[] {
     return (this.serverDetails?.channels ?? []).filter(channel => !this.isWhisperChannel(channel));
-  }
-
-  get textChannelCount(): number {
-    return this.manageableChannels.filter(channel => channel.type === ChannelType.Text).length;
-  }
-
-  get voiceChannelCount(): number {
-    return this.manageableChannels.filter(channel => channel.type === ChannelType.Call).length;
   }
 
   get roleCount(): number {
@@ -278,7 +204,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     if (this.pendingServerAction === 'delete') {
       return `This permanently deletes ${this.serverDisplayName} and removes access for every member. This cannot be undone.`;
     }
-
     return `You will leave ${this.serverDisplayName} and lose access unless someone invites you back.`;
   }
 
@@ -295,7 +220,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     if (this.pendingServerAction === 'delete') {
       return this.deleteConfirmationText.trim().toLowerCase() === 'delete';
     }
-
     return true;
   }
 
@@ -310,7 +234,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   get filteredChannelAccessRoles(): IRole[] {
     const query = this.normalizeSearch(this.channelRoleSearchTerm);
     if (!query) return this.channelAccessRoles;
-
     return this.channelAccessRoles.filter(role => role.name.toLowerCase().includes(query));
   }
 
@@ -357,9 +280,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
 
   get visibleMaterialIcons(): readonly string[] {
     const query = this.normalizeIconSearch(this.iconSearchTerm);
-    if (!query) {
-      return this.defaultMaterialIconNames;
-    }
+    if (!query) return this.defaultMaterialIconNames;
 
     return MATERIAL_ICON_NAMES
       .map(icon => ({ icon, score: this.getIconSearchScore(icon, query) }))
@@ -371,9 +292,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
 
   get iconSearchSummary(): string {
     const query = this.normalizeIconSearch(this.iconSearchTerm);
-    if (!query) {
-      return `Suggested icons from ${this.materialIconTotal} available`;
-    }
+    if (!query) return `Suggested icons from ${this.materialIconTotal} available`;
 
     const totalMatches = MATERIAL_ICON_NAMES.filter(
       icon => this.getIconSearchScore(icon, query) >= 0
@@ -412,11 +331,163 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
 
   async refreshData() {
     await this.serverService.getServerDetails(this.server._id);
+    await this.homebrewPackService.loadPacks();
   }
 
-  compareRoles(role1: unknown, role2: unknown): boolean {
-    return this.resolveId(role1) === this.resolveId(role2);
+  // --- Homebrew Pack Methods ---
+  isPackAttached(pack: IHomebrewPack): boolean {
+    return pack.attachedServerIds?.includes(this.server._id) ?? false;
   }
+
+  async togglePackAttachment(pack: IHomebrewPack, attach: boolean) {
+    await this.homebrewPackService.toggleServerAttachment(pack.id, this.server._id, attach);
+    this.snackBar.open(
+      attach ? `Attached "${pack.name}" to server.` : `Detached "${pack.name}" from server.`,
+      'OK',
+      { duration: 2000 }
+    );
+  }
+
+  selectPack(pack: IHomebrewPack) {
+    this.isCreatingPack = false;
+    this.selectedPack = pack;
+    this.packItems = structuredClone(pack.items || []);
+    this.packForm = this.initPackForm(pack);
+  }
+
+  createNewPack() {
+    this.selectedPack = null;
+    this.isCreatingPack = true;
+    this.packItems = [];
+    this.packForm = this.initPackForm();
+  }
+
+  cancelPackEdit() {
+    if (this.isCreatingPack) {
+      this.selectedPack = null;
+      this.isCreatingPack = false;
+    } else if (this.selectedPack) {
+      this.selectPack(this.selectedPack);
+    }
+  }
+
+  async onSavePack() {
+    if (this.packForm.invalid) return;
+
+    const val = this.packForm.value;
+    const packToSave: IHomebrewPack = {
+      id: this.selectedPack?.id || `pack_${Date.now()}`,
+      name: val.name,
+      version: val.version,
+      author: val.author,
+      description: val.description,
+      attachedServerIds: this.selectedPack?.attachedServerIds || [this.server._id],
+      items: this.packItems,
+      createdAt: this.selectedPack?.createdAt || Date.now(),
+      updatedAt: Date.now()
+    };
+
+    await this.homebrewPackService.savePack(packToSave);
+    this.snackBar.open('Homebrew pack saved locally.', 'OK', { duration: 2000 });
+    this.selectPack(packToSave);
+  }
+
+  async onDeletePack(packId: string) {
+    if (!confirm('Are you sure you want to delete this homebrew pack?')) return;
+    await this.homebrewPackService.deletePack(packId);
+    this.selectedPack = null;
+    this.isCreatingPack = false;
+    this.snackBar.open('Homebrew pack deleted.', 'OK', { duration: 2000 });
+  }
+
+  onImportPackFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async e => {
+      try {
+        const rawJson = e.target?.result as string;
+        const pack = JSON.parse(rawJson) as IHomebrewPack;
+        if (!pack.name || !Array.isArray(pack.items)) {
+          throw new Error('Invalid pack schema.');
+        }
+        pack.id = pack.id || `pack_${Date.now()}`;
+        pack.attachedServerIds = pack.attachedServerIds || [this.server._id];
+        await this.homebrewPackService.savePack(pack);
+        this.selectPack(pack);
+        this.snackBar.open('Modpack imported successfully!', 'OK', { duration: 2000 });
+      } catch (err) {
+        this.snackBar.open('Failed to import pack file. Invalid JSON.', 'Close', { duration: 3000 });
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  addPackItem() {
+    this.packItems.push({
+      id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: 'New Custom Item',
+      description: 'Markdown item description...',
+      properties: { type: 'item', rarity: 'common' }
+    });
+    this.packForm.markAsDirty();
+  }
+
+  removePackItem(index: number) {
+    this.packItems.splice(index, 1);
+    this.packForm.markAsDirty();
+  }
+
+  updateItemField(index: number, field: keyof IHomebrewPackItem, value: any) {
+    (this.packItems[index] as any)[field] = value;
+    this.packForm.markAsDirty();
+  }
+
+  getItemPropertiesArray(index: number): Array<{ key: string; value: string }> {
+    const props = this.packItems[index]?.properties || {};
+    return Object.entries(props).map(([key, value]) => ({ key, value: String(value) }));
+  }
+
+  addItemProperty(index: number) {
+    if (!this.packItems[index].properties) {
+      this.packItems[index].properties = {};
+    }
+    const propCount = Object.keys(this.packItems[index].properties).length;
+    this.packItems[index].properties[`key_${propCount + 1}`] = 'value';
+    this.packForm.markAsDirty();
+  }
+
+  removeItemProperty(index: number, key: string) {
+    delete this.packItems[index].properties[key];
+    this.packForm.markAsDirty();
+  }
+
+  updateItemPropertyKey(index: number, oldKey: string, newKey: string) {
+    if (!newKey || oldKey === newKey) return;
+    const props = this.packItems[index].properties;
+    const value = props[oldKey];
+    delete props[oldKey];
+    props[newKey] = value;
+    this.packForm.markAsDirty();
+  }
+
+  updateItemPropertyValue(index: number, key: string, value: string) {
+    this.packItems[index].properties[key] = value;
+    this.packForm.markAsDirty();
+  }
+
+  private initPackForm(pack?: IHomebrewPack | null): FormGroup {
+    return this.fb.group({
+      name: [pack?.name ?? '', Validators.required],
+      version: [pack?.version ?? '1.0.0', Validators.required],
+      author: [pack?.author ?? '', Validators.required],
+      description: [pack?.description ?? '']
+    });
+  }
+
+  // --- End Homebrew Pack Methods ---
 
   enabledPermissionCount(role: IRole | null | undefined): number {
     if (!role?.permissions) return 0;
@@ -553,9 +624,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
           this.pendingRoleSelectionId = savedRole?._id ?? this.selectedRole?._id ?? null;
           this.isCreating = false;
           this.roleForm.markAsPristine();
-          this.snackBar.open(wasCreating ? 'Role created.' : 'Role saved.', 'OK', {
-            duration: 2000
-          });
+          this.snackBar.open(wasCreating ? 'Role created.' : 'Role saved.', 'OK', { duration: 2000 });
           void this.refreshData();
         },
         error: () => {
@@ -581,25 +650,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
           this.snackBar.open('Role delete failed.', 'Close', { duration: 3000 });
         }
       });
-  }
-
-  async updateMemberRoles(userId: string, roles: unknown[]) {
-    const roleIds = roles
-      .map(role => this.resolveId(role))
-      .filter((roleId): roleId is string => !!roleId);
-
-    const member = this.serverDetails?.members?.find(candidate => this.memberUserId(candidate) === userId);
-    if (member) {
-      await this.setMemberRoles(member, roleIds, this.memberRoleIds(member));
-      return;
-    }
-
-    try {
-      await this.serverService.updateMemberRoles(this.server._id, userId, roleIds);
-      this.snackBar.open('Member roles updated.', 'OK', { duration: 1500 });
-    } catch {
-      this.snackBar.open('Member role update failed.', 'Close', { duration: 3000 });
-    }
   }
 
   onFileSelected(event: Event) {
@@ -828,9 +878,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
           this.pendingChannelSelectionId = savedChannel?._id ?? this.selectedChannel?._id ?? null;
           this.isCreatingChannel = false;
           this.channelForm.markAsPristine();
-          this.snackBar.open(wasCreating ? 'Channel created.' : 'Channel saved.', 'OK', {
-            duration: 2000
-          });
+          this.snackBar.open(wasCreating ? 'Channel created.' : 'Channel saved.', 'OK', { duration: 2000 });
           void this.refreshData();
         },
         error: () => {
@@ -1017,10 +1065,7 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
   }
 
   private toCssImageValue(imageUrl: string | null): string {
-    if (!imageUrl) {
-      return 'none';
-    }
-
+    if (!imageUrl) return 'none';
     return `url("${imageUrl.replace(/"/g, '\\"')}")`;
   }
 
@@ -1115,7 +1160,6 @@ export class ServerSettingsDialogComponent implements OnInit, OnDestroy {
     if (this.roleFilterId === this.unassignedRoleFilterId) {
       return this.memberAssignedRoles(member).length === 0;
     }
-
     return this.memberHasRole(member, this.roleFilterId);
   }
 
