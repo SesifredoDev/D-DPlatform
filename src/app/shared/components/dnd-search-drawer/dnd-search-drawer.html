@@ -1,6 +1,6 @@
-@if (showHandle()) {
-  <div class="top-edge-trigger" (mouseenter)="openFromTopEdge()" aria-hidden="true"></div>
+<div class="top-edge-trigger" (mouseenter)="openFromTopEdge()" aria-hidden="true"></div>
 
+@if (showHandle()) {
   <button
     class="search-handle"
     type="button"
@@ -143,20 +143,22 @@
           <div class="detail-header">
             <span class="detail-category" [class.vault]="selected.source === 'vault'">{{ selected.category }}</span>
             <h3>{{ detailTitle() }}</h3>
-            @if (selected.source === 'open5e') {
+            @if (selected.source === 'open5e' || selected.source === 'homebrew') {
               <div class="detail-actions">
                 <button
                   type="button"
                   class="detail-action-button"
-                  (click)="broadcastSelectedRule()"
+                  (click)="selected.source === 'homebrew' ? broadcastSelectedHomebrew() : broadcastSelectedRule()"
                   [disabled]="isDetailLoading() || isBroadcasting()"
                 >
                   <span class="material-icons">broadcast_on_home</span>
                   {{ isBroadcasting() ? 'Preparing...' : 'Broadcast' }}
                 </button>
-                <a [href]="selectedExternalUrl()" target="_blank" rel="noreferrer">
-                  API JSON
-                </a>
+                @if (selected.source === 'open5e') {
+                  <a [href]="selectedExternalUrl()" target="_blank" rel="noreferrer">
+                    API JSON
+                  </a>
+                }
               </div>
             }
           </div>
@@ -170,7 +172,7 @@
             @if (detailDescriptionBlock(); as description) {
               @if (description.text) {
                 @if (description.isMarkdown) {
-                  <div class="detail-markdown detail-description" [innerHTML]="description.html"></div>
+                  <div class="detail-markdown detail-description" [innerHTML]="description.html" (click)="onDescriptionClick($event)"></div>
                 } @else {
                   <p class="detail-description">{{ description.text }}</p>
                 }
@@ -195,9 +197,9 @@
                   <div class="section-markdown-list">
                     @for (entry of section.entries; track entry.text) {
                       @if (entry.isMarkdown) {
-                        <div class="detail-markdown section-markdown" [innerHTML]="entry.html"></div>
+                        <div class="detail-markdown section-markdown" [innerHTML]="entry.html" (click)="onDescriptionClick($event)"></div>
                       } @else {
-                        <p class="section-text">{{ entry.text }}</p>
+                        <p class="section\-text">{{ entry.text }}</p>
                       }
                     }
                   </div>

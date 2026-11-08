@@ -260,7 +260,11 @@ export class DndSearchDrawer {
     this.pointerInside = false;
   }
 
-  onDrawerMouseEnter(): void {}
+  onDrawerMouseEnter(): void {
+    this.pointerInside = true;
+    this.clearCloseTimer();
+  }
+
 
   onDrawerMouseLeave(): void {
     this.pointerInside = false;
@@ -278,10 +282,15 @@ export class DndSearchDrawer {
     if (nextTarget instanceof Node && this.host.nativeElement.contains(nextTarget)) {
       return;
     }
+    if (this.host.nativeElement.contains(document.activeElement)) {
+      return;
+    }
     if (!this.pointerInside) {
       this.scheduleClose(250);
     }
   }
+
+
 
   onQueryChange(value: string): void {
     const query = value.trimStart();
@@ -373,6 +382,64 @@ export class DndSearchDrawer {
       this.isBroadcasting.set(false);
     }
   }
+  async broadcastSelectedHomebrew(): Promise<void> {
+    const item = this.selectedItem();
+    if (!item?.homebrew || item.source !== 'homebrew') return;
+
+    this.error.set(null);
+    this.isBroadcasting.set(true);
+
+    try {
+      const homebrew = item.homebrew;
+      const data: BroadcastData = {
+        text: this.buildHomebrewBroadcastMarkdown(homebrew),
+        source: 'homebrew-search',
+        filename: `${this.safeFilename(homebrew.name)}.md`,
+      };
+
+      this.dialog.open(BroadcastDialog, {
+        data,
+        maxWidth: '600px',
+        width: '100%',
+        panelClass: ['glass-dialog-container', 'broadcast-dialog-panel'],
+      });
+    } catch (error) {
+      console.warn('Failed to prepare Homebrew broadcast', error);
+      this.error.set('That homebrew entry could not be prepared for broadcast.');
+    } finally {
+      this.isBroadcasting.set(false);
+    }
+  }
+
+  private buildHomebrewBroadcastMarkdown(homebrew: IHomebrewPackItem & { packName?: string }): string {
+    const title = homebrew.name;
+    const category = String(homebrew.properties['type'] || 'Homebrew');
+    const source = homebrew.packName || 'Homebrew Pack';
+
+    const parts = [
+      `# ${title}`,
+      `_${[category, source].filter(Boolean).join(' - ')}_`,
+    ];
+
+    const properties = Object.entries(homebrew.properties || {}).map(([key, value]) => ({
+      label: key.replace(/[-_]/g, ' '),
+      value: String(value),
+    }));
+
+    if (properties.length > 0) {
+      parts.push([
+        '| Property | Value |',
+        '|---|---|',
+        ...properties.map(prop => `| ${this.escapeMarkdownTableCell(prop.label)} | ${this.escapeMarkdownTableCell(prop.value)} |`),
+      ].join('\n'));
+    }
+
+    if (homebrew.description) {
+      parts.push(this.normalizeOpen5eMarkdown(homebrew.description));
+    }
+
+    return parts.filter(Boolean).join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
 
   @HostListener('document:keydown', ['$event'])
   onDocumentKeydown(event: KeyboardEvent): void {
@@ -392,13 +459,17 @@ export class DndSearchDrawer {
   onDocumentMouseDown(event: MouseEvent): void {
     if (!this.isOpen()) return;
     const target = event.target;
-    if (target instanceof Node && this.host.nativeElement.contains(target)) return;
+    if (target instanceof Node && this.host.nativeElement.contains(target)) {
+      return;
+    }
     this.close();
   }
+
 
   private open(shouldFocus: boolean): void {
     this.clearCloseTimer();
     this.isOpen.set(true);
+    this.pointerInside = true;
     if (shouldFocus) {
       setTimeout(() => this.searchInput?.nativeElement.focus(), 0);
     }
@@ -569,6 +640,41 @@ export class DndSearchDrawer {
       case 'rule': return 'rules';
       case 'item': return 'equipment';
       default: return result.object_model || 'Unknown';
+    }
+  }
+
+  onDescriptionClick(event: MouseEvent): void {
+    const target = (event.target as HTMLElement).closest('a');
+    if (!target) return;
+
+    const href = target.getAttribute('href');
+    const text = target.textContent?.trim() || '';
+    if (!href && !text) return;
+
+    event.preventDefault();
+
+    let searchQuery = text;
+    if (href) {
+      try {
+        const url = href.startsWith('http') ? new URL(href) : new URL(href, 'https://dnd5e.wikidot.com');
+        const pathname = url.pathname;
+        const slug = pathname.split('/').filter(Boolean).pop() || '';
+        if (slug) {
+          const cleanSlug = slug.includes(':') ? slug.split(':').pop() || slug : slug;
+          searchQuery = cleanSlug.replace(/[-_]/g, ' ').trim();
+        }
+      } catch {
+        // Fallback to text if URL parsing fails
+      }
+    }
+
+    if (!searchQuery && text) {
+      searchQuery = text;
+    }
+
+    if (searchQuery) {
+      this.query.set(searchQuery);
+      this.onQueryChange(searchQuery);
     }
   }
 

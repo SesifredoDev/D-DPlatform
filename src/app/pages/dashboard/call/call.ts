@@ -697,12 +697,16 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     const hasAuthorizedHost = !!state.hostId && this.isAuthorizedDmUserId(state.hostId);
     const stateTimestamp = this.normalizeSoundCloudSyncTimestamp(state.timestamp);
+
+    // Explicitly isolate manual entries from automatic background timestamp alterations
+    const isManualEntry = state.source === 'manual';
+
     if (this.isServerOwner) {
       if (!hasAuthorizedHost) return;
-      if (state.source === 'auto' && (Date.now() - this.spotify.lastActionTime < 5000)) return;
+      if (!isManualEntry && (Date.now() - this.spotify.lastActionTime < 5000)) return;
     } else {
       if (!hasAuthorizedHost) return;
-      if (this.isStaleSoundCloudSync(stateTimestamp)) return;
+      if (!isManualEntry && this.isStaleSoundCloudSync(stateTimestamp)) return;
       if (this.isSyncing) {
         this.pendingSoundCloudSyncState = state;
         return;
@@ -725,10 +729,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
       const currentState = await this.spotify.getPlaybackState().catch(() => null);
       const isDifferentTrack = currentState?.track_window?.current_track?.uri !== state.uri;
-      const drift = this.getSoundCloudSyncDriftMs(stateTimestamp, state.paused);
+
+      // Disable aggressive drift compensation for automatic packets; reserve strict positioning for manual entries
+      const drift = isManualEntry ? 0 : this.getSoundCloudSyncDriftMs(stateTimestamp, state.paused);
       const adjustedPosition = this.normalizeSoundCloudSyncPosition(state.position) + drift;
+
+      // Enforce stricter threshold checks on manual entries, looser tolerance for auto-syncs to prevent loops
+      const positionTolerance = isManualEntry ? 500 : 4000;
       const isDifferentPosition = !currentState ||
-        Math.abs(currentState.position - adjustedPosition) > 2000;
+        Math.abs(currentState.position - adjustedPosition) > positionTolerance;
       const isDifferentStatus = currentState?.paused !== state.paused;
       const isDifferentShuffle = state.shuffle !== undefined && currentState?.shuffle_state !== state.shuffle;
 
@@ -736,16 +745,17 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         await this.spotify.toggleShuffle(state.shuffle, true);
       }
 
-      if (state.command === 'seek') {
+      // Seek prevention and hard position snapping only trigger on explicit manual actions
+      if (state.command === 'seek' && isManualEntry) {
         if (currentState?.track_window?.current_track?.uri === state.uri) {
           await this.spotify.seek(adjustedPosition, true);
         }
-      } else if (isDifferentTrack || isDifferentPosition || isDifferentStatus) {
+      } else if (isDifferentTrack || (isDifferentPosition && isManualEntry) || isDifferentStatus) {
         await this.applySoundCloudPlaybackSync(
           state,
           adjustedPosition,
           isDifferentTrack,
-          isDifferentPosition,
+          isDifferentPosition && isManualEntry,
           isDifferentStatus,
           applySequence
         );
