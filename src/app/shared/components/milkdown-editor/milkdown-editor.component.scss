@@ -18,7 +18,7 @@
     border-radius: 10px;
   }
 
-  .milkdown-crepe {
+  .milkdown {
     /* Override Crepe CSS variables for dark theme */
     --crepe-color-background: transparent;
     --crepe-color-on-background: var(--on-background, #dbdee1);
@@ -535,9 +535,12 @@
   /* Clean mobile adjustments */
   @media (max-width: 480px) {
     padding: 0.5rem 1rem 5rem;
-    .milkdown-crepe .editor,
-    .milkdown-crepe .ProseMirror {
+    .milkdown .editor,
+    .milkdown .ProseMirror {
       font-size: 15px;
+      // The global .ProseMirror gutter in styles.scss (85px, !important) wastes most of a phone screen.
+      padding-left: 28px !important;
+      padding-right: 4px !important;
 
       .dnd-statsheet {
         padding: 14px;

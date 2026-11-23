@@ -1,653 +1,769 @@
 <div
-  class="obsidian-view-container"
-  [class.compact-sidebar-layout]="isCompactSidebarLayout"
-  [class.preview-tab]="previewOnly">
-  <div
-    class="vault-layout"
-    [class.compact-sidebar]="isCompactSidebarLayout"
-    [class.sidebar-open]="isCompactSidebarLayout && isMobileSidebarOpen">
-    @if (isCompactSidebarLayout && isMobileSidebarOpen) {
-      <button
-        type="button"
-        class="mobile-sidebar-backdrop"
-        (click)="closeMobileSidebar()"
-        aria-label="Close vault files">
+  class="vault-view"
+  [class.is-compact]="isCompactSidebarLayout"
+  [class.is-preview]="previewOnly"
+  [class.sidebar-open]="isCompactSidebarLayout && isMobileSidebarOpen">
+
+  @if (isCompactSidebarLayout && isMobileSidebarOpen) {
+    <button
+      type="button"
+      class="sidebar-backdrop"
+      (click)="closeMobileSidebar()"
+      aria-label="Close file list">
+    </button>
+  }
+
+  <!-- ===================== Sidebar ===================== -->
+  <aside class="sidebar" aria-label="Vault files">
+    <header class="sidebar-header">
+      <div class="vault-title">
+        <mat-icon>auto_stories</mat-icon>
+        <span [title]="vaultName || 'Vault'">{{ vaultName || 'Vault' }}</span>
+      </div>
+
+      <div class="sidebar-header-actions">
+        <button
+          mat-icon-button
+          class="icon-btn"
+          [matMenuTriggerFor]="newMenu"
+          [disabled]="!permissionGranted"
+          aria-label="Create new"
+          matTooltip="New">
+          <mat-icon>add</mat-icon>
+        </button>
+        <button
+          mat-icon-button
+          class="icon-btn"
+          [matMenuTriggerFor]="vaultMenu"
+          aria-label="Vault options"
+          matTooltip="More">
+          <mat-icon>more_horiz</mat-icon>
+        </button>
+        <button
+          mat-icon-button
+          class="icon-btn compact-only"
+          (click)="closeMobileSidebar()"
+          aria-label="Close file list">
+          <mat-icon>close</mat-icon>
+        </button>
+      </div>
+    </header>
+
+    <mat-menu #newMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+      <button mat-menu-item (click)="startNewFile()">
+        <mat-icon>note_add</mat-icon>
+        <span>New note</span>
       </button>
+      <button mat-menu-item (click)="startNewCanvas()">
+        <mat-icon>account_tree</mat-icon>
+        <span>New canvas</span>
+      </button>
+      <button mat-menu-item (click)="startNewFolder()">
+        <mat-icon>create_new_folder</mat-icon>
+        <span>New folder</span>
+      </button>
+    </mat-menu>
+
+    <mat-menu #vaultMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+      <button mat-menu-item (click)="refreshVault()" [disabled]="!permissionGranted || isVaultLoading">
+        <mat-icon>refresh</mat-icon>
+        <span>Refresh files</span>
+      </button>
+      <button mat-menu-item (click)="collapseAllFolders()" [disabled]="!permissionGranted">
+        <mat-icon>unfold_less</mat-icon>
+        <span>Collapse all folders</span>
+      </button>
+      @if (localhostRoute) {
+        <button mat-menu-item (click)="openObsidianVault()">
+          <mat-icon>open_in_new</mat-icon>
+          <span>Open in Obsidian</span>
+        </button>
+      }
+      <button mat-menu-item (click)="attachVault()" [disabled]="!fileSystemApiSupported">
+        <mat-icon>folder_open</mat-icon>
+        <span>Change vault folder</span>
+      </button>
+    </mat-menu>
+
+    <label class="search" [class.is-disabled]="!permissionGranted">
+      <mat-icon>search</mat-icon>
+      <input
+        [(ngModel)]="treeFilter"
+        [disabled]="!permissionGranted"
+        (keydown)="onSearchKeydown($event)"
+        type="search"
+        placeholder="Find a file"
+        aria-label="Find a file in the vault">
+      @if (treeFilter) {
+        <button
+          type="button"
+          class="search-clear"
+          (click)="treeFilter = ''"
+          aria-label="Clear search">
+          <mat-icon>close</mat-icon>
+        </button>
+      }
+    </label>
+
+    @if (isCreatingFile) {
+      <form class="create-form" (ngSubmit)="createNewFile()" (keydown.escape)="cancelNewFile()">
+        <span class="create-form-title">
+          <mat-icon>{{ newFileKind === 'canvas' ? 'account_tree' : 'note_add' }}</mat-icon>
+          {{ newFileKind === 'canvas' ? 'New canvas' : 'New note' }}
+        </span>
+        <input
+          name="newFileName"
+          [(ngModel)]="newFileName"
+          [placeholder]="newFileKind === 'canvas' ? 'e.g. Family tree' : 'e.g. Session notes'"
+          aria-label="Name (use folder/name to place it in a folder)"
+          autocomplete="off"
+          spellcheck="false"
+          #createInput>
+        @if (newFileKind === 'note') {
+          <select
+            name="newFileTemplate"
+            [(ngModel)]="selectedTemplateFileName"
+            aria-label="Template">
+            <option value="">Blank note</option>
+            @for (template of noteTemplates; track template.fileName) {
+              <option [value]="template.fileName">{{ template.label }}</option>
+            }
+          </select>
+        }
+        <span class="create-form-hint">Tip: type <code>Folder/Name</code> to create it inside a folder.</span>
+        @if (createFileError) {
+          <span class="form-error" role="alert">{{ createFileError }}</span>
+        }
+        <div class="create-form-actions">
+          <button type="button" mat-button class="btn-text" (click)="cancelNewFile()">Cancel</button>
+          <button type="submit" mat-flat-button class="btn-primary">Create</button>
+        </div>
+      </form>
     }
 
-    <aside
-      class="vault-sidebar"
-      [class.mobile-open]="isCompactSidebarLayout && isMobileSidebarOpen"
-      aria-label="Vault files">
-      <div class="sidebar-header">
-        <div>
-          <span class="section-kicker">{{ vaultName || 'Vault' }}</span>
-          <strong>{{ pluralize(totalEntryCount, 'item') }}</strong>
-          <div class="sidebar-metrics">
-            <span>{{ pluralize(totalFolderCount, 'folder') }}</span>
-            <span>{{ pluralize(totalFileCount, 'file') }}</span>
+    @if (isCreatingFolder) {
+      <form class="create-form" (ngSubmit)="createNewFolder()" (keydown.escape)="cancelNewFolder()">
+        <span class="create-form-title">
+          <mat-icon>create_new_folder</mat-icon>
+          New folder
+        </span>
+        <input
+          name="newFolderName"
+          [(ngModel)]="newFolderName"
+          placeholder="e.g. Locations/Cities"
+          aria-label="Folder name"
+          autocomplete="off"
+          spellcheck="false"
+          #createInput>
+        @if (createFolderError) {
+          <span class="form-error" role="alert">{{ createFolderError }}</span>
+        }
+        <div class="create-form-actions">
+          <button type="button" mat-button class="btn-text" (click)="cancelNewFolder()">Cancel</button>
+          <button type="submit" mat-flat-button class="btn-primary">Create</button>
+        </div>
+      </form>
+    }
+
+    <div
+      class="tree"
+      role="tree"
+      aria-label="Vault files"
+      [class.is-loading]="isVaultLoading"
+      [class.is-root-drop]="isRootDropTarget"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      (drop)="onDrop($event)">
+
+      @if (permissionGranted && hasTreeFilter && visibleVaultEntries.length > 0) {
+        <div class="tree-note">{{ pluralize(visibleFileCount, 'match', 'matches') }}</div>
+      }
+
+      @if (permissionGranted && visibleVaultEntries.length > 0) {
+        <ng-container *ngTemplateOutlet="treeLevel; context: { entries: visibleVaultEntries, depth: 0 }"></ng-container>
+      } @else if (permissionGranted && treeFilter) {
+        <div class="tree-empty">
+          <mat-icon>search_off</mat-icon>
+          <span>No files match “{{ treeFilter }}”</span>
+        </div>
+      } @else if (isVaultLoading) {
+        <div class="tree-empty">
+          <mat-icon class="spin">progress_activity</mat-icon>
+          <span>Loading vault…</span>
+        </div>
+      } @else if (permissionGranted) {
+        <div class="tree-empty">
+          <mat-icon>folder_open</mat-icon>
+          <span>This vault is empty</span>
+          <button mat-stroked-button class="btn-secondary" (click)="startNewFile()">
+            <mat-icon>note_add</mat-icon>
+            New note
+          </button>
+        </div>
+      }
+
+      @if (draggedEntryPath) {
+        <div class="root-drop-hint" [class.is-active]="isRootDropTarget">
+          <mat-icon>vertical_align_top</mat-icon>
+          Drop here to move to the vault root
+        </div>
+      }
+    </div>
+
+    @if (permissionGranted && totalEntryCount > 0) {
+      <footer class="sidebar-footer">
+        {{ pluralize(totalFileCount, 'file') }} · {{ pluralize(totalFolderCount, 'folder') }}
+        @if (isVaultLoading) {
+          <mat-icon class="spin">progress_activity</mat-icon>
+        }
+      </footer>
+    }
+
+    <ng-template #treeLevel let-entries="entries" let-depth="depth">
+      @for (entry of entries; track trackEntry($index, entry)) {
+        @if (entry.kind === 'directory') {
+          <div
+            class="tree-folder"
+            role="treeitem"
+            [attr.aria-expanded]="isFolderExpanded(entry)"
+            [class.is-drop-target]="isDropTarget(entry)"
+            (dragover)="onDragOver($event, entry)"
+            (dragleave)="onDragLeave($event, entry)"
+            (drop)="onDrop($event, entry)">
+            <div
+              class="tree-row"
+              [class.is-selected]="isFolderSelected(entry)"
+              [style.--depth]="depth"
+              draggable="true"
+              (dragstart)="onDragStart($event, entry)"
+              (dragend)="onDragEnd()"
+              (contextmenu)="openEntryMenu($event, entry)">
+              <button
+                type="button"
+                class="tree-row-main"
+                (click)="toggleFolder(entry)"
+                [title]="entry.relativePath">
+                <mat-icon class="chevron" [class.is-open]="isFolderExpanded(entry)">chevron_right</mat-icon>
+                <mat-icon class="row-icon folder-icon">{{ isFolderExpanded(entry) ? 'folder_open' : 'folder' }}</mat-icon>
+                <span class="row-label">{{ entry.name }}</span>
+              </button>
+              <button
+                type="button"
+                class="row-more"
+                (click)="openEntryMenu($event, entry)"
+                [attr.aria-label]="'Options for ' + entry.name">
+                <mat-icon>more_horiz</mat-icon>
+              </button>
+            </div>
+
+            @if (isFolderExpanded(entry)) {
+              <div class="tree-children" role="group" [style.--depth]="depth">
+                @if ((entry.children || []).length === 0) {
+                  <div class="tree-row is-placeholder" [style.--depth]="depth + 1">
+                    <span class="row-label">Empty folder</span>
+                  </div>
+                } @else {
+                  <ng-container *ngTemplateOutlet="treeLevel; context: { entries: entry.children, depth: depth + 1 }"></ng-container>
+                }
+              </div>
+            }
+          </div>
+        } @else {
+          <div
+            class="tree-row"
+            role="treeitem"
+            [class.is-selected]="isFileSelected(entry)"
+            [style.--depth]="depth"
+            draggable="true"
+            (dragstart)="onDragStart($event, entry)"
+            (dragend)="onDragEnd()"
+            (contextmenu)="openEntryMenu($event, entry)">
+            <button
+              type="button"
+              class="tree-row-main"
+              (click)="selectFile(entry)"
+              [title]="entry.relativePath"
+              [attr.aria-current]="isFileSelected(entry) ? 'page' : null">
+              <span class="chevron-spacer"></span>
+              <mat-icon class="row-icon">{{ getFileIcon(entry.name) }}</mat-icon>
+              <span class="row-label">{{ getDisplayName(entry.name) }}</span>
+              @if (getTreeBadge(entry.name); as badge) {
+                <span class="row-badge">{{ badge }}</span>
+              }
+            </button>
+            <button
+              type="button"
+              class="row-more"
+              (click)="openEntryMenu($event, entry)"
+              [attr.aria-label]="'Options for ' + getDisplayName(entry.name)">
+              <mat-icon>more_horiz</mat-icon>
+            </button>
+          </div>
+        }
+      }
+    </ng-template>
+
+    <!-- One shared menu for every tree row. -->
+    <div
+      class="menu-anchor"
+      [style.left]="contextMenuPosition.x"
+      [style.top]="contextMenuPosition.y"
+      [matMenuTriggerFor]="entryMenu"
+      #entryMenuTrigger="matMenuTrigger">
+    </div>
+    <mat-menu #entryMenu="matMenu" panelClass="custom-glass-menu">
+      @if (menuEntry; as entry) {
+        @if (entry.kind === 'directory') {
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'note')">
+            <mat-icon>note_add</mat-icon>
+            <span>New note here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'canvas')">
+            <mat-icon>account_tree</mat-icon>
+            <span>New canvas here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFolderInFolder(entry)">
+            <mat-icon>create_new_folder</mat-icon>
+            <span>New folder here</span>
+          </button>
+          <button mat-menu-item (click)="selectFolder(entry)">
+            <mat-icon>photo_library</mat-icon>
+            <span>View images</span>
+          </button>
+        } @else {
+          <button mat-menu-item (click)="selectFile(entry)">
+            <mat-icon>edit_note</mat-icon>
+            <span>Open</span>
+          </button>
+          <button mat-menu-item (click)="openEntryPreviewTab(entry)">
+            <mat-icon>open_in_new</mat-icon>
+            <span>Open in preview tab</span>
+          </button>
+          <button mat-menu-item (click)="broadcastEntry(entry)">
+            <mat-icon>broadcast_on_home</mat-icon>
+            <span>Broadcast</span>
+          </button>
+        }
+        <div class="menu-divider"></div>
+        <button mat-menu-item class="menu-danger" (click)="deleteEntry(entry)">
+          <mat-icon>delete</mat-icon>
+          <span>Delete</span>
+        </button>
+      }
+    </mat-menu>
+  </aside>
+
+  <!-- ===================== Main pane ===================== -->
+  <main class="main">
+    @if (!vaultName && !localhostRoute) {
+      <section class="state">
+        <div class="state-card">
+          <span class="state-icon"><mat-icon>folder_open</mat-icon></span>
+          <h2>Connect your Obsidian vault</h2>
+          <p>Pick the folder that holds your vault to read, edit and broadcast notes in this server.</p>
+
+          @if (!fileSystemApiSupported) {
+            <div class="state-alert" role="alert">
+              <mat-icon>warning_amber</mat-icon>
+              <span>Folder access needs a Chromium-based browser (Chrome, Edge) or the desktop app.</span>
+            </div>
+          }
+
+          <div class="state-actions">
+            <button mat-flat-button class="btn-primary" (click)="attachVault()" [disabled]="!fileSystemApiSupported">
+              <mat-icon>folder_open</mat-icon>
+              Choose vault folder
+            </button>
           </div>
         </div>
+      </section>
+    } @else if (localhostRoute && !vaultName) {
+      <section class="state">
+        <div class="state-card">
+          <span class="state-icon"><mat-icon>link</mat-icon></span>
+          <h2>Vault linked by URL</h2>
+          <p class="state-mono">{{ localhostRoute }}</p>
+          <div class="state-actions">
+            <button mat-flat-button class="btn-primary" (click)="openObsidianVault()">
+              <mat-icon>open_in_new</mat-icon>
+              Open vault
+            </button>
+            <button mat-stroked-button class="btn-secondary" (click)="attachVault()" [disabled]="!fileSystemApiSupported">
+              <mat-icon>folder_open</mat-icon>
+              Use a local folder instead
+            </button>
+          </div>
+        </div>
+      </section>
+    } @else if (vaultName && !permissionGranted) {
+      <section class="state">
+        <div class="state-card">
+          <span class="state-icon"><mat-icon>lock_open</mat-icon></span>
+          <h2>Allow access to “{{ vaultName }}”</h2>
+          <p>Your browser needs permission again before this vault can be opened.</p>
 
-        <div class="sidebar-actions">
-          <button
-            mat-icon-button
-            class="compact-icon"
-            (click)="startNewFile()"
-            [disabled]="!permissionGranted"
-            aria-label="New note"
-            matTooltip="New note">
-            <mat-icon>note_add</mat-icon>
-          </button>
-          <button
-            mat-icon-button
-            class="compact-icon"
-            (click)="startNewCanvas()"
-            [disabled]="!permissionGranted"
-            aria-label="New canvas"
-            matTooltip="New canvas">
-            <mat-icon>account_tree</mat-icon>
-          </button>
-          <button
-            mat-icon-button
-            class="compact-icon"
-            (click)="startNewFolder()"
-            [disabled]="!permissionGranted"
-            aria-label="New folder"
-            matTooltip="New folder">
-            <mat-icon>create_new_folder</mat-icon>
-          </button>
-          <button
-            mat-icon-button
-            class="compact-icon"
-            (click)="loadVaultEntries(false)"
-            [disabled]="!permissionGranted || isVaultLoading"
-            aria-label="Refresh vault"
-            matTooltip="Refresh">
-            <mat-icon [class.rotating]="isVaultLoading">refresh</mat-icon>
-          </button>
-          @if (localhostRoute) {
+          @if (vaultError) {
+            <span class="form-error" role="alert">{{ vaultError }}</span>
+          }
+
+          <div class="state-actions">
+            <button mat-flat-button class="btn-primary" (click)="requestPermission()">
+              <mat-icon>check</mat-icon>
+              Allow access
+            </button>
+            <button mat-stroked-button class="btn-secondary" (click)="attachVault()" [disabled]="!fileSystemApiSupported">
+              <mat-icon>folder_open</mat-icon>
+              Choose folder again
+            </button>
+          </div>
+        </div>
+      </section>
+    } @else if (!hasActiveView) {
+      <section class="state">
+        <div class="state-card is-centered">
+          <span class="state-icon"><mat-icon>auto_stories</mat-icon></span>
+          @if (totalFileCount) {
+            <h2>Pick a note to get started</h2>
+            <p>Choose a file from the list, or start something new.</p>
+          } @else {
+            <h2>No notes yet</h2>
+            <p>Create the first note in {{ vaultName }}.</p>
+          }
+
+          @if (vaultError) {
+            <span class="form-error" role="alert">{{ vaultError }}</span>
+          }
+
+          <div class="state-actions">
+            @if (totalFileCount) {
+              <button mat-flat-button class="btn-primary compact-only" (click)="openMobileSidebar()">
+                <mat-icon>menu_open</mat-icon>
+                Browse files
+              </button>
+            }
+            @if (totalFileCount && isCompactSidebarLayout) {
+              <button mat-stroked-button class="btn-secondary" (click)="startNewFile()">
+                <mat-icon>note_add</mat-icon>
+                New note
+              </button>
+            } @else {
+              <button mat-flat-button class="btn-primary" (click)="startNewFile()">
+                <mat-icon>note_add</mat-icon>
+                New note
+              </button>
+            }
+            <button mat-stroked-button class="btn-secondary" (click)="startNewCanvas()">
+              <mat-icon>account_tree</mat-icon>
+              New canvas
+            </button>
+          </div>
+        </div>
+      </section>
+    } @else {
+      <section class="document">
+        <header class="doc-header">
+          @if (!previewOnly && isCompactSidebarLayout) {
             <button
               mat-icon-button
-              class="compact-icon"
-              (click)="openObsidianVault()"
-              aria-label="Open in Obsidian"
-              matTooltip="Open in Obsidian">
-              <mat-icon>open_in_new</mat-icon>
+              class="icon-btn"
+              (click)="openMobileSidebar()"
+              aria-label="Show files"
+              matTooltip="Files">
+              <mat-icon>menu</mat-icon>
             </button>
           }
-          <button
-            type="button"
-            mat-icon-button
-            class="compact-icon mobile-sidebar-close"
-            (click)="closeMobileSidebar()"
-            aria-label="Close vault files"
-            matTooltip="Close files">
-            <mat-icon>close</mat-icon>
-          </button>
-        </div>
-      </div>
 
-      <label class="vault-search" [class.disabled]="!permissionGranted">
-        <mat-icon>search</mat-icon>
-        <input
-          [(ngModel)]="treeFilter"
-          [disabled]="!permissionGranted"
-          type="search"
-          placeholder="Search files"
-          aria-label="Search vault files">
-        @if (treeFilter) {
-          <button
-            type="button"
-            mat-icon-button
-            class="clear-search"
-            (click)="treeFilter = ''"
-            aria-label="Clear file search"
-            matTooltip="Clear">
-            <mat-icon>close</mat-icon>
-          </button>
-        }
-      </label>
-
-      @if (isCreatingFile) {
-        <form class="new-note-form" (ngSubmit)="createNewFile()">
-          <label>
-            <span>{{ newFileKind === 'canvas' ? 'New canvas' : 'New note' }}</span>
-            <input
-              name="newFileName"
-              [(ngModel)]="newFileName"
-              [placeholder]="newFileKind === 'canvas' ? 'Family tree' : 'Session notes'"
-              autocomplete="off"
-              spellcheck="false">
-          </label>
-
-          @if (newFileKind === 'note') {
-          <label>
-            <span>Template</span>
-            <select
-              name="newFileTemplate"
-              [(ngModel)]="selectedTemplateFileName"
-              aria-label="Choose note template">
-              <option value="">Blank note</option>
-              @for (template of noteTemplates; track template.fileName) {
-                <option [value]="template.fileName">{{ template.label }}</option>
-              }
-            </select>
-          </label>
-          }
-
-          @if (createFileError) {
-            <span class="form-error">{{ createFileError }}</span>
-          }
-
-          <div class="new-note-actions">
-            <button type="button" mat-button (click)="cancelNewFile()">Cancel</button>
-            <button type="submit" mat-flat-button> Create </button>
-          </div>
-        </form>
-      }
-
-      @if (isCreatingFolder) {
-        <form class="new-note-form new-folder-form" (ngSubmit)="createNewFolder()">
-          <label>
-            <span>New folder</span>
-            <input
-              name="newFolderName"
-              [(ngModel)]="newFolderName"
-              placeholder="Locations/Cities"
-              autocomplete="off"
-              spellcheck="false">
-          </label>
-
-          @if (createFolderError) {
-            <span class="form-error">{{ createFolderError }}</span>
-          }
-
-          <div class="new-note-actions">
-            <button type="button" mat-button (click)="cancelNewFolder()">Cancel</button>
-            <button type="submit" mat-flat-button> Create </button>
-          </div>
-        </form>
-      }
-
-      <div class="file-tree" [class.loading]="isVaultLoading">
-        @if (permissionGranted && vaultEntries.length > 0) {
-          <div class="tree-summary" [class.filtered]="hasTreeFilter">
-            @if (hasTreeFilter) {
-              <span>{{ pluralize(visibleFileCount, 'file') }} found</span>
-              <span>{{ pluralize(visibleFolderCount, 'folder') }}</span>
-            } @else {
-              <span>{{ vaultName || 'Vault root' }}</span>
-              <span>{{ pluralize(totalEntryCount, 'item') }}</span>
-            }
-          </div>
-
-          <button
-            type="button"
-            class="root-drop-row"
-            [class.active]="!hasActiveView"
-            [class.drop-target]="isRootDropTarget"
-            (click)="closeActiveView()"
-            (dragover)="onDragOver($event)"
-            (dragleave)="onDragLeave($event)"
-            (drop)="onDrop($event)"
-            aria-label="Show vault root"
-            matTooltip="Vault root">
-            <mat-icon>home</mat-icon>
-            <span>Vault root</span>
-            <strong>{{ vaultEntries.length }}</strong>
-          </button>
-        }
-
-        @if (permissionGranted && visibleVaultEntries.length > 0) {
-          <mat-nav-list class="tree-root">
-            <ng-container *ngTemplateOutlet="treeNode; context: { entries: visibleVaultEntries }"></ng-container>
-          </mat-nav-list>
-        } @else if (permissionGranted && treeFilter) {
-          <div class="sidebar-empty">
-            <mat-icon>search_off</mat-icon>
-            <span>No matching files</span>
-          </div>
-        } @else if (permissionGranted && !isVaultLoading) {
-          <div class="sidebar-empty">
-            <mat-icon>folder_open</mat-icon>
-            <span>Empty vault</span>
-          </div>
-        } @else if (isVaultLoading) {
-          <div class="sidebar-empty">
-            <mat-icon class="rotating">sync</mat-icon>
-            <span>Loading vault</span>
-          </div>
-        }
-
-        <ng-template #treeNode let-entries="entries">
-          <ng-container *ngFor="let entry of entries; trackBy: trackEntry">
-            @if (entry.kind === 'directory') {
-              <mat-expansion-panel
-                [hideToggle]="false"
-                class="folder-panel"
-                [class.active-folder]="isFolderSelected(entry)"
-                [class.active-ancestor]="isFolderInActivePath(entry)"
-                [class.drop-target]="isDropTarget(entry)"
-                [expanded]="hasTreeFilter || isFolderInActivePath(entry)"
-                (dragover)="onDragOver($event, entry)"
-                (dragleave)="onDragLeave($event, entry)"
-                (drop)="onDrop($event, entry)"
-                (contextmenu)="onContextMenu($event, folderMenuTrigger)">
-                <mat-expansion-panel-header
-                  (click)="selectFolder(entry)"
-                  [matTooltip]="entry.relativePath"
-                  matTooltipPosition="right">
-                  <mat-panel-title>
-                    <mat-icon>{{ isFolderInActivePath(entry) ? 'folder_open' : 'folder' }}</mat-icon>
-                    <span class="tree-node-text">
-                      <span class="tree-node-name">{{ entry.name }}</span>
-                      <span class="tree-node-meta">{{ getFolderMeta(entry) }}</span>
-                    </span>
-                    <span class="tree-count">{{ (entry.children || []).length }}</span>
-                  </mat-panel-title>
-
-                  <div
-                    [style.position]="'fixed'"
-                    [style.left]="contextMenuPosition.x"
-                    [style.top]="contextMenuPosition.y"
-                    [matMenuTriggerFor]="folderMenu"
-                    #folderMenuTrigger="matMenuTrigger">
-                  </div>
-
-                  <mat-menu #folderMenu="matMenu" panelClass="custom-glass-menu">
-                    <button mat-menu-item (click)="startNewFileInFolder(entry, 'note', $event)">
-                      <mat-icon>note_add</mat-icon>
-                      <span>New note here</span>
-                    </button>
-                    <button mat-menu-item (click)="startNewFileInFolder(entry, 'canvas', $event)">
-                      <mat-icon>account_tree</mat-icon>
-                      <span>New canvas here</span>
-                    </button>
-                    <button mat-menu-item (click)="startNewFolderInFolder(entry, $event)">
-                      <mat-icon>create_new_folder</mat-icon>
-                      <span>New folder here</span>
-                    </button>
-                    <button mat-menu-item (click)="deleteEntry(entry, $event)">
-                      <mat-icon>delete</mat-icon>
-                      <span>Delete</span>
-                    </button>
-                  </mat-menu>
-                </mat-expansion-panel-header>
-
-                <div class="folder-content">
-                  <ng-container *ngTemplateOutlet="treeNode; context: { entries: entry.children || [] }"></ng-container>
-                </div>
-              </mat-expansion-panel>
-            } @else {
-              <mat-list-item
-                (click)="selectFile(entry)"
-                (contextmenu)="onContextMenu($event, fileMenuTrigger)"
-                class="file-item"
-                [class.active]="isFileSelected(entry)"
-                draggable="true"
-                (dragstart)="onDragStart($event, entry)"
-                (dragend)="onDragEnd()"
-                [matTooltip]="entry.relativePath"
-                matTooltipPosition="right">
-                <mat-icon matListItemIcon>{{ getFileIcon(entry.name) }}</mat-icon>
-                <div matListItemTitle class="file-title-row">
-                  <span>{{ getDisplayName(entry.name) }}</span>
-                  <span class="file-extension">{{ getFileTypeLabel(entry.name) }}</span>
-                </div>
-                <div matListItemLine>{{ getFileLocationLabel(entry) }}</div>
-
-                <div
-                  [style.position]="'fixed'"
-                  [style.left]="contextMenuPosition.x"
-                  [style.top]="contextMenuPosition.y"
-                  [matMenuTriggerFor]="fileMenu"
-                  #fileMenuTrigger="matMenuTrigger">
-                </div>
-
-                <mat-menu #fileMenu="matMenu" panelClass="custom-glass-menu">
-                  <button mat-menu-item (click)="openEntryPreviewTab(entry, $event)">
-                    <mat-icon>visibility</mat-icon>
-                    <span>Open preview tab</span>
-                  </button>
-                  @if (entry.parentPath) {
-                    <button mat-menu-item (click)="selectContainingFolder(entry, $event)">
-                      <mat-icon>folder_open</mat-icon>
-                      <span>Show containing folder</span>
-                    </button>
+          <div class="doc-heading">
+            @if (activeBreadcrumbs.length) {
+              <nav class="breadcrumbs" aria-label="Location">
+                @for (crumb of activeBreadcrumbs; track crumb.path; let last = $last) {
+                  <button type="button" (click)="revealFolder(crumb.path)" [disabled]="previewOnly">{{ crumb.name }}</button>
+                  @if (!last) {
+                    <mat-icon>chevron_right</mat-icon>
                   }
-                  <button mat-menu-item (click)="broadcastEntry(entry, $event)">
-                    <mat-icon>broadcast_on_home</mat-icon>
-                    <span>Broadcast</span>
-                  </button>
-                  <button mat-menu-item (click)="deleteEntry(entry, $event)">
-                    <mat-icon>delete</mat-icon>
-                    <span>Delete</span>
-                  </button>
-                </mat-menu>
-              </mat-list-item>
-            }
-          </ng-container>
-        </ng-template>
-      </div>
-    </aside>
-
-    <main class="vault-main">
-      @if (!vaultName && !localhostRoute) {
-        <section class="vault-state">
-          <div class="state-card">
-            <span class="state-icon"><mat-icon>folder_open</mat-icon></span>
-            <span class="eyebrow">Local vault</span>
-            <h3>Attach an Obsidian vault</h3>
-            <p>Connect a local folder to use notes, embeds, and broadcasts in this server.</p>
-
-            @if (!fileSystemApiSupported) {
-              <div class="state-alert warning">
-                <mat-icon>warning_amber</mat-icon>
-                <span>Use a Chromium browser for local folder access.</span>
-              </div>
+                }
+              </nav>
             }
 
-            <button
-              mat-flat-button
-              class="primary-action"
-              (click)="attachVault()"
-              [disabled]="!fileSystemApiSupported">
-              <mat-icon>folder_open</mat-icon>
-              <span>Attach Folder</span>
-            </button>
+            @if (isViewingFolder) {
+              <h1 class="doc-title">{{ selectedFolderName }}</h1>
+            } @else if (previewOnly) {
+              <h1 class="doc-title">{{ selectedFileDisplayName || getDisplayName(selectedFileName) }}</h1>
+            } @else {
+              <input
+                class="doc-title doc-title-input"
+                [(ngModel)]="selectedFileDisplayName"
+                (blur)="renameSelectedFile()"
+                (keydown.enter)="$any($event.target).blur()"
+                placeholder="Untitled"
+                spellcheck="false"
+                aria-label="File name (edit to rename)">
+            }
           </div>
-        </section>
-      } @else if (localhostRoute && !vaultName) {
-        <section class="vault-state">
-          <div class="state-card">
-            <span class="state-icon"><mat-icon>open_in_new</mat-icon></span>
-            <span class="eyebrow">External vault</span>
-            <h3>Vault route linked</h3>
-            <p>{{ localhostRoute }}</p>
 
-            <div class="state-actions">
-              <button mat-flat-button class="primary-action" (click)="openObsidianVault()">
-                <mat-icon>open_in_new</mat-icon>
-                <span>Open Vault</span>
-              </button>
+          <div class="doc-actions">
+            @if (isViewingFolder) {
+              <span class="status">
+                <mat-icon>photo_library</mat-icon>
+                {{ pluralize(selectedFolderImages.length, 'image') }}
+              </span>
+            } @else {
+              @if (previewOnly) {
+                <span class="status is-preview">
+                  <mat-icon>visibility</mat-icon>
+                  <span class="status-text">Read only</span>
+                </span>
+              } @else if (isEditableFileSelected) {
+                <span
+                  class="status"
+                  [class.is-busy]="saveState === 'saving'"
+                  [class.is-error]="saveState === 'error' || saveState === 'conflict'"
+                  [matTooltip]="lastSavedAt ? 'Last saved ' + (lastSavedAt | date: 'shortTime') : ''"
+                  aria-live="polite">
+                  <mat-icon [class.spin]="saveState === 'saving'">
+                    {{ saveState === 'saving' ? 'progress_activity' : saveState === 'conflict' ? 'sync_problem' : saveState === 'error' ? 'error' : 'check' }}
+                  </mat-icon>
+                  <span class="status-text">{{ saveState === 'saving' ? 'Saving…' : saveStateLabel }}</span>
+                </span>
+              }
+
               <button
                 mat-stroked-button
-                class="secondary-action"
-                (click)="attachVault()"
-                [disabled]="!fileSystemApiSupported">
-                <mat-icon>folder_open</mat-icon>
-                <span>Attach Folder</span>
-              </button>
-            </div>
-          </div>
-        </section>
-      } @else if (vaultName && !permissionGranted) {
-        <section class="vault-state">
-          <div class="state-card">
-            <span class="state-icon"><mat-icon>lock</mat-icon></span>
-            <span class="eyebrow">Permission</span>
-            <h3>Access required</h3>
-            <p>{{ vaultName }}</p>
-
-            <button mat-flat-button class="primary-action" (click)="requestPermission()">
-              <mat-icon>vpn_key</mat-icon>
-              <span>Grant Access</span>
-            </button>
-          </div>
-        </section>
-      } @else if (permissionGranted && !isEditing && !isViewingFolder) {
-        <section class="vault-state">
-          <div class="state-card compact-state">
-            <span class="state-icon"><mat-icon>auto_stories</mat-icon></span>
-            <span class="eyebrow">Ready</span>
-            <h3>{{ totalFileCount ? 'Choose a file' : 'No notes yet' }}</h3>
-            <p>{{ totalFileCount ? vaultName : 'Create the first note in this vault.' }}</p>
-
-            @if (totalFileCount) {
-              <button mat-flat-button class="primary-action mobile-sidebar-only" (click)="openMobileSidebar()">
-                <mat-icon>folder_open</mat-icon>
-                <span>Browse Files</span>
-              </button>
-            }
-            <button mat-stroked-button class="secondary-action" (click)="startNewFile()">
-              <mat-icon>note_add</mat-icon>
-              <span>New Note</span>
-            </button>
-            <button mat-stroked-button class="secondary-action" (click)="startNewCanvas()">
-              <mat-icon>account_tree</mat-icon>
-              <span>New Canvas</span>
-            </button>
-            <button mat-stroked-button class="secondary-action" (click)="startNewFolder()">
-              <mat-icon>create_new_folder</mat-icon>
-              <span>New Folder</span>
-            </button>
-          </div>
-        </section>
-      } @else if (isViewingFolder) {
-        <section class="file-content-wrapper folder-gallery-page">
-          <header class="file-header">
-            <div class="file-title-block">
-              <mat-icon>photo_library</mat-icon>
-              <div>
-                <h3>{{ selectedFolderName }}</h3>
-                <span>{{ selectedFolderRelativePath || 'Vault root' }} - {{ selectedFolderImages.length }} images</span>
-              </div>
-            </div>
-
-            <div class="file-header-actions">
-              @if (!previewOnly && isCompactSidebarLayout) {
-                <button
-                  type="button"
-                  mat-icon-button
-                  class="toolbar-icon"
-                  (click)="openMobileSidebar()"
-                  aria-label="Browse files"
-                  matTooltip="Files">
-                  <mat-icon>menu</mat-icon>
-                </button>
-              }
-              <button
-                mat-icon-button
-                class="toolbar-icon"
-                (click)="cancelFolderView()"
-                aria-label="Close folder"
-                matTooltip="Close folder">
-                <mat-icon>close</mat-icon>
-              </button>
-            </div>
-          </header>
-
-          <div class="gallery-scroll">
-            @if (selectedFolderImages.length > 0) {
-              <div class="image-waterfall">
-                @for (image of selectedFolderImages; track image.relativePath) {
-                  <figure class="gallery-image-card">
-                    <img
-                      [src]="image.url"
-                      [alt]="image.name"
-                      [title]="getDisplayName(image.name)"
-                      [attr.data-path]="image.relativePath"
-                      loading="lazy"
-                      (click)="openGalleryImage(image.relativePath)"
-                      (contextmenu)="onImageContextMenu($event, galleryImageMenuTrigger)">
-                  </figure>
-                }
-              </div>
-            } @else {
-              <div class="sidebar-empty gallery-empty">
-                <mat-icon>hide_image</mat-icon>
-                <h3>No images in this folder</h3>
-                <p>{{ selectedFolderRelativePath || selectedFolderName }}</p>
-              </div>
-            }
-
-            <div
-              [style.position]="'fixed'"
-              [style.left]="contextMenuPosition.x"
-              [style.top]="contextMenuPosition.y"
-              [matMenuTriggerFor]="galleryImageMenu"
-              #galleryImageMenuTrigger="matMenuTrigger">
-            </div>
-
-            <mat-menu #galleryImageMenu="matMenu" panelClass="custom-glass-menu">
-              <button mat-menu-item (click)="broadcastContextImage()">
-                <mat-icon>broadcast_on_home</mat-icon>
-                <span>Broadcast image</span>
-              </button>
-            </mat-menu>
-          </div>
-        </section>
-      } @else {
-        <section class="file-content-wrapper">
-          <header class="file-header">
-            <div class="file-title-block">
-              <mat-icon>{{ getFileIcon(selectedFileName) }}</mat-icon>
-              <div>
-                @if (previewOnly) {
-                  <h3>{{ selectedFileDisplayName || getDisplayName(selectedFileName) }}</h3>
-                } @else {
-                  <input
-                    [(ngModel)]="selectedFileDisplayName"
-                    (blur)="renameSelectedFile()"
-                    placeholder="Untitled Note"
-                    spellcheck="false"
-                    class="file-title-input"
-                    aria-label="Note title">
-                }
-                <span>{{ selectedFileRelativePath }}</span>
-              </div>
-            </div>
-
-            <div class="file-header-actions">
-              @if (!previewOnly && isCompactSidebarLayout) {
-                <button
-                  type="button"
-                  mat-icon-button
-                  class="toolbar-icon"
-                  (click)="openMobileSidebar()"
-                  aria-label="Browse files"
-                  matTooltip="Files">
-                  <mat-icon>menu</mat-icon>
-                </button>
-              }
-              @if (previewOnly) {
-                <span class="status-chip preview">
-                  <mat-icon>visibility</mat-icon>
-                  <span>Preview</span>
-                </span>
-              }
-              @if (!previewOnly && (isMarkdownFileSelected || isCanvasFileSelected)) {
-                <span class="save-status" [class.saving]="saveState === 'saving'" [class.error]="saveState === 'error'">
-                  <mat-icon>{{ saveState === 'saving' ? 'sync' : saveState === 'error' ? 'error' : 'cloud_done' }}</mat-icon>
-                  <span>{{ saveStateLabel }}</span>
-                </span>
-              }
-              @if (!previewOnly && selectedFileRelativePath) {
-                <button
-                  mat-icon-button
-                  class="toolbar-icon"
-                  (click)="openSelectedFilePreviewTab()"
-                  aria-label="Open preview tab"
-                  matTooltip="Open preview tab">
-                  <mat-icon>visibility</mat-icon>
-                </button>
-              }
-              @if (!previewOnly && isMarkdownFileSelected) {
-                <button
-                  mat-icon-button
-                  class="toolbar-icon"
-                  (click)="insertStatsheetTemplate()"
-                  aria-label="Insert 5e statsheet"
-                  matTooltip="Insert 5e statsheet">
-                  <mat-icon>assignment</mat-icon>
-                </button>
-              }
-              <button
-                mat-icon-button
-                class="toolbar-icon"
+                class="btn-secondary btn-broadcast"
                 (click)="broadcast()"
-                [matTooltip]="hasActiveSelection ? 'Broadcast selection' : 'Broadcast document'"
-                aria-label="Broadcast note">
-                <mat-icon [class.accented]="hasActiveSelection">broadcast_on_home</mat-icon>
+                [matTooltip]="hasActiveSelection ? 'Send the selected text to players' : 'Send this file to players'">
+                <mat-icon [class.is-accent]="hasActiveSelection">broadcast_on_home</mat-icon>
+                <span class="btn-label">{{ hasActiveSelection ? 'Broadcast selection' : 'Broadcast' }}</span>
               </button>
+
+              <button
+                mat-icon-button
+                class="icon-btn links-toggle"
+                [class.is-active]="linksPanelVisible"
+                (click)="toggleLinksPanel()"
+                [attr.aria-pressed]="linksPanelVisible"
+                [attr.aria-label]="'Backlinks: ' + pluralize(backlinks.length, 'note') + ' link here'"
+                [matTooltip]="linksPanelVisible ? 'Hide backlinks' : 'Show backlinks'">
+                <mat-icon>link</mat-icon>
+                @if (backlinks.length) {
+                  <span class="count-badge">{{ backlinks.length }}</span>
+                }
+              </button>
+
               @if (!previewOnly) {
                 <button
                   mat-icon-button
-                  class="toolbar-icon"
-                  (click)="cancelEdit()"
-                  aria-label="Close note"
-                  matTooltip="Close note">
-                  <mat-icon>close</mat-icon>
+                  class="icon-btn"
+                  [matMenuTriggerFor]="fileMenu"
+                  aria-label="File options"
+                  matTooltip="More">
+                  <mat-icon>more_vert</mat-icon>
                 </button>
               }
-            </div>
-          </header>
-
-          <div class="content-scroll-container">
-            @if (isMarkdownFileSelected) {
-              <div class="editor-wrapper" (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
-                <app-milkdown-editor
-                  [markdown]="selectedFileContent"
-                  [serverId]="serverId"
-                  [currentFilePath]="selectedFileRelativePath"
-                  [isPreview]="previewOnly"
-                  (markdownChange)="onContentChange($event)"
-                  (onLinkClick)="onWikilinkClick($event)">
-                </app-milkdown-editor>
-              </div>
-            } @else if (isCanvasFileSelected) {
-              <div class="canvas-editor-wrapper">
-                <app-obsidian-canvas-editor
-                  [canvasJson]="selectedFileContent"
-                  [serverId]="serverId"
-                  [currentFilePath]="selectedFileRelativePath"
-                  [readonly]="previewOnly"
-                  (canvasJsonChange)="onContentChange($event)"
-                  (fileOpen)="onCanvasFileOpen($event)">
-                </app-obsidian-canvas-editor>
-              </div>
-            } @else {
-              <div class="non-markdown-viewer">
-                @if (isImage) {
-                  <img
-                    [src]="nonMarkdownUrl"
-                    class="viewer-image"
-                    [alt]="selectedFileName"
-                    [attr.data-path]="selectedFileRelativePath"
-                    (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
-                } @else if (isPdf) {
-                  <embed [src]="nonMarkdownUrl" type="application/pdf" class="viewer-pdf">
-                } @else {
-                  <div class="generic-file">
-                    <mat-icon>{{ getFileIcon(selectedFileName) }}</mat-icon>
-                    <h3>{{ selectedFileName }}</h3>
-                    <a [href]="nonMarkdownUrl" [download]="selectedFileName" mat-flat-button class="primary-action">
-                      <mat-icon>download</mat-icon>
-                      <span>Download</span>
-                    </a>
-                  </div>
-                }
-              </div>
             }
 
-            <div
-              [style.position]="'fixed'"
-              [style.left]="contextMenuPosition.x"
-              [style.top]="contextMenuPosition.y"
-              [matMenuTriggerFor]="imageMenu"
-              #imageMenuTrigger="matMenuTrigger">
-            </div>
-
-            <mat-menu #imageMenu="matMenu" panelClass="custom-glass-menu">
-              <button mat-menu-item (click)="broadcastContextImage()">
-                <mat-icon>broadcast_on_home</mat-icon>
-                <span>Broadcast image</span>
+            @if (!previewOnly) {
+              <button
+                mat-icon-button
+                class="icon-btn"
+                (click)="closeActiveView()"
+                [attr.aria-label]="isViewingFolder ? 'Close folder' : 'Close file'"
+                matTooltip="Close">
+                <mat-icon>close</mat-icon>
               </button>
-            </mat-menu>
+            }
           </div>
-        </section>
-      }
-    </main>
-  </div>
+        </header>
+
+        @if (saveState === 'conflict' && !previewOnly) {
+          <div class="banner is-warning" role="alert">
+            <mat-icon>sync_problem</mat-icon>
+            <span>This file was changed outside the app (e.g. in Obsidian). Your latest edits haven't been saved.</span>
+            <div class="banner-actions">
+              <button mat-button class="btn-text" (click)="reloadFromDisk()">Load their version</button>
+              <button mat-flat-button class="btn-primary" (click)="overwriteDiskVersion()">Keep mine</button>
+            </div>
+          </div>
+        } @else if (saveState === 'error' && !previewOnly) {
+          <div class="banner is-error" role="alert">
+            <mat-icon>error</mat-icon>
+            <span>Couldn't save your changes. They'll be retried on your next edit.</span>
+            <div class="banner-actions">
+              <button mat-button class="btn-text" (click)="onContentChange()">Retry now</button>
+            </div>
+          </div>
+        }
+
+        <mat-menu #fileMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+          <button mat-menu-item (click)="openSelectedFilePreviewTab()">
+            <mat-icon>open_in_new</mat-icon>
+            <span>Open in preview tab</span>
+          </button>
+          @if (isMarkdownFileSelected) {
+            <button mat-menu-item (click)="insertStatsheetTemplate()">
+              <mat-icon>assignment</mat-icon>
+              <span>Insert 5e statblock</span>
+            </button>
+          }
+          <button mat-menu-item (click)="revealOpenFile()">
+            <mat-icon>account_tree</mat-icon>
+            <span>Show in file list</span>
+          </button>
+          <div class="menu-divider"></div>
+          <button mat-menu-item class="menu-danger" (click)="deleteOpenFile()">
+            <mat-icon>delete</mat-icon>
+            <span>Delete file</span>
+          </button>
+        </mat-menu>
+
+        <div class="doc-main">
+        <div class="doc-body">
+          @if (isViewingFolder) {
+            <div class="gallery">
+              @if (selectedFolderImages.length > 0) {
+                <div class="gallery-grid">
+                  @for (image of selectedFolderImages; track image.relativePath) {
+                    <figure class="gallery-item">
+                      <button type="button" (click)="openGalleryImage(image.relativePath)" [attr.aria-label]="'Open ' + image.name">
+                        <img
+                          [src]="image.url"
+                          [alt]="image.name"
+                          [attr.data-path]="image.relativePath"
+                          loading="lazy"
+                          (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+                      </button>
+                      <figcaption>{{ getDisplayName(image.name) }}</figcaption>
+                    </figure>
+                  }
+                </div>
+              } @else {
+                <div class="tree-empty is-large">
+                  <mat-icon>hide_image</mat-icon>
+                  <span>No images in this folder</span>
+                </div>
+              }
+            </div>
+          } @else if (isMarkdownFileSelected) {
+            <div class="editor" (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+              <app-milkdown-editor
+                [markdown]="selectedFileContent"
+                [serverId]="serverId"
+                [currentFilePath]="selectedFileRelativePath"
+                [isPreview]="previewOnly"
+                (markdownChange)="onContentChange($event)"
+                (onLinkClick)="onWikilinkClick($event)">
+              </app-milkdown-editor>
+            </div>
+          } @else if (isCanvasFileSelected) {
+            <div class="canvas">
+              <app-obsidian-canvas-editor
+                [canvasJson]="selectedFileContent"
+                [serverId]="serverId"
+                [currentFilePath]="selectedFileRelativePath"
+                [readonly]="previewOnly"
+                (canvasJsonChange)="onContentChange($event)"
+                (fileOpen)="onCanvasFileOpen($event)">
+              </app-obsidian-canvas-editor>
+            </div>
+          } @else {
+            <div class="viewer">
+              @if (isImage) {
+                <img
+                  [src]="nonMarkdownUrl"
+                  class="viewer-image"
+                  [alt]="selectedFileName"
+                  [attr.data-path]="selectedFileRelativePath"
+                  (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+              } @else if (isPdf) {
+                <embed [src]="nonMarkdownUrl" type="application/pdf" class="viewer-pdf">
+              } @else {
+                <div class="state-card is-centered">
+                  <span class="state-icon"><mat-icon>{{ getFileIcon(selectedFileName) }}</mat-icon></span>
+                  <h2>{{ selectedFileName }}</h2>
+                  <p>This file type can't be shown here.</p>
+                  <div class="state-actions">
+                    <a [href]="nonMarkdownUrl" [download]="selectedFileName" mat-flat-button class="btn-primary">
+                      <mat-icon>download</mat-icon>
+                      Download
+                    </a>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        @if (isEditing && linksPanelVisible) {
+          <aside class="links-panel" aria-label="Backlinks">
+            <header class="links-panel-header">
+              <mat-icon>link</mat-icon>
+              <span class="links-panel-title">Linked from</span>
+              @if (backlinks.length) {
+                <span class="count-badge">{{ backlinks.length }}</span>
+              }
+              <button
+                mat-icon-button
+                class="icon-btn links-panel-close"
+                (click)="toggleLinksPanel()"
+                aria-label="Hide backlinks"
+                matTooltip="Hide">
+                <mat-icon>close</mat-icon>
+              </button>
+            </header>
+
+            <div class="links-panel-body">
+              @if (backlinks.length) {
+                <ul class="backlink-list">
+                  @for (mention of backlinks; track mention.source.relativePath) {
+                    <li>
+                      <button type="button" class="backlink" (click)="openBacklink(mention.source)" [title]="mention.source.relativePath">
+                        <span class="backlink-title">
+                          <mat-icon>{{ getFileIcon(mention.source.name) }}</mat-icon>
+                          <span class="backlink-name">{{ getDisplayName(mention.source.name) }}</span>
+                        </span>
+                        @if (mention.source.parentPath) {
+                          <span class="backlink-path">{{ mention.source.parentPath }}</span>
+                        }
+                        @for (snippet of mention.snippets.slice(0, 3); track snippet) {
+                          <span class="backlink-snippet">{{ snippet }}</span>
+                        }
+                      </button>
+                    </li>
+                  }
+                </ul>
+              } @else if (contentIndexState === 'indexing') {
+                <div class="links-empty">
+                  <mat-icon class="spin">progress_activity</mat-icon>
+                  <span>Indexing notes…</span>
+                </div>
+              } @else {
+                <div class="links-empty">
+                  <mat-icon>link_off</mat-icon>
+                  <span>No notes link here yet.</span>
+                  @if (!previewOnly) {
+                    <span class="links-empty-hint">Link to it from another note with <code>[[{{ getDisplayName(selectedFileName) }}]]</code></span>
+                  }
+                </div>
+              }
+            </div>
+          </aside>
+        }
+        </div>
+
+        <div
+          class="menu-anchor"
+          [style.left]="contextMenuPosition.x"
+          [style.top]="contextMenuPosition.y"
+          [matMenuTriggerFor]="imageMenu"
+          #imageMenuTrigger="matMenuTrigger">
+        </div>
+        <mat-menu #imageMenu="matMenu" panelClass="custom-glass-menu">
+          <button mat-menu-item (click)="broadcastContextImage()">
+            <mat-icon>broadcast_on_home</mat-icon>
+            <span>Broadcast image</span>
+          </button>
+        </mat-menu>
+      </section>
+    }
+  </main>
 </div>

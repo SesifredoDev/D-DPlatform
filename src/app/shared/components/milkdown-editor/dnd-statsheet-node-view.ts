@@ -7,14 +7,14 @@ import {
   type DndStatsheet,
   type DndStatsheetEntry,
   type DndStatsheetSection,
-  ObsidianVaultService,
-} from '../../services/ObsidianVault/obsidian-vault-service';
+  DndStatsheetService,
+} from '../../services/ObsidianVault/dnd-statsheet.service';
 
 type GetPos = () => number | undefined;
 
 const ABILITIES: DndAbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
-export function dndStatsheetNodeViewPlugin(vaultService: ObsidianVaultService) {
+export function dndStatsheetNodeViewPlugin(statsheetService: DndStatsheetService) {
   const timer = createTimer('DndStatsheetNodeViewReady');
   let fallback: NodeViewConstructor | undefined;
 
@@ -29,7 +29,7 @@ export function dndStatsheetNodeViewPlugin(vaultService: ObsidianVaultService) {
       ctx.update(nodeViewCtx, views => {
         fallback = [...views].reverse().find(([nodeId]) => nodeId === 'code_block')?.[1];
         const nextViews = views.filter(([nodeId]) => nodeId !== 'code_block');
-        nextViews.push(['code_block', createDndStatsheetNodeView(vaultService, fallback)]);
+        nextViews.push(['code_block', createDndStatsheetNodeView(statsheetService, fallback)]);
         return nextViews;
       });
 
@@ -49,13 +49,13 @@ export function dndStatsheetNodeViewPlugin(vaultService: ObsidianVaultService) {
 }
 
 export function createDndStatsheetNodeView(
-  vaultService: ObsidianVaultService,
+  statsheetService: DndStatsheetService,
   fallback?: NodeViewConstructor
 ): NodeViewConstructor {
   return (node, view, getPos, decorations, innerDecorations) => {
     const language = String(node.attrs['language'] || '');
-    if (vaultService.isDndStatsheetLanguage(language)) {
-      return new DndStatsheetNodeView(node, view, getPos as GetPos, vaultService);
+    if (statsheetService.isDndStatsheetLanguage(language)) {
+      return new DndStatsheetNodeView(node, view, getPos as GetPos, statsheetService);
     }
 
     return fallback
@@ -74,7 +74,7 @@ class DndStatsheetNodeView implements NodeView {
     node: ProseMirrorNode,
     private view: EditorView,
     private getPos: GetPos,
-    private vaultService: ObsidianVaultService
+    private statsheetService: DndStatsheetService
   ) {
     this.node = node;
     this.statsheet = this.parseNode(node);
@@ -90,7 +90,7 @@ class DndStatsheetNodeView implements NodeView {
 
   update(node: ProseMirrorNode): boolean {
     const language = String(node.attrs['language'] || '');
-    if (node.type !== this.node.type || !this.vaultService.isDndStatsheetLanguage(language)) {
+    if (node.type !== this.node.type || !this.statsheetService.isDndStatsheetLanguage(language)) {
       return false;
     }
 
@@ -125,7 +125,7 @@ class DndStatsheetNodeView implements NodeView {
   }
 
   private parseNode(node: ProseMirrorNode): DndStatsheet {
-    return this.vaultService.parseDndStatsheetSource(node.textContent) || this.vaultService.createDndStatsheet();
+    return this.statsheetService.parseDndStatsheetSource(node.textContent) || this.statsheetService.createDndStatsheet();
   }
 
   private render(): void {
@@ -426,7 +426,7 @@ class DndStatsheetNodeView implements NodeView {
     const pos = this.getPos();
     if (typeof pos !== 'number') return;
 
-    const source = this.vaultService.serializeDndStatsheet(this.statsheet);
+    const source = this.statsheetService.serializeDndStatsheet(this.statsheet);
     const start = pos + 1;
     const end = pos + this.node.nodeSize - 1;
     const transaction = source

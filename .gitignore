@@ -51,3 +51,4 @@ Thumbs.db
 /src-tauri/bin/ffprobe.exe
 /src-tauri/bin/ffmpeg
 /src-tauri/bin/ffprobe
+/NOTE_FEATURES.md

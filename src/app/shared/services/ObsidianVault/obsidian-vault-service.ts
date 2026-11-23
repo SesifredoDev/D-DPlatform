@@ -1,32 +1,31 @@
 import { Injectable } from '@angular/core';
 import { IServer } from '../../models/server/server.model';
 import { ChannelType, IChannel } from '../../models/server/channel.model';
-import { get, set, del } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 import type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/obsidian-vault-service.model';
 export type { VaultEntry, VaultSearchResult } from '../../models/ObsidianVault/obsidian-vault-service.model';
 
-export type DndAbilityKey = 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha';
 type VaultPermissionMode = 'read' | 'readwrite';
 
-export interface DndStatsheetEntry {
-  name: string;
-  text: string;
+export interface VaultFileText {
+  content: string;
+  /** File's lastModified timestamp when it was read; pass back to writeFile to detect external edits. */
+  lastModified: number;
 }
 
-export interface DndStatsheetSection {
-  title: string;
-  entries: DndStatsheetEntry[];
+export interface VaultWriteOptions {
+  /**
+   * When set, the write is refused with VaultConflictError if the file on disk was modified
+   * after this timestamp (e.g. edited in Obsidian while open here).
+   */
+  expectedLastModified?: number;
 }
 
-export interface DndStatsheet {
-  name: string;
-  meta: string;
-  armorClass: string;
-  hitPoints: string;
-  speed: string;
-  abilities: Record<DndAbilityKey, string>;
-  attributes: DndStatsheetEntry[];
-  sections: DndStatsheetSection[];
+export class VaultConflictError extends Error {
+  constructor(readonly relativePath: string, readonly diskLastModified: number) {
+    super(`File changed on disk: ${relativePath}`);
+    this.name = 'VaultConflictError';
+  }
 }
 
 @Injectable({
@@ -35,20 +34,11 @@ export interface DndStatsheet {
 export class ObsidianVaultService {
   private readonly STORAGE_KEY_PREFIX = 'obsidian_handle_';
   private readonly LOCALHOST_ROUTE_STORAGE_KEY_PREFIX = 'obsidian_localhost_route_';
-  private readonly DND_STATSHEET_LANGUAGES = new Set([
-    '5e',
-    '5e-statblock',
-    '5e-statsheet',
-    'dnd',
-    'dnd-statblock',
-    'dnd-statsheet',
-    'statblock',
-    'statsheet',
-  ]);
-  private readonly DND_ABILITY_KEYS: DndAbilityKey[] = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
   private vaultCache: Map<string, VaultEntry[]> = new Map();
   private readonly fileTextCache = new Map<string, string>();
+  /** In-memory copy of the IndexedDB-stored root handles, so each file read doesn't hit IndexedDB. */
+  private readonly handleCache = new Map<string, FileSystemDirectoryHandle>();
 
   constructor() {}
 
@@ -56,18 +46,20 @@ export class ObsidianVaultService {
     return 'showDirectoryPicker' in window;
   }
 
-  async attachVaultToServer(serverId: string): Promise<string> {
+  async attachVaultToServer(serverId: string, startIn?: FileSystemHandle): Promise<string> {
     if (!this.isFileSystemApiSupported()) {
       throw new Error('File System Access API is not supported in this browser.');
     }
 
     try {
       const handle = await (window as any).showDirectoryPicker({
-        mode: 'readwrite'
+        mode: 'readwrite',
+        ...(startIn ? { startIn } : {}),
       });
       await set(`${this.STORAGE_KEY_PREFIX}${serverId}`, handle);
       localStorage.setItem(`${this.STORAGE_KEY_PREFIX}${serverId}_exists`, 'true');
-      this.vaultCache.delete(serverId);
+      this.handleCache.set(serverId, handle);
+      this.invalidateServerCaches(serverId);
       return handle.name;
     } catch (err) {
       console.error('User cancelled or browser blocked folder access', err);
@@ -76,8 +68,14 @@ export class ObsidianVaultService {
   }
 
   async getVaultHandle(serverId: string): Promise<FileSystemDirectoryHandle | null> {
-    const handle = await get(`${this.STORAGE_KEY_PREFIX}${serverId}`);
-    return (handle as FileSystemDirectoryHandle) || null;
+    const cached = this.handleCache.get(serverId);
+    if (cached) return cached;
+
+    const handle = (await get(`${this.STORAGE_KEY_PREFIX}${serverId}`)) as FileSystemDirectoryHandle | undefined;
+    if (handle) {
+      this.handleCache.set(serverId, handle);
+    }
+    return handle || null;
   }
 
   async requestPermission(
@@ -187,116 +185,205 @@ export class ObsidianVaultService {
     return await blob.text();
   }
 
-  async readFileAsBlob(serverId: string, relativePath: string): Promise<Blob> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
+  async readFileWithMeta(serverId: string, relativePath: string): Promise<VaultFileText> {
+    const file = await this.readFileAsBlob(serverId, relativePath);
+    return { content: await file.text(), lastModified: file.lastModified };
+  }
 
+  async readFileAsBlob(serverId: string, relativePath: string): Promise<File> {
+    const rootHandle = await this.requireVaultHandle(serverId);
     const fileHandle = await this.getFileHandleByPath(rootHandle, relativePath);
     return await fileHandle.getFile();
   }
 
-  async writeFile(serverId: string, relativePath: string, content: string): Promise<void> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
+  /** Returns true when a file exists at the path. Cheaper than reading it as a probe. */
+  async fileExists(serverId: string, relativePath: string): Promise<boolean> {
+    try {
+      const rootHandle = await this.requireVaultHandle(serverId);
+      await this.getFileHandleByPath(rootHandle, relativePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-    const fileHandle = await this.getFileHandleByPath(rootHandle, relativePath, true);
+  /**
+   * Writes text or binary content. Returns the file's new lastModified timestamp.
+   * The cached file tree is only invalidated when the write creates a new file.
+   */
+  async writeFile(
+    serverId: string,
+    relativePath: string,
+    content: string | Blob,
+    options: VaultWriteOptions = {}
+  ): Promise<number> {
+    const rootHandle = await this.requireVaultHandle(serverId);
+
+    let fileHandle: FileSystemFileHandle;
+    let created = false;
+    try {
+      fileHandle = await this.getFileHandleByPath(rootHandle, relativePath);
+    } catch {
+      fileHandle = await this.getFileHandleByPath(rootHandle, relativePath, true);
+      created = true;
+    }
+
+    if (!created && options.expectedLastModified !== undefined) {
+      const diskLastModified = (await fileHandle.getFile()).lastModified;
+      if (diskLastModified > options.expectedLastModified) {
+        throw new VaultConflictError(relativePath, diskLastModified);
+      }
+    }
+
     const writable = await fileHandle.createWritable();
     await writable.write(content);
     await writable.close();
-    this.vaultCache.delete(serverId);
+
+    if (created) {
+      this.vaultCache.delete(serverId);
+    }
     this.fileTextCache.delete(this.fileCacheKey(serverId, relativePath));
+    return (await fileHandle.getFile()).lastModified;
   }
 
   async createFolder(serverId: string, relativePath: string): Promise<void> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
+    const rootHandle = await this.requireVaultHandle(serverId);
 
-    const parts = relativePath.split(/[/\\]/).filter(part => part.trim() !== '');
+    const parts = this.splitPath(relativePath).filter(part => part.trim() !== '');
     if (parts.length === 0) throw new Error('Invalid folder path');
 
-    let currentDir = rootHandle;
-    for (const part of parts) {
-      currentDir = await currentDir.getDirectoryHandle(part, { create: true });
-    }
-
+    await this.getDirectoryByParts(rootHandle, parts, true);
     this.vaultCache.delete(serverId);
   }
 
   async renameFile(serverId: string, oldPath: string, newName: string): Promise<string> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
+    const rootHandle = await this.requireVaultHandle(serverId);
 
-    const fileHandle = await this.getFileHandleByPath(rootHandle, oldPath);
-    if ((fileHandle as any).move) {
+    const parentParts = this.splitPath(oldPath);
+    const oldName = parentParts.pop()!;
+    const parentDir = await this.getDirectoryByParts(rootHandle, parentParts);
+    const newPath = parentParts.length > 0 ? `${parentParts.join('/')}/${newName}` : newName;
+
+    if (newName === oldName) return oldPath;
+    // Case-only renames are the same entry on case-insensitive file systems.
+    if (newName.toLowerCase() !== oldName.toLowerCase() && await this.childExists(parentDir, newName)) {
+      throw new Error(`An entry named "${newName}" already exists.`);
+    }
+
+    const fileHandle = await parentDir.getFileHandle(oldName);
+    if (typeof (fileHandle as any).move === 'function') {
       await (fileHandle as any).move(newName);
     } else {
-      const file = await fileHandle.getFile();
-      const content = await file.text();
-      const pathParts = oldPath.split(/[/\\]/).filter(p => p !== '');
-      pathParts.pop();
-      const newPath = pathParts.length > 0 ? `${pathParts.join('/')}/${newName}` : newName;
-      await this.writeFile(serverId, newPath, content);
-      await this.deleteEntry(serverId, oldPath);
-      return newPath;
+      await this.copyHandle(fileHandle, parentDir, newName);
+      await parentDir.removeEntry(oldName);
     }
 
-    const pathParts = oldPath.split(/[/\\]/).filter(p => p !== '');
-    pathParts.pop();
-    this.vaultCache.delete(serverId);
-    this.fileTextCache.delete(this.fileCacheKey(serverId, oldPath));
-    return pathParts.length > 0 ? `${pathParts.join('/')}/${newName}` : newName;
+    this.invalidateServerCaches(serverId);
+    return newPath;
   }
 
+  /** Moves a file or folder into targetDirectoryPath ('' = vault root). Returns the new relative path. */
   async moveEntry(serverId: string, entryPath: string, targetDirectoryPath: string): Promise<string> {
-    const rootHandle = await this.getVaultHandle(serverId);
-    if (!rootHandle) throw new Error('Vault not found');
+    const rootHandle = await this.requireVaultHandle(serverId);
 
-    const entryName = entryPath.split(/[/\\]/).pop()!;
+    const sourceParts = this.splitPath(entryPath);
+    const entryName = sourceParts.pop()!;
+    const sourceDir = await this.getDirectoryByParts(rootHandle, sourceParts);
+    const targetDir = await this.getDirectoryByParts(rootHandle, this.splitPath(targetDirectoryPath));
     const newRelativePath = targetDirectoryPath ? `${targetDirectoryPath}/${entryName}` : entryName;
 
-    const parts = entryPath.split(/[/\\]/).filter(p => p !== '');
-    const fileName = parts.pop()!;
-    let sourceDir = rootHandle;
-    for (const part of parts) {
-      sourceDir = await sourceDir.getDirectoryHandle(part);
+    if (await this.childExists(targetDir, entryName)) {
+      throw new Error(`An entry named "${entryName}" already exists in the target folder.`);
     }
 
-    const targetParts = targetDirectoryPath ? targetDirectoryPath.split(/[/\\]/).filter(p => p !== '') : [];
-    let targetDir = rootHandle;
-    for (const part of targetParts) {
-      targetDir = await targetDir.getDirectoryHandle(part);
-    }
-
-    const handle = await (sourceDir as any).getFileHandle(fileName);
-    if (handle.move) {
-      await handle.move(targetDir, fileName);
+    const handle = await this.getChildHandle(sourceDir, entryName);
+    if (handle.kind === 'file' && typeof (handle as any).move === 'function') {
+      await (handle as any).move(targetDir, entryName);
     } else {
-      const file = await handle.getFile();
-      const content = await file.text();
-      await this.writeFile(serverId, newRelativePath, content);
-      await sourceDir.removeEntry(fileName);
+      // Directory moves (and browsers without move()) fall back to copy + delete, preserving bytes.
+      await this.copyHandle(handle, targetDir, entryName);
+      await sourceDir.removeEntry(entryName, { recursive: true });
     }
 
-    this.vaultCache.delete(serverId);
-    this.fileTextCache.delete(this.fileCacheKey(serverId, entryPath));
+    this.invalidateServerCaches(serverId);
     return newRelativePath;
   }
 
   async deleteEntry(serverId: string, relativePath: string): Promise<void> {
+    const rootHandle = await this.requireVaultHandle(serverId);
+
+    const parts = this.splitPath(relativePath);
+    const name = parts.pop()!;
+    const parentDir = await this.getDirectoryByParts(rootHandle, parts);
+
+    await parentDir.removeEntry(name, { recursive: true });
+    this.invalidateServerCaches(serverId);
+  }
+
+  private async requireVaultHandle(serverId: string): Promise<FileSystemDirectoryHandle> {
     const rootHandle = await this.getVaultHandle(serverId);
     if (!rootHandle) throw new Error('Vault not found');
+    return rootHandle;
+  }
 
-    const parts = relativePath.split(/[/\\]/).filter(p => p !== '');
-    const name = parts.pop()!;
-    let currentDir = rootHandle;
+  private splitPath(path: string): string[] {
+    return path.split(/[/\\]/).filter(p => p !== '');
+  }
 
+  private async getDirectoryByParts(
+    root: FileSystemDirectoryHandle,
+    parts: string[],
+    create = false
+  ): Promise<FileSystemDirectoryHandle> {
+    let currentDir = root;
     for (const part of parts) {
-      currentDir = await currentDir.getDirectoryHandle(part);
+      currentDir = await currentDir.getDirectoryHandle(part, { create });
+    }
+    return currentDir;
+  }
+
+  private async getChildHandle(dir: FileSystemDirectoryHandle, name: string): Promise<FileSystemHandle> {
+    try {
+      return await dir.getFileHandle(name);
+    } catch {
+      return await dir.getDirectoryHandle(name);
+    }
+  }
+
+  private async childExists(dir: FileSystemDirectoryHandle, name: string): Promise<boolean> {
+    try {
+      await this.getChildHandle(dir, name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Recursively copies a file or directory handle into targetDir under `name`, byte-for-byte. */
+  private async copyHandle(source: FileSystemHandle, targetDir: FileSystemDirectoryHandle, name: string): Promise<void> {
+    if (source.kind === 'file') {
+      const file = await (source as FileSystemFileHandle).getFile();
+      const targetFile = await targetDir.getFileHandle(name, { create: true });
+      const writable = await targetFile.createWritable();
+      await writable.write(file);
+      await writable.close();
+      return;
     }
 
-    await currentDir.removeEntry(name, { recursive: true });
+    const newDir = await targetDir.getDirectoryHandle(name, { create: true });
+    for await (const child of (source as any).values() as AsyncIterable<FileSystemHandle>) {
+      await this.copyHandle(child, newDir, child.name);
+    }
+  }
+
+  private invalidateServerCaches(serverId: string): void {
     this.vaultCache.delete(serverId);
-    this.fileTextCache.delete(this.fileCacheKey(serverId, relativePath));
+    const prefix = this.fileCacheKey(serverId, '');
+    for (const key of Array.from(this.fileTextCache.keys())) {
+      if (key.startsWith(prefix)) {
+        this.fileTextCache.delete(key);
+      }
+    }
   }
 
   async searchVault(serverId: string, query: string, limit = 30): Promise<VaultSearchResult[]> {
@@ -344,347 +431,8 @@ export class ObsidianVaultService {
       .slice(0, limit);
   }
 
-  isDndStatsheetLanguage(language: string): boolean {
-    return this.DND_STATSHEET_LANGUAGES.has(language.trim().toLowerCase());
-  }
-
-  createDndStatsheet(name = 'New Creature'): DndStatsheet {
-    return {
-      name: name.trim() || 'New Creature',
-      meta: 'Medium humanoid, unaligned',
-      armorClass: '10',
-      hitPoints: '7 (2d8 - 2)',
-      speed: '30 ft.',
-      abilities: {
-        str: '10',
-        dex: '10',
-        con: '10',
-        int: '10',
-        wis: '10',
-        cha: '10',
-      },
-      attributes: [
-        { name: 'Senses', text: 'passive Perception 10' },
-        { name: 'Languages', text: 'Common' },
-        { name: 'Challenge', text: '1/8 (25 XP)' },
-      ],
-      sections: [
-        {
-          title: 'Traits',
-          entries: [{ name: 'Trait Name', text: 'Describe the creature trait here.' }],
-        },
-        {
-          title: 'Actions',
-          entries: [
-            {
-              name: 'Attack Name',
-              text: 'Melee or Ranged Weapon Attack: +2 to hit, reach 5 ft., one target. Hit: 4 (1d6 + 1) damage.',
-            },
-          ],
-        },
-      ],
-    };
-  }
-
-  getDndStatsheetTemplate(name = 'New Creature'): string {
-    return this.serializeDndStatsheetMarkdown(this.createDndStatsheet(name));
-  }
-
   getObsidianCanvasTemplate(): string {
     return JSON.stringify({ nodes: [], edges: [] }, null, 2);
-  }
-
-  renderDndStatsheetHtml(content: string): string | null {
-    const statsheet = this.parseDndStatsheetSource(content);
-    if (!statsheet) return null;
-
-    const basics = [
-      ['Armor Class', statsheet.armorClass],
-      ['Hit Points', statsheet.hitPoints],
-      ['Speed', statsheet.speed],
-    ].filter(([, value]) => !!value);
-
-    const basicsHtml = basics.length
-      ? `<dl class="dnd-statsheet__basics">${basics.map(([label, value]) => `
-          <div>
-            <dt>${this.escapeHtml(label)}</dt>
-            <dd>${this.renderDndInline(value)}</dd>
-          </div>`).join('')}
-        </dl>`
-      : '';
-
-    const hasAbilities = this.DND_ABILITY_KEYS.some(ability => !!statsheet.abilities[ability]);
-    const abilitiesHtml = hasAbilities
-      ? `<div class="dnd-statsheet__abilities">
-          ${this.DND_ABILITY_KEYS.map(ability => this.renderDndAbility(ability, statsheet.abilities[ability])).join('')}
-        </div>`
-      : '';
-
-    const attributesHtml = statsheet.attributes.length
-      ? `<dl class="dnd-statsheet__attributes">
-          ${statsheet.attributes.map(attribute => `
-            <div>
-              <dt>${this.escapeHtml(attribute.name)}</dt>
-              <dd>${this.renderDndInline(attribute.text)}</dd>
-            </div>`).join('')}
-        </dl>`
-      : '';
-
-    const sectionsHtml = statsheet.sections
-      .filter(section => section.entries.length > 0)
-      .map(section => `
-        <section class="dnd-statsheet__section">
-          <h4>${this.escapeHtml(section.title)}</h4>
-          ${section.entries.map(entry => `
-            <p>
-              ${entry.name ? `<strong>${this.escapeHtml(entry.name)}.</strong> ` : ''}
-              ${this.renderDndInline(entry.text)}
-            </p>`).join('')}
-        </section>`)
-      .join('');
-
-    return `
-      <article class="dnd-statsheet" aria-label="Dungeons and Dragons 5e statsheet">
-        <header class="dnd-statsheet__header">
-          <h3>${this.escapeHtml(statsheet.name)}</h3>
-          ${statsheet.meta ? `<p>${this.renderDndInline(statsheet.meta)}</p>` : ''}
-        </header>
-        ${basicsHtml ? '<div class="dnd-statsheet__rule"></div>' : ''}
-        ${basicsHtml}
-        ${abilitiesHtml ? '<div class="dnd-statsheet__rule"></div>' : ''}
-        ${abilitiesHtml}
-        ${attributesHtml ? '<div class="dnd-statsheet__rule"></div>' : ''}
-        ${attributesHtml}
-        ${sectionsHtml}
-      </article>`;
-  }
-
-  parseDndStatsheetSource(content: string): DndStatsheet | null {
-    const cleanContent = content
-      .replace(/^\s*```[\w-]*\s*/i, '')
-      .replace(/\s*```\s*$/i, '')
-      .trim();
-
-    if (!cleanContent) return null;
-
-    const statsheet: DndStatsheet = {
-      name: '',
-      meta: '',
-      armorClass: '',
-      hitPoints: '',
-      speed: '',
-      abilities: {
-        str: '',
-        dex: '',
-        con: '',
-        int: '',
-        wis: '',
-        cha: '',
-      },
-      attributes: [],
-      sections: [],
-    };
-
-    const metaParts: { size: string; type: string; alignment: string } = {
-      size: '',
-      type: '',
-      alignment: '',
-    };
-
-    let currentSection: DndStatsheetSection | null = null;
-    let lastEntry: DndStatsheetEntry | null = null;
-    let expectsAbilityScoreRow = false;
-
-    cleanContent.split(/\r?\n/).forEach(rawLine => {
-      const line = rawLine.trim();
-      if (!line || /^-{3,}$/.test(line)) {
-        lastEntry = null;
-        expectsAbilityScoreRow = false;
-        return;
-      }
-
-      if (/^str\s+dex\s+con\s+int\s+wis\s+cha$/i.test(line.replace(/\s+/g, ' '))) {
-        expectsAbilityScoreRow = true;
-        lastEntry = null;
-        return;
-      }
-
-      if (expectsAbilityScoreRow && this.parseDndAbilityScoreRow(statsheet, line)) {
-        expectsAbilityScoreRow = false;
-        lastEntry = null;
-        return;
-      }
-
-      expectsAbilityScoreRow = false;
-
-      const heading = this.normalizeDndStatsheetKey(line.replace(/^#+\s*/, '').replace(/:$/, ''));
-      const sectionTitle = this.getDndStatsheetSectionTitle(heading);
-      if (sectionTitle) {
-        currentSection = this.ensureDndStatsheetSection(statsheet, sectionTitle);
-        lastEntry = null;
-        return;
-      }
-
-      const keyValue = line.match(/^([A-Za-z][A-Za-z0-9 _-]*):\s*(.*)$/);
-      if (keyValue) {
-        const key = this.normalizeDndStatsheetKey(keyValue[1]);
-        const value = keyValue[2].trim();
-
-        if (this.assignDndStatsheetValue(statsheet, metaParts, key, value)) {
-          lastEntry = null;
-          return;
-        }
-
-        const keySectionTitle = this.getDndStatsheetSectionTitle(key);
-        if (keySectionTitle) {
-          currentSection = this.ensureDndStatsheetSection(statsheet, keySectionTitle);
-          if (value) {
-            lastEntry = this.parseDndStatsheetEntry(value);
-            currentSection.entries.push(lastEntry);
-          } else {
-            lastEntry = null;
-          }
-          return;
-        }
-
-        if (!value && line.endsWith(':')) {
-          currentSection = this.ensureDndStatsheetSection(
-            statsheet,
-            this.toDndStatsheetDisplayTitle(keyValue[1])
-          );
-          lastEntry = null;
-          return;
-        }
-
-        if (currentSection) {
-          lastEntry = { name: keyValue[1].trim(), text: value };
-          currentSection.entries.push(lastEntry);
-          return;
-        }
-
-        if (value) {
-          this.addDndStatsheetAttribute(statsheet, this.toDndStatsheetDisplayTitle(keyValue[1]), value);
-          lastEntry = null;
-          return;
-        }
-      }
-
-      if (this.parseDndAbilityLine(statsheet, line)) {
-        lastEntry = null;
-        return;
-      }
-
-      if (this.parseDndBareStatLine(statsheet, metaParts, line)) {
-        lastEntry = null;
-        return;
-      }
-
-      if (currentSection) {
-        if (/^\s{2,}/.test(rawLine) && lastEntry) {
-          lastEntry.text = `${lastEntry.text} ${line}`.trim();
-        } else {
-          lastEntry = this.parseDndStatsheetEntry(line);
-          currentSection.entries.push(lastEntry);
-        }
-        return;
-      }
-
-      if (!statsheet.name) {
-        statsheet.name = line.replace(/^#+\s*/, '');
-      } else if (!statsheet.meta) {
-        statsheet.meta = line.replace(/^\*+|\*+$/g, '');
-      }
-    });
-
-    const kind = [metaParts.size, metaParts.type].filter(Boolean).join(' ');
-    statsheet.meta = statsheet.meta || [kind, metaParts.alignment].filter(Boolean).join(', ');
-    statsheet.name = statsheet.name || 'Unnamed Creature';
-
-    return statsheet;
-  }
-
-  serializeDndStatsheet(statsheet: DndStatsheet): string {
-    const lines = [
-      `name: ${statsheet.name || 'Unnamed Creature'}`,
-      statsheet.meta ? `meta: ${statsheet.meta}` : '',
-      statsheet.armorClass ? `armor_class: ${statsheet.armorClass}` : '',
-      statsheet.hitPoints ? `hit_points: ${statsheet.hitPoints}` : '',
-      statsheet.speed ? `speed: ${statsheet.speed}` : '',
-      ...this.DND_ABILITY_KEYS.map(ability => statsheet.abilities[ability] ? `${ability}: ${statsheet.abilities[ability]}` : ''),
-      ...statsheet.attributes
-        .filter(attribute => attribute.name.trim() && attribute.text.trim())
-        .map(attribute => `${this.getDndStatsheetAttributeKey(attribute.name)}: ${attribute.text}`),
-    ].filter(Boolean);
-
-    statsheet.sections
-      .filter(section => section.title.trim() && section.entries.some(entry => entry.name.trim() || entry.text.trim()))
-      .forEach(section => {
-        lines.push('', `${this.getDndStatsheetSectionKey(section.title)}:`);
-        section.entries
-          .filter(entry => entry.name.trim() || entry.text.trim())
-          .forEach(entry => {
-            const prefix = entry.name.trim() ? `${entry.name.trim()}. ` : '';
-            lines.push(`  - ${prefix}${entry.text.trim()}`);
-          });
-      });
-
-    return lines.join('\n');
-  }
-
-  serializeDndStatsheetMarkdown(statsheet: DndStatsheet): string {
-    const abilityHeader = this.DND_ABILITY_KEYS.map(ability => ability.toUpperCase()).join(' | ');
-    const abilityAlign = this.DND_ABILITY_KEYS.map(() => ':---:').join(' | ');
-    const abilityValues = this.DND_ABILITY_KEYS
-      .map(ability => this.getDndAbilityMarkdown(statsheet.abilities[ability]))
-      .join(' | ');
-
-    const attributes = statsheet.attributes
-      .filter(attribute => attribute.name.trim() || attribute.text.trim())
-      .map(attribute => `**${attribute.name.trim() || 'Field'}** ${attribute.text.trim()}`)
-      .join('  \n');
-
-    const sections = statsheet.sections
-      .filter(section => section.title.trim() && section.entries.some(entry => entry.name.trim() || entry.text.trim()))
-      .map(section => {
-        const entries = section.entries
-          .filter(entry => entry.name.trim() || entry.text.trim())
-          .map(entry => {
-            const name = entry.name.trim();
-            const text = entry.text.trim();
-            return name ? `***${name}.*** ${text}` : text;
-          })
-          .join('\n\n');
-
-        return `## ${section.title.trim()}\n\n${entries}`;
-      })
-      .join('\n\n');
-
-    return [
-      `# ${statsheet.name || 'Unnamed Creature'}`,
-      statsheet.meta ? `*${statsheet.meta}*` : '',
-      '',
-      '---',
-      '',
-      statsheet.armorClass ? `**Armor Class** ${statsheet.armorClass}` : '',
-      statsheet.hitPoints ? `**Hit Points** ${statsheet.hitPoints}` : '',
-      statsheet.speed ? `**Speed** ${statsheet.speed}` : '',
-      '',
-      '---',
-      '',
-      `| ${abilityHeader} |`,
-      `| ${abilityAlign} |`,
-      `| ${abilityValues} |`,
-      '',
-      '---',
-      '',
-      attributes,
-      attributes ? '\n---' : '',
-      '',
-      sections,
-    ]
-      .filter((line, index, lines) => line || lines[index - 1] !== '')
-      .join('\n')
-      .trim();
   }
 
   private async getFileHandleByPath(
@@ -810,209 +558,6 @@ export class ObsidianVaultService {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
-  }
-
-  private assignDndStatsheetValue(
-    statsheet: DndStatsheet,
-    metaParts: { size: string; type: string; alignment: string },
-    key: string,
-    value: string
-  ): boolean {
-    if (key === 'name') statsheet.name = value;
-    else if (key === 'meta' || key === 'description') statsheet.meta = value;
-    else if (key === 'size') metaParts.size = value;
-    else if (key === 'type') metaParts.type = value;
-    else if (key === 'alignment') metaParts.alignment = value;
-    else if (key === 'armor_class' || key === 'ac') statsheet.armorClass = value;
-    else if (key === 'hit_points' || key === 'hp') statsheet.hitPoints = value;
-    else if (key === 'speed') statsheet.speed = value;
-    else if (this.DND_ABILITY_KEYS.includes(key as DndAbilityKey)) statsheet.abilities[key as DndAbilityKey] = value;
-    else if (key === 'saving_throws') this.addDndStatsheetAttribute(statsheet, 'Saving Throws', value);
-    else if (key === 'skills') this.addDndStatsheetAttribute(statsheet, 'Skills', value);
-    else if (key === 'damage_vulnerabilities') this.addDndStatsheetAttribute(statsheet, 'Damage Vulnerabilities', value);
-    else if (key === 'damage_resistances') this.addDndStatsheetAttribute(statsheet, 'Damage Resistances', value);
-    else if (key === 'damage_immunities') this.addDndStatsheetAttribute(statsheet, 'Damage Immunities', value);
-    else if (key === 'condition_immunities') this.addDndStatsheetAttribute(statsheet, 'Condition Immunities', value);
-    else if (key === 'senses') this.addDndStatsheetAttribute(statsheet, 'Senses', value);
-    else if (key === 'languages') this.addDndStatsheetAttribute(statsheet, 'Languages', value);
-    else if (key === 'challenge' || key === 'cr') this.addDndStatsheetAttribute(statsheet, 'Challenge', value);
-    else if (key === 'proficiency_bonus' || key === 'pb') this.addDndStatsheetAttribute(statsheet, 'Proficiency Bonus', value);
-    else return false;
-
-    return true;
-  }
-
-  private addDndStatsheetAttribute(statsheet: DndStatsheet, name: string, text: string): void {
-    if (!text) return;
-    statsheet.attributes.push({ name, text });
-  }
-
-  private parseDndAbilityLine(statsheet: DndStatsheet, line: string): boolean {
-    const matches = Array.from(line.matchAll(/\b(str|dex|con|int|wis|cha)\b\s*:?\s*(\d{1,2})/gi));
-    if (matches.length < 2) return false;
-
-    matches.forEach(match => {
-      statsheet.abilities[match[1].toLowerCase() as DndAbilityKey] = match[2];
-    });
-    return true;
-  }
-
-  private parseDndAbilityScoreRow(statsheet: DndStatsheet, line: string): boolean {
-    const matches = Array.from(line.matchAll(/\b(\d{1,2})\s*(?:\([+-]?\d+\))?/g));
-    if (matches.length < this.DND_ABILITY_KEYS.length) return false;
-
-    this.DND_ABILITY_KEYS.forEach((ability, index) => {
-      statsheet.abilities[ability] = matches[index][1];
-    });
-    return true;
-  }
-
-  private parseDndBareStatLine(
-    statsheet: DndStatsheet,
-    metaParts: { size: string; type: string; alignment: string },
-    line: string
-  ): boolean {
-    const match = line.match(/^(Armor Class|AC|Hit Points|HP|Speed|Saving Throws|Skills|Damage Vulnerabilities|Damage Resistances|Damage Immunities|Condition Immunities|Senses|Languages|Challenge|CR|Proficiency Bonus|PB)\s+(.+)$/i);
-    if (!match) return false;
-
-    return this.assignDndStatsheetValue(
-      statsheet,
-      metaParts,
-      this.normalizeDndStatsheetKey(match[1]),
-      match[2].trim()
-    );
-  }
-
-  private getDndAbilityMarkdown(value: string): string {
-    const score = Number.parseInt(value, 10);
-    if (!Number.isFinite(score)) return value || '-';
-
-    const modifier = Math.floor((score - 10) / 2);
-    return `${score} (${modifier >= 0 ? '+' : ''}${modifier})`;
-  }
-
-  private parseDndStatsheetEntry(line: string): DndStatsheetEntry {
-    const cleanLine = line.replace(/^[-*]\s+/, '').trim();
-    const namedEntry = cleanLine.match(/^([^.:]+)[.:]\s+(.+)$/);
-
-    if (!namedEntry) {
-      return { name: '', text: cleanLine };
-    }
-
-    return {
-      name: namedEntry[1].replace(/\*\*/g, '').trim(),
-      text: namedEntry[2].trim(),
-    };
-  }
-
-  private ensureDndStatsheetSection(statsheet: DndStatsheet, title: string): DndStatsheetSection {
-    let section = statsheet.sections.find(existing => existing.title === title);
-    if (!section) {
-      section = { title, entries: [] };
-      statsheet.sections.push(section);
-    }
-    return section;
-  }
-
-  private getDndStatsheetSectionTitle(key: string): string | null {
-    const sections: Record<string, string> = {
-      traits: 'Traits',
-      features: 'Traits',
-      actions: 'Actions',
-      bonus_actions: 'Bonus Actions',
-      reactions: 'Reactions',
-      legendary_actions: 'Legendary Actions',
-      lair_actions: 'Lair Actions',
-    };
-
-    return sections[key] || null;
-  }
-
-  private getDndStatsheetSectionKey(title: string): string {
-    const keys: Record<string, string> = {
-      traits: 'traits',
-      features: 'traits',
-      actions: 'actions',
-      bonus_actions: 'bonus_actions',
-      reactions: 'reactions',
-      legendary_actions: 'legendary_actions',
-      lair_actions: 'lair_actions',
-    };
-
-    const normalized = this.normalizeDndStatsheetKey(title);
-    return keys[normalized] || this.getDndStatsheetLabel(title, 'section');
-  }
-
-  private getDndStatsheetAttributeKey(name: string): string {
-    const keys: Record<string, string> = {
-      saving_throws: 'saving_throws',
-      skills: 'skills',
-      damage_vulnerabilities: 'damage_vulnerabilities',
-      damage_resistances: 'damage_resistances',
-      damage_immunities: 'damage_immunities',
-      condition_immunities: 'condition_immunities',
-      senses: 'senses',
-      languages: 'languages',
-      challenge: 'challenge',
-      proficiency_bonus: 'proficiency_bonus',
-    };
-
-    const normalized = this.normalizeDndStatsheetKey(name);
-    return keys[normalized] || this.getDndStatsheetLabel(name, 'attribute');
-  }
-
-  private toDndStatsheetDisplayTitle(value: string): string {
-    const label = this.getDndStatsheetLabel(value, 'Section').replace(/[_-]+/g, ' ');
-    if (/[A-Z]/.test(label)) return label;
-
-    return label.replace(/\b[a-z]/g, char => char.toUpperCase());
-  }
-
-  private getDndStatsheetLabel(value: string, fallback: string): string {
-    return value
-      .trim()
-      .replace(/[:\r\n]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      || fallback;
-  }
-
-  private renderDndAbility(ability: DndAbilityKey, value: string): string {
-    const score = Number.parseInt(value, 10);
-    const modifier = Number.isFinite(score) ? Math.floor((score - 10) / 2) : null;
-    const modifierText = modifier === null ? '' : modifier >= 0 ? `+${modifier}` : `${modifier}`;
-
-    return `
-      <div>
-        <span>${ability.toUpperCase()}</span>
-        <strong>${value ? this.escapeHtml(value) : '-'}</strong>
-        ${modifierText ? `<small>${modifierText}</small>` : ''}
-      </div>`;
-  }
-
-  private renderDndInline(value: string): string {
-    return this.escapeHtml(value)
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  }
-
-  private normalizeDndStatsheetKey(value: string): string {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/[\s-]+/g, '_')
-      .replace(/[^a-z0-9_]/g, '');
-  }
-
-  private escapeHtml(value: string): string {
-    const entities: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    };
-
-    return value.replace(/[&<>"']/g, char => entities[char]);
   }
 
   private fileCacheKey(serverId: string, relativePath: string): string {

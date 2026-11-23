@@ -15,6 +15,7 @@ import { Crepe } from '@milkdown/crepe';
 import { wikilinkPlugin } from './wikilink-plugin';
 import { editorViewOptionsCtx } from '@milkdown/core';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
+import { DndStatsheetService } from '../../services/ObsidianVault/dnd-statsheet.service';
 import { dndStatsheetNodeViewPlugin } from './dnd-statsheet-node-view';
 
 @Component({
@@ -56,7 +57,10 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
   // before the first destroy() has fully resolved.
   private creationLock = false;
 
-  constructor(private vaultService: ObsidianVaultService) {}
+  constructor(
+    private vaultService: ObsidianVaultService,
+    private statsheetService: DndStatsheetService
+  ) {}
 
   async ngAfterViewInit() {
     setTimeout(() => this.createEditor(), 0);
@@ -106,7 +110,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       .config((ctx) => {
         ctx.set(editorViewOptionsCtx, { editable: () => !this.isPreview });
       })
-      .use(dndStatsheetNodeViewPlugin(this.vaultService))
+      .use(dndStatsheetNodeViewPlugin(this.statsheetService))
       .use(wikilinkPlugin);
 
     localCrepe.on((listener) => {
