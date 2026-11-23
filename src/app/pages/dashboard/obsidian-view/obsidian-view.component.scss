@@ -373,6 +373,108 @@
   gap: 6px;
 }
 
+// ---------------------------------------------------------------- tags
+
+.tags {
+  flex: 0 0 auto;
+  margin: 0 10px 4px;
+  border-bottom: 1px solid var(--vv-border);
+}
+
+.tags-header {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--vv-text-3);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text-2);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+  }
+
+  .tag-chip.is-inline {
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+}
+
+.tags-count {
+  color: var(--vv-text-3);
+  font-weight: 500;
+}
+
+.tag-list {
+  max-height: 104px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: auto;
+  padding: 2px 2px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.tag-chip {
+  max-width: 100%;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--vv-accent-rgb), 0.12);
+  color: var(--vv-text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(var(--vv-accent-rgb), 0.22);
+    color: var(--vv-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+    outline-offset: 1px;
+  }
+
+  &.is-active {
+    border-color: rgba(var(--vv-accent-rgb), 0.8);
+    background: rgba(var(--vv-accent-rgb), 0.3);
+    color: var(--vv-text);
+  }
+}
+
+.tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-count {
+  color: var(--vv-text-3);
+  font-size: 10.5px;
+}
+
 // ---------------------------------------------------------------- tree
 
 .tree {
@@ -390,9 +492,135 @@
 }
 
 .tree-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 4px 8px 6px;
   color: var(--vv-text-3);
   font-size: 11px;
+
+  strong {
+    color: var(--vv-text-2);
+    font-weight: 600;
+  }
+}
+
+.tree-note-icon {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
+}
+
+.menu-shortcut {
+  margin-left: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 11px;
+}
+
+.content-hits {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--vv-border);
+}
+
+.content-hit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 1px 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--vv-text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+
+  &.is-selected {
+    background: var(--vv-selected);
+    color: var(--vv-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+    outline-offset: -2px;
+  }
+}
+
+.content-hit-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--vv-text-3);
+    font-size: 16px;
+  }
+}
+
+.content-hit-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-hit-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text-3);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-hit-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  padding-left: 22px;
+  color: var(--vv-text-3);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+
+  .is-match {
+    border-radius: 2px;
+    background: rgba(var(--vv-accent-rgb), 0.28);
+    color: var(--vv-text);
+  }
+}
+
+.tree-note-clear {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--vv-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+  }
 }
 
 .tree-folder {
@@ -831,6 +1059,167 @@
   }
 }
 
+// ---------------------------------------------------------------- tags on the open note
+
+.note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0 1px;
+}
+
+.note-tag {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--vv-accent-rgb), 0.14);
+  color: var(--vv-text-2);
+
+  &.is-inline {
+    border: 1px dashed rgba(var(--vv-accent-rgb), 0.35);
+    background: transparent;
+  }
+}
+
+.note-tag-label,
+.note-tag-remove,
+.add-tag {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.note-tag-label {
+  padding: 0 8px;
+  font-size: 12px;
+
+  .note-tag:has(.note-tag-remove) & {
+    padding-right: 2px;
+  }
+
+  &:hover {
+    color: var(--vv-text);
+  }
+}
+
+.note-tag-remove {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  margin-right: 2px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--vv-text-3);
+
+  mat-icon {
+    width: 12px;
+    height: 12px;
+    font-size: 12px;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--vv-text);
+  }
+}
+
+.add-tag {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-pill);
+  color: var(--vv-text-3);
+  font-size: 12px;
+
+  mat-icon {
+    width: 14px;
+    height: 14px;
+    font-size: 14px;
+  }
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+}
+
+.note-tag-label:focus-visible,
+.note-tag-remove:focus-visible,
+.add-tag:focus-visible {
+  outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+  outline-offset: 1px;
+}
+
+.tag-input-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tag-input {
+  width: 140px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--vv-accent-rgb), 0.6);
+  border-radius: var(--radius-pill);
+  outline: 0;
+  background: var(--vv-field-bg);
+  color: var(--vv-text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.tag-suggestions,
+.tag-input-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+}
+
+.tag-suggestions {
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-m);
+  background: var(--surface, #1e1f22);
+  box-shadow: var(--shadow-2);
+
+  button {
+    padding: 5px 8px;
+    border: 0;
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--vv-text-2);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--vv-hover);
+      color: var(--vv-text);
+    }
+  }
+}
+
+.tag-input-error {
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  background: var(--surface, #1e1f22);
+  color: var(--vv-danger);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
 .doc-actions {
   flex: 0 0 auto;
   display: flex;
@@ -1213,6 +1602,143 @@
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+}
+
+// ---------------------------------------------------------------- link hover preview
+
+.hover-preview {
+  position: absolute;
+  z-index: 40;
+  width: min(420px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-l);
+  background: var(--surface, #1e1f22);
+  box-shadow: var(--shadow-3);
+  animation: vv-hover-in 120ms ease-out;
+
+  &.is-above {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes vv-hover-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.hover-preview-header {
+  flex: 0 0 auto;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--vv-border);
+  font-size: 13px;
+
+  > mat-icon {
+    width: 16px;
+    height: 16px;
+    color: var(--vv-accent);
+    font-size: 16px;
+  }
+}
+
+.hover-preview-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-preview-heading {
+  color: var(--vv-text-2);
+  font-weight: 400;
+}
+
+.hover-preview-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hover-preview-open {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--vv-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+  }
+}
+
+.hover-preview-body {
+  min-height: 0;
+  max-height: 300px;
+  overflow: auto;
+
+  &.is-note {
+    height: 300px;
+  }
+}
+
+// The previewed note uses the shared editor; tighten its desktop gutters for a small card.
+:host ::ng-deep .hover-preview-body {
+  .milkdown-container {
+    padding: 0;
+  }
+
+  .milkdown .ProseMirror {
+    padding: 12px 16px !important;
+    font-size: 14px;
+  }
+
+  .milkdown .ProseMirror h1 {
+    font-size: 1.5em;
+  }
+}
+
+.hover-preview-image {
+  width: 100%;
+  max-height: 300px;
+  display: block;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.hover-preview-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: var(--vv-text-3);
+  font-size: 13px;
+  text-align: center;
+
+  mat-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 20px;
   }
 }
 

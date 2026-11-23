@@ -184,6 +184,14 @@ describe('extractLinks', () => {
   });
 });
 
+describe('notes saved by older app versions', () => {
+  it('still counts [x](wikilink:…) links and \\#tags', () => {
+    expect(extractLinks('[Session 1](<wikilink:Session 1>) and [the Count](wikilink:Strahd) ![m](wikilink-blob:map.png)'))
+      .toEqual(['Session 1', 'Strahd', 'map.png']);
+    expect(extractTags('\\#campaign #handout')).toEqual(['campaign', 'handout']);
+  });
+});
+
 describe('extractTags', () => {
   it('reads inline tags and both frontmatter styles, skipping headings, numbers and code', () => {
     const inline = extractTags('---\ntags: [lore, Elves]\n---\n# Heading\n#quest text #123 `#code`');

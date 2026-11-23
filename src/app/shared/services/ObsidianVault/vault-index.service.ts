@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { ObsidianVaultService, VaultEntry } from './obsidian-vault-service';
 import { isVaultFileType } from './vault-file-types';
+import { readFrontmatterTags, splitFrontmatter } from './frontmatter';
 
 const ZERO_WIDTH = /[​-‍﻿]/g;
 
@@ -86,6 +87,17 @@ export class VaultIndex {
       folderMatch ??= entry;
     }
     return folderMatch;
+  }
+
+  /**
+   * The shortest text that links to `entry` from anywhere in the vault, like Obsidian:
+   * notes drop `.md`, and the folder path is only included when another file has the same name.
+   */
+  linkTextFor(entry: VaultEntry): string {
+    const isMarkdown = /\.md$/i.test(entry.name);
+    const strip = (value: string) => (isMarkdown ? value.slice(0, -3) : value);
+    const sameName = (this.byName.get(entry.name.toLowerCase()) ?? []).filter(other => other.kind === 'file').length;
+    return sameName <= 1 ? strip(entry.name) : strip(entry.relativePath);
   }
 
   /** Resolves an embed/attachment path to a file: exact path, relative path, then file name anywhere. */
@@ -354,9 +366,16 @@ export function extractLinkMentions(content: string): { link: string; snippet: s
     for (const match of line.matchAll(/!?\[\[([^\]]+)\]\]/g)) {
       pushMention(mentions, match[1], line, match.index ?? 0, match[0].startsWith('!'));
     }
-    for (const match of line.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)) {
-      const target = match[1];
-      if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) continue;
+    // [text](target), [text](<target with spaces>) and their ![image] forms
+    for (const match of line.matchAll(/!?\[[^\]]*\]\((?:<([^>\n]+)>|([^)\s]+))(?:\s+"[^"]*")?\)/g)) {
+      let target = match[1] ?? match[2];
+      // Notes saved by older app versions wrote wikilinks as [x](wikilink:Note) / ![x](wikilink-blob:img.png).
+      const legacy = target.match(/^wikilink(?:-blob)?:(.+)$/);
+      if (legacy) {
+        target = legacy[1];
+      } else if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) {
+        continue;
+      }
       let decoded = target;
       try {
         decoded = decodeURIComponent(target);
@@ -410,21 +429,19 @@ function buildSnippet(line: string, linkIndex: number): string {
 /** Inline `#tags` (outside code) plus `tags:` frontmatter, lower-cased, without the leading '#'. */
 export function extractTags(content: string): string[] {
   const tags = new Set<string>();
+  readFrontmatterTags(content).forEach(tag => addTag(tags, tag));
+  extractInlineTags(content).forEach(tag => addTag(tags, tag));
+  return Array.from(tags);
+}
 
-  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (frontmatter) {
-    const inline = frontmatter[1].match(/^tags:[ \t]*\[?([^\]\r\n]*)\]?[ \t]*$/m);
-    inline?.[1].split(',').forEach(tag => addTag(tags, tag));
-
-    const block = frontmatter[1].match(/^tags:\s*\r?\n((?:\s*-\s*.+\r?\n?)+)/m);
-    block?.[1].split(/\r?\n/).forEach(line => addTag(tags, line.replace(/^\s*-\s*/, '')));
-  }
-
-  const body = stripCode(frontmatter ? content.slice(frontmatter[0].length) : content);
-  for (const match of body.matchAll(/(?:^|[\s(])#([\p{L}\p{N}_\-/]*[\p{L}_\-/][\p{L}\p{N}_\-/]*)/gu)) {
+/** `#tags` written in the note body (outside code), lower-cased, without '#'. Excludes frontmatter tags. */
+export function extractInlineTags(content: string): string[] {
+  const tags = new Set<string>();
+  const body = stripCode(splitFrontmatter(content).body);
+  // `\#tag` is how older app versions saved a tag at the start of a line.
+  for (const match of body.matchAll(/(?:^|[\s(])\\?#([\p{L}\p{N}_\-/]*[\p{L}_\-/][\p{L}\p{N}_\-/]*)/gu)) {
     addTag(tags, match[1]);
   }
-
   return Array.from(tags);
 }
 

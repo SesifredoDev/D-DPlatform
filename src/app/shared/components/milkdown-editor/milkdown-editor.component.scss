@@ -570,3 +570,79 @@
     }
   }
 }
+
+/* ------------------------------------------------------------------
+   [[ autocomplete list (appended to <body>, so only global tokens apply)
+   ------------------------------------------------------------------ */
+.wikilink-suggest {
+  position: fixed;
+  z-index: 1000;
+  width: min(340px, calc(100vw - 16px));
+  max-height: 280px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: var(--surface, #1e1f22);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  color: var(--on-background, #eef0f6);
+  font-family: var(--font-family-main, inherit);
+  scrollbar-width: thin;
+}
+
+.wikilink-suggest-item {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.7));
+  font-size: 13px;
+  cursor: pointer;
+
+  &.is-active {
+    background: rgba(var(--primary-rgb, 114, 137, 218), 0.18);
+    color: var(--on-background, #eef0f6);
+
+    .wikilink-suggest-icon {
+      color: var(--primary, #7289da);
+    }
+  }
+}
+
+.wikilink-suggest-icon {
+  flex: 0 0 auto;
+  color: var(--on-surface-muted, rgba(255, 255, 255, 0.5));
+  font-size: 16px;
+}
+
+.wikilink-suggest-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .is-match {
+    color: var(--primary, #7289da);
+    font-weight: 600;
+  }
+}
+
+.wikilink-suggest-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--on-surface-muted, rgba(255, 255, 255, 0.5));
+  font-size: 11.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wikilink-suggest-empty {
+  padding: 10px 8px;
+  color: var(--on-surface-muted, rgba(255, 255, 255, 0.5));
+  font-size: 12.5px;
+}

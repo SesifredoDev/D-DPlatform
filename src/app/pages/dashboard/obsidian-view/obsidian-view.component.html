@@ -65,6 +65,10 @@
     </mat-menu>
 
     <mat-menu #vaultMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+      <button mat-menu-item (click)="openQuickSwitcher()" [disabled]="!permissionGranted">
+        <mat-icon>bolt</mat-icon>
+        <span>Jump to file… <span class="menu-shortcut">Ctrl+O</span></span>
+      </button>
       <button mat-menu-item (click)="refreshVault()" [disabled]="!permissionGranted || isVaultLoading">
         <mat-icon>refresh</mat-icon>
         <span>Refresh files</span>
@@ -88,12 +92,14 @@
     <label class="search" [class.is-disabled]="!permissionGranted">
       <mat-icon>search</mat-icon>
       <input
+        #searchInput
         [(ngModel)]="treeFilter"
+        (ngModelChange)="onTreeFilterInput()"
         [disabled]="!permissionGranted"
         (keydown)="onSearchKeydown($event)"
         type="search"
-        placeholder="Find a file"
-        aria-label="Find a file in the vault">
+        placeholder="Search files and notes"
+        aria-label="Search file names and note contents (Ctrl+Shift+F)">
       @if (treeFilter) {
         <button
           type="button"
@@ -165,6 +171,41 @@
       </form>
     }
 
+    @if (permissionGranted && vaultTags.length > 0) {
+      <section class="tags" [class.is-open]="isTagsSectionOpen" aria-label="Tags">
+        <button
+          type="button"
+          class="tags-header"
+          (click)="toggleTagsSection()"
+          [attr.aria-expanded]="isTagsSectionOpen">
+          <mat-icon class="chevron" [class.is-open]="isTagsSectionOpen">chevron_right</mat-icon>
+          <span>Tags</span>
+          <span class="tags-count">{{ vaultTags.length }}</span>
+          @if (activeTag && !isTagsSectionOpen) {
+            <span class="tag-chip is-active is-inline">#{{ activeTag }}</span>
+          }
+        </button>
+
+        @if (isTagsSectionOpen) {
+          <div class="tag-list" role="list">
+            @for (item of vaultTags; track item.tag) {
+              <button
+                type="button"
+                role="listitem"
+                class="tag-chip"
+                [class.is-active]="activeTag === item.tag"
+                [attr.aria-pressed]="activeTag === item.tag"
+                (click)="toggleTag(item.tag)"
+                [title]="(activeTag === item.tag ? 'Clear filter: #' : 'Show notes tagged #') + item.tag">
+                <span class="tag-name">#{{ item.tag }}</span>
+                <span class="tag-count">{{ item.count }}</span>
+              </button>
+            }
+          </div>
+        }
+      </section>
+    }
+
     <div
       class="tree"
       role="tree"
@@ -176,15 +217,37 @@
       (drop)="onDrop($event)">
 
       @if (permissionGranted && hasTreeFilter && visibleVaultEntries.length > 0) {
-        <div class="tree-note">{{ pluralize(visibleFileCount, 'match', 'matches') }}</div>
+        <div class="tree-note">
+          <span>
+            @if (activeTag) {
+              {{ pluralize(visibleFileCount, 'note') }} tagged <strong>#{{ activeTag }}</strong>
+            } @else {
+              <strong>File names</strong> · {{ visibleFileCount }}
+            }
+          </span>
+          @if (activeTag) {
+            <button type="button" class="tree-note-clear" (click)="activeTag = null">Clear</button>
+          }
+        </div>
       }
 
       @if (permissionGranted && visibleVaultEntries.length > 0) {
         <ng-container *ngTemplateOutlet="treeLevel; context: { entries: visibleVaultEntries, depth: 0 }"></ng-container>
-      } @else if (permissionGranted && treeFilter) {
+      } @else if (permissionGranted && hasTreeFilter && (isContentSearchPending || visibleContentHits.length > 0)) {
+        <div class="tree-note">
+          <span><strong>File names</strong> · none match</span>
+        </div>
+      } @else if (permissionGranted && hasTreeFilter) {
         <div class="tree-empty">
           <mat-icon>search_off</mat-icon>
-          <span>No files match “{{ treeFilter }}”</span>
+          @if (activeTag && treeFilter) {
+            <span>No notes tagged #{{ activeTag }} match “{{ treeFilter }}”</span>
+          } @else if (activeTag) {
+            <span>No notes tagged #{{ activeTag }}</span>
+          } @else {
+            <span>No files match “{{ treeFilter }}”</span>
+          }
+          <button mat-stroked-button class="btn-secondary" (click)="clearTreeFilters()">Clear filters</button>
         </div>
       } @else if (isVaultLoading) {
         <div class="tree-empty">
@@ -200,6 +263,36 @@
             New note
           </button>
         </div>
+      }
+
+      @if (permissionGranted && showsContentSection && (isContentSearchPending || visibleContentHits.length > 0)) {
+        <section class="content-hits" aria-label="Matches in note text">
+          <div class="tree-note">
+            <span><strong>In notes</strong> · {{ isContentSearchPending ? '…' : visibleContentHits.length }}</span>
+            @if (isContentSearchPending) {
+              <mat-icon class="spin tree-note-icon">progress_activity</mat-icon>
+            }
+          </div>
+          @for (hit of visibleContentHits; track hit.entry.relativePath) {
+            <button
+              type="button"
+              class="content-hit"
+              [class.is-selected]="isFileSelected(hit.entry)"
+              (click)="openContentHit(hit)"
+              [title]="hit.entry.relativePath">
+              <span class="content-hit-title">
+                <mat-icon>{{ hit.icon }}</mat-icon>
+                <span class="content-hit-name">{{ hit.title }}</span>
+                @if (hit.folder) {
+                  <span class="content-hit-folder">{{ hit.folder }}</span>
+                }
+              </span>
+              <span class="content-hit-snippet">
+                @for (segment of hit.snippet; track $index) {<span [class.is-match]="segment.match">{{ segment.text }}</span>}
+              </span>
+            </button>
+          }
+        </section>
       }
 
       @if (draggedEntryPath) {
@@ -499,6 +592,69 @@
                 spellcheck="false"
                 aria-label="File name (edit to rename)">
             }
+
+            @if (isMarkdownFileSelected && (!previewOnly || noteTags.length)) {
+              <div class="note-tags" aria-label="Tags on this note">
+                @for (item of noteTags; track item.tag) {
+                  <span class="note-tag" [class.is-inline]="!item.editable">
+                    <button
+                      type="button"
+                      class="note-tag-label"
+                      (click)="showTagInSidebar(item.tag)"
+                      [title]="item.editable ? 'Show notes tagged #' + item.tag : '#' + item.tag + ' is written in the note text; edit it there'">
+                      #{{ item.tag }}
+                    </button>
+                    @if (item.editable && !previewOnly) {
+                      <button
+                        type="button"
+                        class="note-tag-remove"
+                        (click)="removeNoteTag(item.tag)"
+                        [attr.aria-label]="'Remove tag ' + item.tag">
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    }
+                  </span>
+                }
+
+                @if (!previewOnly) {
+                  @if (isAddingTag) {
+                    <span class="tag-input-wrap">
+                      <input
+                        #tagInput
+                        class="tag-input"
+                        [(ngModel)]="newTagInput"
+                        (ngModelChange)="tagInputError = ''"
+                        (keydown)="onTagInputKeydown($event)"
+                        (blur)="onTagInputBlur()"
+                        placeholder="Add a tag"
+                        aria-label="New tag (Enter to add, Esc to close)"
+                        autocomplete="off"
+                        spellcheck="false">
+                      @if (tagInputError) {
+                        <span class="tag-input-error" role="alert">{{ tagInputError }}</span>
+                      } @else if (tagSuggestions.length) {
+                        <span class="tag-suggestions" role="listbox" aria-label="Existing tags">
+                          @for (suggestion of tagSuggestions; track suggestion) {
+                            <button
+                              type="button"
+                              role="option"
+                              (mousedown)="$event.preventDefault()"
+                              (click)="addNoteTag(suggestion)">
+                              #{{ suggestion }}
+                            </button>
+                          }
+                        </span>
+                      }
+                    </span>
+                  } @else {
+                    <button type="button" class="add-tag" (click)="startAddingTag()">
+                      <mat-icon>add</mat-icon>
+                      {{ noteTags.length ? 'Tag' : 'Add tag' }}
+                    </button>
+                  }
+                }
+              </div>
+            }
           </div>
 
           <div class="doc-actions">
@@ -651,7 +807,8 @@
                 [currentFilePath]="selectedFileRelativePath"
                 [isPreview]="previewOnly"
                 (markdownChange)="onContentChange($event)"
-                (onLinkClick)="onWikilinkClick($event)">
+                (onLinkClick)="onWikilinkClick($event)"
+                (linkHover)="onEditorLinkHover($event)">
               </app-milkdown-editor>
             </div>
           } @else if (isCanvasFileSelected) {
@@ -766,4 +923,68 @@
       </section>
     }
   </main>
+
+  @if (hoverPreview; as preview) {
+    <div
+      class="hover-preview"
+      [class.is-above]="preview.above"
+      [style.top.px]="preview.top"
+      [style.left.px]="preview.left"
+      role="dialog"
+      [attr.aria-label]="'Preview of ' + preview.title"
+      (mouseenter)="onHoverCardEnter()"
+      (mouseleave)="onHoverCardLeave()">
+      <header class="hover-preview-header">
+        <mat-icon>{{ preview.icon }}</mat-icon>
+        <span class="hover-preview-title">
+          {{ preview.title }}@if (preview.heading) {<span class="hover-preview-heading"> › {{ preview.heading }}</span>}
+        </span>
+        @if (preview.folder) {
+          <span class="hover-preview-folder">{{ preview.folder }}</span>
+        }
+        @if (preview.entry) {
+          <button type="button" class="hover-preview-open" (click)="openHoverTarget()">
+            Open
+          </button>
+        }
+      </header>
+
+      <div class="hover-preview-body" [class.is-note]="preview.markdown !== null">
+        @if (!preview.entry) {
+          <div class="hover-preview-message">
+            <mat-icon>link_off</mat-icon>
+            <span>No note called “{{ preview.title }}” yet.</span>
+          </div>
+        } @else if (preview.loading) {
+          <div class="hover-preview-message">
+            <mat-icon class="spin">progress_activity</mat-icon>
+          </div>
+        } @else if (preview.markdown !== null) {
+          <app-milkdown-editor
+            [markdown]="preview.markdown"
+            [serverId]="serverId"
+            [currentFilePath]="preview.entry.relativePath"
+            [isPreview]="true"
+            (onLinkClick)="openHoverLink($event)">
+          </app-milkdown-editor>
+        } @else if (preview.imageUrl) {
+          <img class="hover-preview-image" [src]="preview.imageUrl" [alt]="preview.title">
+        } @else {
+          <div class="hover-preview-message">
+            <mat-icon>{{ preview.icon }}</mat-icon>
+            <span>No preview for this file type. Use Open to view it.</span>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  @if (isQuickSwitcherOpen) {
+    <app-vault-quick-switcher
+      [files]="quickSwitcherFiles"
+      [recentPaths]="recentPaths"
+      (pick)="pickFromQuickSwitcher($event)"
+      (close)="closeQuickSwitcher()">
+    </app-vault-quick-switcher>
+  }
 </div>

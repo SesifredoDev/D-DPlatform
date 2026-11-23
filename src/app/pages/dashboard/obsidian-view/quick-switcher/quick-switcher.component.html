@@ -1,0 +1,51 @@
+<div class="switcher-backdrop" (click)="close.emit()"></div>
+
+<div class="switcher" role="dialog" aria-label="Jump to a file" (keydown)="onKeydown($event)">
+  <label class="switcher-input">
+    <mat-icon>search</mat-icon>
+    <input
+      #queryInput
+      [(ngModel)]="query"
+      (ngModelChange)="onQueryChange()"
+      type="text"
+      placeholder="Jump to a file…"
+      aria-label="File name"
+      role="combobox"
+      aria-controls="switcher-results"
+      [attr.aria-activedescendant]="items.length ? 'switcher-item-' + activeIndex : null"
+      autocomplete="off"
+      spellcheck="false">
+  </label>
+
+  <ul class="switcher-results" id="switcher-results" role="listbox" #list>
+    @for (item of items; track item.entry.relativePath; let i = $index) {
+      <li
+        role="option"
+        [id]="'switcher-item-' + i"
+        [attr.data-index]="i"
+        [attr.aria-selected]="i === activeIndex"
+        [class.is-active]="i === activeIndex"
+        (mousemove)="activeIndex = i"
+        (click)="pick.emit(item.entry)">
+        <mat-icon class="item-icon">{{ item.icon }}</mat-icon>
+        <span class="item-title">
+          @for (segment of item.title; track $index) {<span [class.is-match]="segment.match">{{ segment.text }}</span>}
+        </span>
+        @if (item.isRecent && !query) {
+          <span class="item-tag">Recent</span>
+        }
+        @if (item.folder) {
+          <span class="item-folder">{{ item.folder }}</span>
+        }
+      </li>
+    } @empty {
+      <li class="switcher-empty">No files match “{{ query }}”</li>
+    }
+  </ul>
+
+  <footer class="switcher-footer">
+    <span><kbd>↑</kbd><kbd>↓</kbd> to move</span>
+    <span><kbd>Enter</kbd> to open</span>
+    <span><kbd>Esc</kbd> to close</span>
+  </footer>
+</div>

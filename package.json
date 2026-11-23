@@ -57,6 +57,7 @@
     "konva": "^10.2.0",
     "livekit-client": "^2.18.0",
     "livekit-server-sdk": "^2.15.0",
+    "mdast-util-to-markdown": "^2.1.2",
     "mediasoup-client": "^3.18.3",
     "ng2-pdf-viewer": "^10.4.0",
     "ngx-electron": "^2.2.0",

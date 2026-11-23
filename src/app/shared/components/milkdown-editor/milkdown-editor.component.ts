@@ -16,6 +16,10 @@ import { wikilinkPlugin } from './wikilink-plugin';
 import { editorViewOptionsCtx } from '@milkdown/core';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
 import { DndStatsheetService } from '../../services/ObsidianVault/dnd-statsheet.service';
+import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
+import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
+import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
+import { WikilinkCandidate, wikilinkSuggestPlugin } from './wikilink-suggest-plugin';
 import { dndStatsheetNodeViewPlugin } from './dnd-statsheet-node-view';
 
 @Component({
@@ -39,9 +43,22 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   @Output() markdownChange = new EventEmitter<string>();
   @Output() onLinkClick = new EventEmitter<string>();
+  /**
+   * Fires when the pointer enters a wikilink (with the link target and its on-screen box) and
+   * `null` when it leaves. Used for hover previews; the host decides delays and what to show.
+   */
+  @Output() linkHover = new EventEmitter<{ target: string; rect: DOMRect } | null>();
+
+  private hoveredLink: HTMLElement | null = null;
 
   private crepe?: Crepe;
+  /** Full note text (frontmatter + body) as last loaded or emitted. */
   private lastMarkdown?: string;
+  /**
+   * The note's YAML frontmatter block. The editor only ever sees the body: CommonMark has no
+   * frontmatter and would save it as a horizontal rule plus a heading. It's re-attached on emit.
+   */
+  private frontmatter = '';
   private objectUrls: string[] = [];
   private observer?: MutationObserver;
   private processingEmbeds = false;
@@ -59,8 +76,28 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   constructor(
     private vaultService: ObsidianVaultService,
-    private statsheetService: DndStatsheetService
+    private statsheetService: DndStatsheetService,
+    private vaultIndexService: VaultIndexService
   ) {}
+
+  /** Notes offered by `[[` autocomplete: every file in this server's vault except the open one. */
+  private readonly wikilinkCandidates = (): WikilinkCandidate[] => {
+    const index = this.vaultIndexService.get(this.serverId);
+    if (!index) {
+      // Not loaded yet (e.g. the session-notes panel): load it for next time.
+      if (this.serverId) void this.vaultIndexService.load(this.serverId).catch(() => undefined);
+      return [];
+    }
+
+    return index.files
+      .filter(file => file.relativePath !== this.currentFilePath)
+      .map(file => ({
+        title: getVaultDisplayName(file.name),
+        folder: file.parentPath,
+        icon: getVaultFileType(file.name).icon,
+        linkText: index.linkTextFor(file),
+      }));
+  };
 
   async ngAfterViewInit() {
     setTimeout(() => this.createEditor(), 0);
@@ -68,6 +105,20 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   async ngOnChanges(changes: SimpleChanges) {
     if (!this.crepe) return;
+
+    // Only the frontmatter changed (e.g. tags edited from the note header): keep the editor
+    // (and the cursor) and just swap the block that gets re-attached on save.
+    const markdownChanged =
+      (changes['markdown'] && !changes['markdown'].isFirstChange()) ||
+      (changes['editorMarkdown'] && !changes['editorMarkdown'].isFirstChange());
+    if (markdownChanged && this.markdown !== this.lastMarkdown && this.lastMarkdown !== undefined) {
+      const incoming = splitFrontmatter(this.markdown);
+      const current = splitFrontmatter(this.lastMarkdown);
+      if (incoming.body === current.body) {
+        this.frontmatter = incoming.block;
+        this.lastMarkdown = this.markdown;
+      }
+    }
 
     const shouldRecreate =
       (changes['isPreview'] && !changes['isPreview'].isFirstChange()) ||
@@ -101,9 +152,12 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       this.crepe = undefined;
     }
 
+    const { block, body } = splitFrontmatter(this.markdown);
+    this.frontmatter = block;
+
     const localCrepe = new Crepe({
       root: this.editorRef.nativeElement,
-      defaultValue: this.markdown,
+      defaultValue: body,
     });
 
     localCrepe.editor
@@ -111,13 +165,15 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
         ctx.set(editorViewOptionsCtx, { editable: () => !this.isPreview });
       })
       .use(dndStatsheetNodeViewPlugin(this.statsheetService))
-      .use(wikilinkPlugin);
+      .use(wikilinkPlugin)
+      .use(wikilinkSuggestPlugin(this.wikilinkCandidates));
 
     localCrepe.on((listener) => {
       listener.markdownUpdated((ctx, markdown, prevMarkdown) => {
-        this.lastMarkdown = markdown;
+        const full = this.frontmatter + markdown;
+        this.lastMarkdown = full;
         if (markdown !== prevMarkdown) {
-          this.markdownChange.emit(markdown);
+          this.markdownChange.emit(full);
         }
       });
     });
@@ -146,6 +202,23 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
         this.onLinkClick.emit(targetPath);
         e.preventDefault();
       }
+    };
+
+    this.editorRef.nativeElement.onmouseover = (e: MouseEvent) => {
+      const link = (e.target as HTMLElement).closest('a');
+      const href = link?.getAttribute('href') || '';
+      if (!link || !(link.classList.contains('wikilink') || href.startsWith('wikilink:')) || link === this.hoveredLink) return;
+
+      this.hoveredLink = link;
+      this.linkHover.emit({ target: href.replace(/^wikilink:/, ''), rect: link.getBoundingClientRect() });
+    };
+
+    this.editorRef.nativeElement.onmouseout = (e: MouseEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (!this.hoveredLink || (next && this.hoveredLink.contains(next))) return;
+
+      this.hoveredLink = null;
+      this.linkHover.emit(null);
     };
   }
 

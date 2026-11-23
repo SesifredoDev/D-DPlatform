@@ -1,0 +1,169 @@
+// Uses the --vv-* tokens inherited from the vault view host.
+
+:host {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 10vh 16px 16px;
+}
+
+.switcher-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.switcher {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(480px, 80%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-l);
+  background: var(--surface, #1e1f22);
+  box-shadow: var(--shadow-3);
+}
+
+.switcher-input {
+  flex: 0 0 auto;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--vv-border);
+  color: var(--vv-text-3);
+
+  mat-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 20px;
+  }
+
+  input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--vv-text);
+    font: inherit;
+    font-size: 15px;
+
+    &::placeholder {
+      color: var(--vv-text-3);
+    }
+  }
+}
+
+.switcher-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+
+  li[role='option'] {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    border-radius: var(--radius-m);
+    color: var(--vv-text-2);
+    font-size: 13.5px;
+    cursor: pointer;
+
+    &.is-active {
+      background: var(--vv-selected);
+      color: var(--vv-text);
+
+      .item-icon {
+        color: var(--vv-accent);
+      }
+    }
+  }
+}
+
+.item-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: var(--vv-text-3);
+  font-size: 18px;
+}
+
+.item-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .is-match {
+    background: transparent;
+    color: var(--vv-accent);
+    font-weight: 600;
+  }
+}
+
+.item-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--vv-text-3);
+  font-size: 10.5px;
+}
+
+.item-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text-3);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switcher-empty {
+  padding: 24px 12px;
+  color: var(--vv-text-3);
+  font-size: 13px;
+  text-align: center;
+}
+
+.switcher-footer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 16px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--vv-border);
+  color: var(--vv-text-3);
+  font-size: 11.5px;
+
+  kbd {
+    margin-right: 3px;
+    padding: 1px 5px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: var(--radius-s);
+    background: rgba(255, 255, 255, 0.05);
+    font-family: inherit;
+    font-size: 10.5px;
+  }
+}
+
+@media (hover: none) {
+  .switcher-footer {
+    display: none;
+  }
+}

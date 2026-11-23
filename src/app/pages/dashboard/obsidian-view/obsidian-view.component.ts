@@ -1,6 +1,8 @@
 import { AfterViewInit, Component, OnInit, Input, OnDestroy, ChangeDetectorRef, OnChanges, SimpleChanges, ElementRef, HostListener, Output, EventEmitter, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultConflictError, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
+import { TextSegment, highlightTerms } from '../../../shared/services/ObsidianVault/vault-search-utils';
+import { VaultQuickSwitcherComponent } from './quick-switcher/quick-switcher.component';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -8,12 +10,15 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule, MatMenuTrigger } from '@angular/material/menu';
 import { Subject, Subscription } from 'rxjs';
-import { debounceTime } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { MilkdownEditorComponent } from '../../../shared/components/milkdown-editor/milkdown-editor.component';
 import { ObsidianCanvasEditorComponent } from '../../../shared/components/obsidian-canvas-editor/obsidian-canvas-editor.component';
 import { DndStatsheetService } from '../../../shared/services/ObsidianVault/dnd-statsheet.service';
-import { BacklinkMention, VaultIndex, VaultIndexService } from '../../../shared/services/ObsidianVault/vault-index.service';
+import { BacklinkMention, VaultIndex, VaultIndexService, extractInlineTags } from '../../../shared/services/ObsidianVault/vault-index.service';
+import { normalizeTagInput, readFrontmatterTags, setFrontmatterTags } from '../../../shared/services/ObsidianVault/frontmatter';
+import { rewriteMovedLinks } from '../../../shared/services/ObsidianVault/link-rewrite';
+import { MatSnackBar } from '@angular/material/snack-bar';
 import { ObsidianBroadcastService, VaultImageBroadcast } from '../../../shared/services/ObsidianVault/obsidian-broadcast.service';
 import { NOTE_TEMPLATES, findNoteTemplate, loadNoteTemplate } from '../../../shared/services/ObsidianVault/note-templates';
 import {
@@ -69,6 +74,57 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const NO_VIEW: ActiveView = { kind: 'none' };
 const LINKS_PANEL_STORAGE_KEY = 'obsidian-view.links-panel-open';
+const TAGS_SECTION_STORAGE_KEY = 'obsidian-view.tags-open';
+const RECENT_FILES_STORAGE_PREFIX = 'obsidian-view.recent.';
+const MAX_RECENT_FILES = 10;
+/** Content search starts at this many characters. */
+const MIN_CONTENT_QUERY = 2;
+
+/** A tag on the open note. Frontmatter tags are editable; `#tags` written in the text are not. */
+interface NoteTag {
+  tag: string;
+  editable: boolean;
+}
+
+/** Taken before a rename/move: the vault as it was, which files move, and which notes link to them. */
+interface LinkSnapshot {
+  index: VaultIndex;
+  isFolder: boolean;
+  movedFiles: string[];
+  sources: string[];
+}
+
+/** The hover card shown for a link in the editor. */
+interface HoverPreview {
+  /** The link as written, e.g. "Strahd#Lair". */
+  target: string;
+  entry: VaultEntry | null;
+  heading: string;
+  title: string;
+  folder: string;
+  icon: string;
+  /** Position inside the view (px); `above` cards are drawn upwards from `top`. */
+  top: number;
+  left: number;
+  above: boolean;
+  loading: boolean;
+  markdown: string | null;
+  imageUrl: string | null;
+}
+
+const HOVER_OPEN_DELAY = 450;
+const HOVER_CLOSE_DELAY = 250;
+const HOVER_CARD_WIDTH = 420;
+const HOVER_CARD_HEIGHT = 340;
+
+/** A note whose text (not name) matches the sidebar search. */
+interface ContentHit {
+  entry: VaultEntry;
+  icon: string;
+  title: string;
+  folder: string;
+  snippet: TextSegment[];
+}
 
 @Component({
   selector: 'app-obsidian-view',
@@ -81,7 +137,8 @@ const LINKS_PANEL_STORAGE_KEY = 'obsidian-view.links-panel-open';
     MatTooltipModule,
     MatMenuModule,
     MilkdownEditorComponent,
-    ObsidianCanvasEditorComponent
+    ObsidianCanvasEditorComponent,
+    VaultQuickSwitcherComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -97,6 +154,9 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   localhostRoute: string | null = null;
   vaultEntries: VaultEntry[] = [];
   treeFilter = '';
+  /** Tag the tree is filtered to (lower-case, without '#'), or null. */
+  activeTag: string | null = null;
+  isTagsSectionOpen = readStoredFlag(TAGS_SECTION_STORAGE_KEY, true);
 
   activeView: ActiveView = NO_VIEW;
   /** Draft title bound to the title input; committed by renameSelectedFile(). */
@@ -154,11 +214,26 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   private selectionToken = 0;
   private pendingOpenPath: string | null = null;
   private filteredEntriesCacheQuery = '';
+  private filteredEntriesCacheTag: string | null = null;
+  private filteredEntriesCacheVersion = -1;
   private filteredEntriesCacheSource: VaultEntry[] | null = null;
+  private tagListCache: { index: VaultIndex; version: number; value: { tag: string; count: number }[] } | null = null;
   private filteredEntriesCache: VaultEntry[] = [];
   private filteredCounts = { files: 0, folders: 0 };
   private saveStateResetTimer?: ReturnType<typeof setTimeout>;
   private sidebarResizeObserver?: ResizeObserver;
+
+  // ---- Content search + quick switcher ----
+  /** Notes whose text matches the sidebar search; only shown while `contentHitsQuery` matches the box. */
+  contentHits: ContentHit[] = [];
+  private contentHitsQuery = '';
+  private contentSearchToken = 0;
+  private readonly contentQuery$ = new Subject<string>();
+  private contentQuerySubscription?: Subscription;
+  isQuickSwitcherOpen = false;
+  /** Recently opened files for this server, most recent first. */
+  recentPaths: string[] = [];
+  @ViewChild('searchInput') private searchInput?: ElementRef<HTMLInputElement>;
 
   /** Background indexing of note contents (needed for backlinks and tags). */
   contentIndexState: 'idle' | 'indexing' | 'ready' = 'idle';
@@ -178,7 +253,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
     private cdr: ChangeDetectorRef,
-    private hostRef: ElementRef<HTMLElement>
+    private hostRef: ElementRef<HTMLElement>,
+    private snackBar: MatSnackBar
   ) {}
 
   // ---- View-state accessors (read by the template) ----
@@ -266,13 +342,26 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   /** Recomputes the filtered tree and its counts only when the query or tree changed. */
   private refreshFilterCache(): void {
     const query = this.treeFilter.trim().toLowerCase();
-    if (this.filteredEntriesCacheQuery === query && this.filteredEntriesCacheSource === this.vaultEntries) {
+    const tag = this.activeTag;
+    // Tag membership changes as notes are edited, so a tag filter is also keyed on the index version.
+    const version = tag ? this.vaultIndex?.contentVersion ?? -1 : -1;
+    if (
+      this.filteredEntriesCacheQuery === query &&
+      this.filteredEntriesCacheTag === tag &&
+      this.filteredEntriesCacheVersion === version &&
+      this.filteredEntriesCacheSource === this.vaultEntries
+    ) {
       return;
     }
 
     this.filteredEntriesCacheQuery = query;
+    this.filteredEntriesCacheTag = tag;
+    this.filteredEntriesCacheVersion = version;
     this.filteredEntriesCacheSource = this.vaultEntries;
-    this.filteredEntriesCache = this.filterVaultEntries(this.vaultEntries, query);
+    const taggedPaths = tag && this.vaultIndex
+      ? new Set(this.vaultIndex.getNotesWithTag(tag).map(entry => entry.relativePath))
+      : null;
+    this.filteredEntriesCache = this.filterVaultEntries(this.vaultEntries, query, taggedPaths);
     this.filteredCounts = {
       files: this.countEntries(this.filteredEntriesCache, entry => entry.kind === 'file'),
       folders: this.countEntries(this.filteredEntriesCache, entry => entry.kind === 'directory'),
@@ -304,7 +393,145 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   }
 
   get hasTreeFilter(): boolean {
-    return this.treeFilter.trim().length > 0;
+    return this.treeFilter.trim().length > 0 || this.activeTag !== null;
+  }
+
+  // ---- Tags ----
+
+  /** Every tag in the vault with its note count, most used first. Cached per index version. */
+  get vaultTags(): { tag: string; count: number }[] {
+    const index = this.vaultIndex;
+    if (!index) return [];
+
+    const cached = this.tagListCache;
+    if (cached && cached.index === index && cached.version === index.contentVersion) {
+      return cached.value;
+    }
+
+    const value = index.getAllTags();
+    this.tagListCache = { index, version: index.contentVersion, value };
+    return value;
+  }
+
+  toggleTagsSection(): void {
+    this.isTagsSectionOpen = !this.isTagsSectionOpen;
+    writeStoredFlag(TAGS_SECTION_STORAGE_KEY, this.isTagsSectionOpen);
+  }
+
+  /** Filters the tree to notes with this tag (nested tags included); clicking the active tag clears it. */
+  toggleTag(tag: string): void {
+    this.activeTag = this.activeTag === tag ? null : tag;
+  }
+
+  // ---- Tags on the open note ----
+
+  isAddingTag = false;
+  newTagInput = '';
+  tagInputError = '';
+  private noteTagsCache: { content: string; value: NoteTag[] } | null = null;
+  /** Focuses the tag input whenever it appears. */
+  @ViewChild('tagInput') private set tagInputRef(ref: ElementRef<HTMLInputElement> | undefined) {
+    if (ref) setTimeout(() => ref.nativeElement.focus());
+  }
+
+  /** Frontmatter tags (editable) followed by inline `#tags` from the text (read-only). */
+  get noteTags(): NoteTag[] {
+    const view = this.fileView;
+    if (!view || view.fileType.viewer !== 'markdown') return [];
+    if (this.noteTagsCache?.content === view.content) return this.noteTagsCache.value;
+
+    const frontmatterTags = readFrontmatterTags(view.content);
+    const known = new Set(frontmatterTags.map(tag => tag.toLowerCase()));
+    const value: NoteTag[] = [
+      ...frontmatterTags.map(tag => ({ tag, editable: true })),
+      ...extractInlineTags(view.content).filter(tag => !known.has(tag)).map(tag => ({ tag, editable: false })),
+    ];
+    this.noteTagsCache = { content: view.content, value };
+    return value;
+  }
+
+  /** Existing vault tags matching what's typed, excluding ones the note already has. */
+  get tagSuggestions(): string[] {
+    const query = this.newTagInput.trim().replace(/^#+/, '').toLowerCase();
+    const existing = new Set(this.noteTags.map(item => item.tag.toLowerCase()));
+    return this.vaultTags
+      .map(item => item.tag)
+      .filter(tag => !existing.has(tag) && (!query || tag.includes(query)))
+      .slice(0, 6);
+  }
+
+  startAddingTag(): void {
+    this.isAddingTag = true;
+    this.newTagInput = '';
+    this.tagInputError = '';
+  }
+
+  cancelAddingTag(): void {
+    this.isAddingTag = false;
+    this.newTagInput = '';
+    this.tagInputError = '';
+  }
+
+  /** Adds a tag to the note's frontmatter. The input stays open so several tags can be added. */
+  addNoteTag(raw: string = this.newTagInput): void {
+    const view = this.fileView;
+    if (!view || this.previewOnly || view.discarded || view.fileType.viewer !== 'markdown') return;
+
+    const tag = normalizeTagInput(raw);
+    if (!tag) {
+      this.tagInputError = raw.trim() ? 'A tag needs at least one letter, e.g. npc' : '';
+      return;
+    }
+
+    const current = readFrontmatterTags(view.content);
+    if (!current.some(existing => existing.toLowerCase() === tag.toLowerCase())) {
+      this.onContentChange(setFrontmatterTags(view.content, [...current, tag]));
+    }
+    this.newTagInput = '';
+    this.tagInputError = '';
+  }
+
+  removeNoteTag(tag: string): void {
+    const view = this.fileView;
+    if (!view || this.previewOnly || view.discarded) return;
+
+    const remaining = readFrontmatterTags(view.content).filter(existing => existing !== tag);
+    this.onContentChange(setFrontmatterTags(view.content, remaining));
+  }
+
+  onTagInputKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      if (this.newTagInput.trim()) {
+        this.addNoteTag();
+      } else if (event.key === 'Enter') {
+        this.cancelAddingTag();
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.cancelAddingTag();
+    }
+  }
+
+  onTagInputBlur(): void {
+    if (this.newTagInput.trim()) {
+      this.addNoteTag();
+    }
+    if (!this.tagInputError) {
+      this.cancelAddingTag();
+    }
+  }
+
+  /** Clicking a tag on the note filters the file list to it. */
+  showTagInSidebar(tag: string): void {
+    this.activeTag = tag.toLowerCase();
+    this.openMobileSidebar();
+  }
+
+  clearTreeFilters(): void {
+    this.treeFilter = '';
+    this.activeTag = null;
   }
 
   get isRootDropTarget(): boolean {
@@ -386,11 +613,17 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       void this.flushPendingSave();
     });
 
+    this.contentQuerySubscription = this.contentQuery$
+      .pipe(debounceTime(250), distinctUntilChanged())
+      .subscribe(query => void this.runContentSearch(query));
+
     document.addEventListener('selectionchange', this.handleSelectionChange);
   }
 
   ngAfterViewInit(): void {
     this.syncResponsiveSidebarState(true);
+    // Scrolling anywhere in the view (except inside the card) moves the link away from the card.
+    this.hostRef.nativeElement.addEventListener('scroll', this.onViewScroll, true);
 
     if (typeof ResizeObserver !== 'undefined') {
       this.sidebarResizeObserver = new ResizeObserver(() => {
@@ -400,15 +633,167 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     }
   }
 
+  /** Ctrl/Cmd+O: quick switcher. Ctrl/Cmd+Shift+F: focus the sidebar search. */
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && this.hoverPreview) {
+      this.closeHoverPreview();
+      return;
+    }
+
+    const mod = event.ctrlKey || event.metaKey;
+    if (!mod || event.altKey || !this.acceptsShortcuts()) return;
+
+    const key = event.key.toLowerCase();
+    if (key === 'o' && !event.shiftKey) {
+      event.preventDefault();
+      this.openQuickSwitcher();
+    } else if (key === 'f' && event.shiftKey) {
+      event.preventDefault();
+      this.focusSearch();
+    }
+  }
+
+  /** Only the visible, editable vault view reacts (tabs keep hidden instances alive). */
+  private acceptsShortcuts(): boolean {
+    return !this.previewOnly && this.permissionGranted && this.hostRef.nativeElement.getClientRects().length > 0;
+  }
+
+  openQuickSwitcher(): void {
+    if (!this.permissionGranted || this.previewOnly) return;
+    this.isQuickSwitcherOpen = true;
+  }
+
+  closeQuickSwitcher(): void {
+    this.isQuickSwitcherOpen = false;
+  }
+
+  pickFromQuickSwitcher(entry: VaultEntry): void {
+    this.isQuickSwitcherOpen = false;
+    void this.selectFile(entry);
+  }
+
+  get quickSwitcherFiles(): VaultEntry[] {
+    return this.vaultIndex?.files ?? [];
+  }
+
+  focusSearch(): void {
+    this.openMobileSidebar();
+    setTimeout(() => {
+      this.searchInput?.nativeElement.focus();
+      this.searchInput?.nativeElement.select();
+    });
+  }
+
+  // ---- Content search ----
+
+  onTreeFilterInput(): void {
+    this.contentQuery$.next(this.treeFilter.trim());
+  }
+
+  /** True while content results for the current query are still loading. */
+  get isContentSearchPending(): boolean {
+    const query = this.treeFilter.trim();
+    return query.length >= MIN_CONTENT_QUERY && this.contentHitsQuery !== query;
+  }
+
+  /** Content hits for exactly what's in the search box (never stale results). */
+  get visibleContentHits(): ContentHit[] {
+    const query = this.treeFilter.trim();
+    if (query.length < MIN_CONTENT_QUERY || this.contentHitsQuery !== query) return [];
+
+    if (!this.activeTag || !this.vaultIndex) return this.contentHits;
+    const tagged = new Set(this.vaultIndex.getNotesWithTag(this.activeTag).map(entry => entry.relativePath));
+    return this.contentHits.filter(hit => tagged.has(hit.entry.relativePath));
+  }
+
+  get showsContentSection(): boolean {
+    return this.treeFilter.trim().length >= MIN_CONTENT_QUERY;
+  }
+
+  private async runContentSearch(query: string): Promise<void> {
+    const token = ++this.contentSearchToken;
+    if (query.length < MIN_CONTENT_QUERY || !this.serverId || !this.permissionGranted) {
+      this.contentHits = [];
+      this.contentHitsQuery = query;
+      return;
+    }
+
+    try {
+      const results = await this.obsidianVaultService.searchVault(this.serverId, query, 60);
+      if (token !== this.contentSearchToken) return;
+
+      // Name/path matches are already in the tree above; list notes that match only by content.
+      this.contentHits = results
+        .filter(result => result.matchType === 'content')
+        .map(result => {
+          const entry = this.vaultIndex?.getByPath(result.relativePath);
+          if (!entry) return null;
+
+          const title = getVaultDisplayName(entry.name);
+          // Snippets often start with the note's own "# Title" heading; drop that repetition.
+          const snippet = result.snippet.startsWith(`${title} `) ? result.snippet.slice(title.length + 1) : result.snippet;
+          return {
+            entry,
+            icon: getVaultFileType(entry.name).icon,
+            title,
+            folder: entry.parentPath,
+            snippet: highlightTerms(snippet, query),
+          };
+        })
+        .filter((hit): hit is ContentHit => !!hit)
+        .slice(0, 30);
+    } catch (err) {
+      console.warn('Content search failed:', err);
+      if (token !== this.contentSearchToken) return;
+      this.contentHits = [];
+    }
+    this.contentHitsQuery = query;
+  }
+
+  openContentHit(hit: ContentHit): void {
+    void this.selectFile(hit.entry);
+  }
+
+  // ---- Recent files ----
+
+  private loadRecentPaths(): void {
+    try {
+      const raw = localStorage.getItem(`${RECENT_FILES_STORAGE_PREFIX}${this.serverId}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      this.recentPaths = Array.isArray(parsed) ? parsed.filter((p: unknown) => typeof p === 'string') : [];
+    } catch {
+      this.recentPaths = [];
+    }
+  }
+
+  private rememberRecent(path: string): void {
+    this.recentPaths = [path, ...this.recentPaths.filter(p => p !== path)].slice(0, MAX_RECENT_FILES);
+    this.saveRecentPaths();
+  }
+
+  private saveRecentPaths(): void {
+    try {
+      localStorage.setItem(`${RECENT_FILES_STORAGE_PREFIX}${this.serverId}`, JSON.stringify(this.recentPaths));
+    } catch {
+      // storage unavailable: recents just won't persist
+    }
+  }
+
   @HostListener('window:resize')
   onWindowResize(): void {
     this.syncResponsiveSidebarState(true);
   }
 
   onSearchKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && this.treeFilter) {
+    // Esc clears the typed text first, then the tag filter.
+    if (event.key === 'Escape' && (this.treeFilter || this.activeTag)) {
       event.stopPropagation();
-      this.treeFilter = '';
+      if (this.treeFilter) {
+        this.treeFilter = '';
+      } else {
+        this.activeTag = null;
+      }
     }
   }
 
@@ -424,11 +809,14 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     void this.flushPendingSave();
     this.revokeObjectUrls();
     this.autoSaveSubscription?.unsubscribe();
+    this.contentQuerySubscription?.unsubscribe();
     if (this.saveStateResetTimer) {
       clearTimeout(this.saveStateResetTimer);
     }
     this.sidebarResizeObserver?.disconnect();
     document.removeEventListener('selectionchange', this.handleSelectionChange);
+    this.hostRef.nativeElement.removeEventListener('scroll', this.onViewScroll, true);
+    this.closeHoverPreview();
   }
 
   private handleSelectionChange = () => {
@@ -462,6 +850,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       try {
         this.vaultError = null;
         this.localhostRoute = this.obsidianVaultService.getVaultLocalhostRoute(this.serverId);
+        this.loadRecentPaths();
 
         const handle = await this.obsidianVaultService.getVaultHandle(this.serverId);
         this.vaultHandle = handle;
@@ -596,6 +985,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       return;
     }
 
+    this.closeHoverPreview();
+
     // A newer selection started while this file was loading; drop this one.
     if (token !== this.selectionToken) {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -618,6 +1009,9 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     this.saveState = 'idle';
     this.lastSavedAt = null;
     this.expandAncestors(entry.relativePath);
+    if (!this.previewOnly) {
+      this.rememberRecent(entry.relativePath);
+    }
 
     this.closeMobileSidebar();
   }
@@ -937,9 +1331,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     try {
       // Queued edits are written to the old path first; later ones follow the view to the new path.
       await this.flushPendingSave();
+      const oldPath = view.relativePath;
+      const snapshot = await this.captureLinkSources(oldPath);
+      let newPath = oldPath;
       await this.queueVaultOp(async () => {
-        const oldPath = view.relativePath;
-        const newPath = await this.obsidianVaultService.renameFile(this.serverId, oldPath, fullNewName);
+        newPath = await this.obsidianVaultService.renameFile(this.serverId, view.relativePath, fullNewName);
         this.moveKnownModified(oldPath, newPath);
         this.retargetOpenPath(oldPath, newPath);
         view.name = fullNewName;
@@ -948,10 +1344,119 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
         this.selectedFileDisplayName = getVaultDisplayName(fullNewName);
       }
       await this.loadVaultEntries(false);
+      if (snapshot) {
+        await this.updateLinksAfterMove(snapshot, oldPath, newPath);
+      }
     } catch (err) {
       console.error('Failed to rename file:', err);
       this.selectedFileDisplayName = currentDisplayName;
     }
+  }
+
+  // ---- Keeping links working after rename/move ----
+
+  /** Records which notes link to `path` (or to anything inside it, for folders) before it moves. */
+  private async captureLinkSources(path: string): Promise<LinkSnapshot | null> {
+    const index = this.vaultIndex;
+    const entry = index?.getByPath(path);
+    if (!index || !entry) return null;
+
+    try {
+      // Backlinks need every note's links; this is instant once the background indexing has run.
+      await this.vaultIndexService.ensureContentIndexed(this.serverId);
+    } catch (err) {
+      console.warn('Could not index notes before moving; links may not be updated.', err);
+    }
+
+    const movedFiles = entry.kind === 'directory'
+      ? index.files.filter(file => file.relativePath.startsWith(`${entry.relativePath}/`)).map(file => file.relativePath)
+      : [entry.relativePath];
+    const sources = new Set<string>();
+    for (const file of movedFiles) {
+      index.getBacklinks(file).forEach(source => sources.add(source.relativePath));
+    }
+    return { index, isFolder: entry.kind === 'directory', movedFiles, sources: Array.from(sources) };
+  }
+
+  /**
+   * After a rename/move, rewrites links in other notes so they still point to the moved file(s).
+   * Asks first, like Obsidian, and reports how many links changed.
+   */
+  private async updateLinksAfterMove(snapshot: LinkSnapshot, oldPath: string, newPath: string): Promise<void> {
+    const newIndex = this.vaultIndex;
+    if (!snapshot.sources.length || !newIndex || oldPath === newPath) return;
+
+    const mapPath = (path: string) =>
+      path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path;
+    const moved = new Map(snapshot.movedFiles.map(path => [path.toLowerCase(), mapPath(path)]));
+    const wikilinkTextFor = (path: string, original: string) => {
+      const isMarkdown = /\.md$/i.test(path);
+      const keepExtension = isMarkdown && /\.md$/i.test(original);
+      const strip = (value: string) => (isMarkdown && !keepExtension ? value.slice(0, -3) : value);
+      if (original.includes('/')) return strip(path);
+      const entry = newIndex.getByPath(path);
+      const text = entry ? newIndex.linkTextFor(entry) : strip(path.split('/').pop()!);
+      return keepExtension && entry ? `${text}.md` : text;
+    };
+
+    const plans: { path: string; content: string; count: number; isOpen: boolean }[] = [];
+    for (const source of snapshot.sources) {
+      const path = mapPath(source);
+      const openView = this.fileView?.relativePath === path ? this.fileView : null;
+      let content: string;
+      try {
+        content = openView ? openView.content : await this.obsidianVaultService.readFile(this.serverId, path);
+      } catch {
+        continue;
+      }
+      const result = rewriteMovedLinks(content, {
+        notePath: source,
+        newNotePath: path,
+        resolve: (target, from) => snapshot.index.resolveLink(target, from)?.relativePath ?? null,
+        moved,
+        wikilinkTextFor,
+      });
+      if (result.count > 0) {
+        plans.push({ path, content: result.content, count: result.count, isOpen: !!openView });
+      }
+    }
+    if (!plans.length) return;
+
+    const total = plans.reduce((sum, plan) => sum + plan.count, 0);
+    const name = getVaultDisplayName(newPath.split('/').pop() || newPath);
+    const target = snapshot.isFolder ? `files in “${name}”` : `“${name}”`;
+    const question =
+      `Update ${this.pluralize(total, 'link')} in ${this.pluralize(plans.length, 'note')} to point to ${target}?\n\n` +
+      `If you skip this, those links will stop working.`;
+    if (!confirm(question)) return;
+
+    let updated = 0;
+    let failed = 0;
+    for (const plan of plans) {
+      if (plan.isOpen && this.fileView?.relativePath === plan.path) {
+        this.onContentChange(plan.content);
+        updated += plan.count;
+        continue;
+      }
+      try {
+        await this.queueVaultOp(async () => {
+          const lastModified = await this.obsidianVaultService.writeFile(this.serverId, plan.path, plan.content, {
+            expectedLastModified: this.knownModified.get(plan.path),
+          });
+          if (this.knownModified.has(plan.path)) this.knownModified.set(plan.path, lastModified);
+        });
+        this.vaultIndexService.indexNoteContent(this.serverId, plan.path, plan.content);
+        updated += plan.count;
+      } catch (err) {
+        failed++;
+        console.error('Failed to update links in', plan.path, err);
+      }
+    }
+
+    const message = failed
+      ? `Updated ${this.pluralize(updated, 'link')}; ${this.pluralize(failed, 'note')} couldn't be changed.`
+      : `Updated ${this.pluralize(updated, 'link')} in ${this.pluralize(plans.length, 'note')}.`;
+    this.snackBar.open(message, 'OK', { duration: 4000 });
   }
 
   async deleteEntry(entry: VaultEntry, event?: Event): Promise<void> {
@@ -1059,12 +1564,17 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
     try {
       await this.flushPendingSave();
+      const snapshot = await this.captureLinkSources(sourcePath);
+      let newPath = sourcePath;
       await this.queueVaultOp(async () => {
-        const newPath = await this.obsidianVaultService.moveEntry(this.serverId, sourcePath, targetDirPath);
+        newPath = await this.obsidianVaultService.moveEntry(this.serverId, sourcePath, targetDirPath);
         this.moveKnownModified(sourcePath, newPath);
         this.retargetOpenPath(sourcePath, newPath);
       });
       await this.loadVaultEntries(false);
+      if (snapshot) {
+        await this.updateLinksAfterMove(snapshot, sourcePath, newPath);
+      }
     } catch (err) {
       this.vaultError = err instanceof Error ? err.message : 'Unable to move entry.';
       console.error('Failed to move entry:', err);
@@ -1089,6 +1599,13 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   /** After a rename/move, point the open file or folder at its new path (also for moved parent folders). */
   private retargetOpenPath(oldPath: string, newPath: string): void {
+    const movePath = (path: string) =>
+      path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path;
+    if (this.recentPaths.some(path => movePath(path) !== path)) {
+      this.recentPaths = this.recentPaths.map(movePath);
+      this.saveRecentPaths();
+    }
+
     const view = this.activeView;
     if (view.kind === 'none') return;
 
@@ -1276,19 +1793,33 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     this.onContentChange(`${content}${content ? '\n\n' : ''}${statsheet}\n`);
   }
 
-  private filterVaultEntries(entries: VaultEntry[], query: string): VaultEntry[] {
-    return entries.reduce<VaultEntry[]>((matches, entry) => {
-      const childMatches = entry.children ? this.filterVaultEntries(entry.children, query) : [];
-      const entryMatches =
-        entry.name.toLowerCase().includes(query) ||
-        entry.relativePath.toLowerCase().includes(query);
+  /**
+   * Filters the tree by name/path text and, optionally, to a set of tagged file paths.
+   * Without a tag filter, a folder whose name matches keeps all its contents; with one,
+   * only tagged files are shown (inside the folders that contain them).
+   */
+  private filterVaultEntries(entries: VaultEntry[], query: string, taggedPaths: Set<string> | null): VaultEntry[] {
+    const matchesQuery = (entry: VaultEntry) =>
+      !query ||
+      entry.name.toLowerCase().includes(query) ||
+      entry.relativePath.toLowerCase().includes(query);
 
-      if (entryMatches) {
-        matches.push(entry);
-      } else if (childMatches.length > 0) {
-        matches.push({ ...entry, children: childMatches });
+    return entries.reduce<VaultEntry[]>((matches, entry) => {
+      if (entry.kind === 'directory') {
+        if (query && !taggedPaths && matchesQuery(entry)) {
+          matches.push(entry);
+          return matches;
+        }
+        const childMatches = this.filterVaultEntries(entry.children ?? [], query, taggedPaths);
+        if (childMatches.length > 0) {
+          matches.push({ ...entry, children: childMatches });
+        }
+        return matches;
       }
 
+      if ((!taggedPaths || taggedPaths.has(entry.relativePath)) && matchesQuery(entry)) {
+        matches.push(entry);
+      }
       return matches;
     }, []);
   }
@@ -1351,6 +1882,152 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       await this.selectFolder(entry);
     } else {
       await this.selectFile(entry);
+    }
+  }
+
+  // ---- Link hover preview ----
+
+  hoverPreview: HoverPreview | null = null;
+  private hoverOpenTimer?: ReturnType<typeof setTimeout>;
+  private hoverCloseTimer?: ReturnType<typeof setTimeout>;
+  private hoverToken = 0;
+  private hoverImageUrl: string | null = null;
+
+  /** From the editor: the pointer entered a link (after a short delay, show its card) or left it. */
+  onEditorLinkHover(event: { target: string; rect: DOMRect } | null): void {
+    if (!event) {
+      this.scheduleHoverClose();
+      return;
+    }
+
+    clearTimeout(this.hoverCloseTimer);
+    clearTimeout(this.hoverOpenTimer);
+    if (this.hoverPreview?.target === event.target) return;
+    this.hoverOpenTimer = setTimeout(() => void this.openHoverPreview(event.target, event.rect), HOVER_OPEN_DELAY);
+  }
+
+  onHoverCardEnter(): void {
+    clearTimeout(this.hoverCloseTimer);
+  }
+
+  onHoverCardLeave(): void {
+    this.scheduleHoverClose();
+  }
+
+  private scheduleHoverClose(): void {
+    clearTimeout(this.hoverOpenTimer);
+    clearTimeout(this.hoverCloseTimer);
+    this.hoverCloseTimer = setTimeout(() => this.closeHoverPreview(), HOVER_CLOSE_DELAY);
+  }
+
+  closeHoverPreview(): void {
+    clearTimeout(this.hoverOpenTimer);
+    clearTimeout(this.hoverCloseTimer);
+    this.hoverToken++;
+    this.hoverPreview = null;
+    if (this.hoverImageUrl) {
+      URL.revokeObjectURL(this.hoverImageUrl);
+      this.hoverImageUrl = null;
+    }
+  }
+
+  private onViewScroll = (event: Event) => {
+    if (!this.hoverPreview) return;
+    const card = this.hostRef.nativeElement.querySelector('.hover-preview');
+    if (card && event.target instanceof Node && card.contains(event.target)) return;
+    this.closeHoverPreview();
+  };
+
+  private async openHoverPreview(target: string, rect: DOMRect): Promise<void> {
+    this.closeHoverPreview();
+    const token = this.hoverToken;
+
+    const entry = this.vaultIndex?.resolveLink(target, this.selectedFileRelativePath) ?? null;
+    const cleanTarget = target.split('|')[0];
+    const heading = cleanTarget.includes('#') ? cleanTarget.slice(cleanTarget.indexOf('#') + 1).trim() : '';
+    const fileType = entry ? getVaultFileType(entry.name) : null;
+
+    // Place the card under the link, or above it when there isn't room below.
+    const host = this.hostRef.nativeElement.getBoundingClientRect();
+    const roomBelow = window.innerHeight - rect.bottom;
+    const above = roomBelow < HOVER_CARD_HEIGHT + 16 && rect.top - host.top > roomBelow;
+    const width = Math.min(HOVER_CARD_WIDTH, host.width - 16);
+
+    this.hoverPreview = {
+      target,
+      entry,
+      heading,
+      title: entry ? getVaultDisplayName(entry.name) : cleanTarget.split('#')[0].trim(),
+      folder: entry?.parentPath ?? '',
+      icon: fileType?.icon ?? 'link_off',
+      top: above ? rect.top - host.top - 6 : rect.bottom - host.top + 6,
+      left: Math.max(8, Math.min(rect.left - host.left, host.width - width - 8)),
+      above,
+      loading: !!entry && entry.kind === 'file' && (fileType?.viewer === 'markdown' || fileType?.viewer === 'image'),
+      markdown: null,
+      imageUrl: null,
+    };
+    if (!this.hoverPreview.loading || !entry) return;
+
+    try {
+      if (fileType?.viewer === 'markdown') {
+        const markdown = await this.obsidianVaultService.readFile(this.serverId, entry.relativePath);
+        if (token !== this.hoverToken || !this.hoverPreview) return;
+        this.hoverPreview = { ...this.hoverPreview, loading: false, markdown };
+        if (heading) {
+          this.scrollHoverCardToHeading(heading, token);
+        }
+      } else {
+        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, entry.relativePath);
+        if (token !== this.hoverToken || !this.hoverPreview) return;
+        this.hoverImageUrl = URL.createObjectURL(blob);
+        this.hoverPreview = { ...this.hoverPreview, loading: false, imageUrl: this.hoverImageUrl };
+      }
+    } catch (err) {
+      console.warn('Hover preview failed:', err);
+      if (token === this.hoverToken && this.hoverPreview) {
+        this.hoverPreview = { ...this.hoverPreview, loading: false };
+      }
+    }
+  }
+
+  /** For `[[Note#Heading]]`, scrolls the card to that heading once the preview has rendered. */
+  private scrollHoverCardToHeading(heading: string, token: number, attempt = 0): void {
+    setTimeout(() => {
+      if (token !== this.hoverToken) return;
+      const wanted = heading.toLowerCase();
+      const match = Array.from(this.hostRef.nativeElement.querySelectorAll<HTMLElement>('.hover-preview-body h1, .hover-preview-body h2, .hover-preview-body h3, .hover-preview-body h4, .hover-preview-body h5, .hover-preview-body h6'))
+        .find(element => element.textContent?.trim().toLowerCase() === wanted);
+      if (match) {
+        match.scrollIntoView({ block: 'start' });
+      } else if (attempt < 10) {
+        this.scrollHoverCardToHeading(heading, token, attempt + 1);
+      }
+    }, 100);
+  }
+
+  openHoverTarget(): void {
+    const entry = this.hoverPreview?.entry;
+    this.closeHoverPreview();
+    if (!entry) return;
+
+    if (this.previewOnly) {
+      if (entry.kind === 'file') this.requestPreviewTab(entry.relativePath, entry.name);
+    } else if (entry.kind === 'directory') {
+      void this.selectFolder(entry);
+    } else {
+      void this.selectFile(entry);
+    }
+  }
+
+  /** A link clicked inside the hover card, resolved relative to the previewed note. */
+  openHoverLink(target: string): void {
+    const from = this.hoverPreview?.entry?.relativePath ?? this.selectedFileRelativePath;
+    const entry = this.vaultIndex?.resolveLink(target, from);
+    this.closeHoverPreview();
+    if (entry?.kind === 'file') {
+      if (this.previewOnly) this.requestPreviewTab(entry.relativePath, entry.name);
+      else void this.selectFile(entry);
     }
   }
 
