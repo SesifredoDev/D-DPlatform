@@ -711,6 +711,7 @@
                   mat-icon-button
                   class="icon-btn"
                   [matMenuTriggerFor]="fileMenu"
+                  [matMenuTriggerRestoreFocus]="false"
                   aria-label="File options"
                   matTooltip="More">
                   <mat-icon>more_vert</mat-icon>
@@ -756,6 +757,10 @@
             <span>Open in preview tab</span>
           </button>
           @if (isMarkdownFileSelected) {
+            <button mat-menu-item (click)="insertSecretBlock()">
+              <mat-icon>visibility_off</mat-icon>
+              <span>{{ hasActiveSelection ? 'Make selection a GM secret' : 'Insert GM secret' }}</span>
+            </button>
             <button mat-menu-item (click)="insertStatsheetTemplate()">
               <mat-icon>assignment</mat-icon>
               <span>Insert 5e statblock</span>
@@ -802,6 +807,7 @@
           } @else if (isMarkdownFileSelected) {
             <div class="editor" (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
               <app-milkdown-editor
+                #noteEditor
                 [markdown]="selectedFileContent"
                 [serverId]="serverId"
                 [currentFilePath]="selectedFileRelativePath"

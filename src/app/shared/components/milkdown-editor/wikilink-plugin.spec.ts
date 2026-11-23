@@ -20,6 +20,9 @@ describe('wikilink plugin round trip', () => {
     ['nested tag', '#quest/main'],
     ['normal link', '[Open5e](https://open5e.com)'],
     ['real heading', '# Session 1'],
+    ['secret callout', '> [!secret] GM only\n> He is a vampire.'],
+    ['foldable callout', '> [!note]- Read aloud\n> The mist parts.'],
+    ['inline comment', 'Aldric %%is a spy%% runs the inn.'],
   ])('keeps %s unchanged', (_, markdown) => {
     expect(roundTrip(markdown)).toBe(markdown);
   });
@@ -58,6 +61,11 @@ describe('restoreObsidianSyntax', () => {
   it('unescapes wikilinks typed straight into the editor', () => {
     expect(restoreObsidianSyntax('see \\[\\[Barovia]] and \\!\\[\\[map.png]]')).toBe('see [[Barovia]] and ![[map.png]]');
     expect(restoreObsidianSyntax('\\[\\[my\\_note|Alias]]')).toBe('[[my_note|Alias]]');
+  });
+
+  it('unescapes callout markers but not ones that could form a link', () => {
+    expect(restoreObsidianSyntax('\\[!secret] GM only')).toBe('[!secret] GM only');
+    expect(restoreObsidianSyntax('\\[!x](url)')).toBe('\\[!x](url)');
   });
 
   it('only unescapes # when it cannot start a heading', () => {

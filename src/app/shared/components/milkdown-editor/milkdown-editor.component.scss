@@ -646,3 +646,53 @@
   color: var(--on-surface-muted, rgba(255, 255, 255, 0.5));
   font-size: 12.5px;
 }
+
+/* ------------------------------------------------------------------
+   GM-only content: > [!secret] callouts and %%comments%%
+   ------------------------------------------------------------------ */
+.milkdown .ProseMirror blockquote.md-secret-block {
+  position: relative;
+  margin-left: 0;
+  margin-right: 0;
+  padding: 26px 14px 8px;
+  border-left: 3px solid #e0a03c;
+  border-radius: 0 8px 8px 0;
+  background: rgba(224, 160, 60, 0.1);
+
+  &::before {
+    content: 'GM only · not broadcast';
+    position: absolute;
+    top: 6px;
+    left: 14px;
+    // Crepe draws the quote bar with this pseudo-element; undo its size so the label lays out as text.
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    background: none;
+    white-space: nowrap;
+    color: #e8b45c;
+    font-family: var(--font-family-main, sans-serif);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+
+  > p:first-child {
+    margin-top: 0;
+  }
+}
+
+.milkdown .ProseMirror .md-secret-marker {
+  color: rgba(232, 180, 92, 0.75);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.milkdown .ProseMirror .md-secret-comment {
+  border-radius: 3px;
+  background: rgba(224, 160, 60, 0.14);
+  color: rgba(232, 180, 92, 0.95);
+  font-style: italic;
+}

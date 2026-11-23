@@ -150,6 +150,8 @@ const wikilinkToMarkdown: ToMarkdownOptions = {
 export function restoreObsidianSyntax(markdown: string): string {
   return markdown
     .replace(/\\#(?=[^\s#\\])/g, '#')
+    // Callout markers: `> [!secret] Title` (not followed by `(`, so it can't become a link).
+    .replace(/\\\[!([\w-]+)\](?=[+-]?(?:\s|$))/g, '[!$1]')
     .replace(/(\\?!)?\\\[\\\[([^\n]*?)\\?\]\\?\]/g, (_, bang: string | undefined, inner: string) => {
       const target = inner.replace(/\\([\\`*_{}[\]()#+\-.!|~<>&])/g, '$1');
       return `${bang ? '!' : ''}[[${target}]]`;

@@ -5,6 +5,7 @@ import type { BroadcastData, BroadcastEmbeddedFile } from '../../models/objects/
 import { ObsidianVaultService } from './obsidian-vault-service';
 import { VaultIndexService } from './vault-index.service';
 import { inferImageMimeType, isVaultFileType } from './vault-file-types';
+import { SECRET_SELECTOR, stripSecrets } from './secrets';
 
 /** Where a broadcast comes from: the vault and the note whose relative links should be resolved. */
 export interface VaultBroadcastContext {
@@ -26,6 +27,12 @@ export interface VaultImageBroadcast {
   alt: string;
   /** Vault path from the image's data-path attribute, if present. */
   path: string | null;
+}
+
+/** What a broadcast left out. `allSecret` means nothing was sent because everything selected was GM-only. */
+export interface BroadcastSecretsReport {
+  removed: number;
+  allSecret: boolean;
 }
 
 interface TokenizeState {
@@ -50,17 +57,21 @@ export class ObsidianBroadcastService {
     private vaultIndex: VaultIndexService
   ) {}
 
-  async broadcastDocument(request: VaultDocumentBroadcast): Promise<void> {
+  /** Broadcasts a whole file. GM-only secrets are removed from notes first. */
+  async broadcastDocument(request: VaultDocumentBroadcast): Promise<BroadcastSecretsReport> {
     const data: BroadcastData = {
       source: 'obsidian-view',
       filename: request.fileName,
     };
+    let removed = 0;
 
     if (request.markdown !== null) {
+      const stripped = stripSecrets(request.markdown);
+      removed = stripped.removed;
       const state = this.newTokenizeState();
-      data.text = await this.tokenizeMarkdownImages(request, request.markdown, state);
+      data.text = await this.tokenizeMarkdownImages(request, stripped.markdown, state);
       data.embeddedFiles = state.embeddedFiles;
-      data.htmlContent = request.html;
+      data.htmlContent = request.html === undefined ? undefined : removeSecretElements(request.html);
       data.preferTextForBroadcast = true;
     } else {
       const blob = await this.vaultService.readFileAsBlob(request.serverId, request.currentFilePath);
@@ -68,13 +79,32 @@ export class ObsidianBroadcastService {
     }
 
     this.openDialog(data);
+    return { removed, allSecret: false };
   }
 
-  /** Broadcasts a DOM selection made inside the note editor. */
-  async broadcastSelection(context: VaultBroadcastContext, selection: Selection): Promise<void> {
+  /**
+   * Broadcasts a DOM selection made inside the note editor. GM-only parts are removed; if the whole
+   * selection is GM-only, nothing is broadcast.
+   */
+  async broadcastSelection(context: VaultBroadcastContext, selection: Selection): Promise<BroadcastSecretsReport> {
     const range = selection.getRangeAt(0);
+    const ancestor = range.commonAncestorContainer;
+    const ancestorElement = ancestor instanceof Element ? ancestor : ancestor.parentElement;
+    if (ancestorElement?.closest(SECRET_SELECTOR)) {
+      return { removed: 1, allSecret: true };
+    }
+
     const container = document.createElement('div');
     container.appendChild(range.cloneContents());
+    const secretElements = container.querySelectorAll(SECRET_SELECTOR);
+    secretElements.forEach(element => element.remove());
+    // Text from the cleaned HTML (selection.toString() would still include the secrets), then
+    // strip any secret syntax the editor didn't mark.
+    const stripped = stripSecrets(selectionText(container));
+    const removed = secretElements.length + stripped.removed;
+    if (!stripped.markdown.trim() && !container.querySelector('img')) {
+      return { removed, allSecret: removed > 0 };
+    }
 
     const state = this.newTokenizeState();
 
@@ -88,17 +118,18 @@ export class ObsidianBroadcastService {
     }
 
     const data: BroadcastData = {
-      text: await this.tokenizeMarkdownImages(context, selection.toString(), state),
+      text: await this.tokenizeMarkdownImages(context, stripped.markdown, state),
       embeddedFiles: state.embeddedFiles,
       htmlContent: container.innerHTML,
       source: 'obsidian-view-selection',
     };
 
-    if (images.length === 1 && container.innerText.trim() === '') {
+    if (images.length === 1 && (container.textContent ?? '').trim() === '') {
       data.imageUrl = images[0].src;
     }
 
     this.openDialog(data);
+    return { removed, allSecret: false };
   }
 
   /** Broadcasts a right-clicked image, sending the vault file itself when it can be resolved. */
@@ -248,4 +279,24 @@ async function replaceAsync(
   }
 
   return output + input.slice(lastIndex);
+}
+
+/** Removes GM-only elements (as marked by the editor) from an HTML string. */
+function removeSecretElements(html: string): string {
+  const container = document.createElement('div');
+  container.innerHTML = html;
+  container.querySelectorAll(SECRET_SELECTOR).forEach(element => element.remove());
+  return container.innerHTML;
+}
+
+const BLOCK_TAGS = /^(P|H[1-6]|LI|UL|OL|BLOCKQUOTE|PRE|DIV|TABLE|TR)$/;
+
+/** Plain text of a cloned selection, with one line per block when it spans several blocks. */
+function selectionText(container: HTMLElement): string {
+  const spansBlocks = Array.from(container.children).some(child => BLOCK_TAGS.test(child.tagName));
+  if (!spansBlocks) return container.textContent ?? '';
+  return Array.from(container.childNodes)
+    .map(node => node.textContent ?? '')
+    .filter(text => text.trim())
+    .join('\n');
 }

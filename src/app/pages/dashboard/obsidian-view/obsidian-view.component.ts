@@ -19,7 +19,7 @@ import { BacklinkMention, VaultIndex, VaultIndexService, extractInlineTags } fro
 import { normalizeTagInput, readFrontmatterTags, setFrontmatterTags } from '../../../shared/services/ObsidianVault/frontmatter';
 import { rewriteMovedLinks } from '../../../shared/services/ObsidianVault/link-rewrite';
 import { MatSnackBar } from '@angular/material/snack-bar';
-import { ObsidianBroadcastService, VaultImageBroadcast } from '../../../shared/services/ObsidianVault/obsidian-broadcast.service';
+import { BroadcastSecretsReport, ObsidianBroadcastService, VaultImageBroadcast } from '../../../shared/services/ObsidianVault/obsidian-broadcast.service';
 import { NOTE_TEMPLATES, findNoteTemplate, loadNoteTemplate } from '../../../shared/services/ObsidianVault/note-templates';
 import {
   VaultFileType,
@@ -189,6 +189,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   /** Tree entry the shared file/folder menu is open for. */
   menuEntry: VaultEntry | null = null;
   @ViewChild('entryMenuTrigger') private entryMenuTrigger?: MatMenuTrigger;
+  /** The main note editor (not the one inside hover cards). */
+  @ViewChild('noteEditor') private noteEditor?: MilkdownEditorComponent;
   /** Focuses the name field whenever a create form appears. */
   @ViewChild('createInput') private set createInput(ref: ElementRef<HTMLInputElement> | undefined) {
     if (ref) {
@@ -2165,7 +2167,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   async broadcast(): Promise<void> {
     const selection = this.getEditorSelection();
     if (selection) {
-      await this.broadcastService.broadcastSelection(this.broadcastContext(), selection);
+      this.reportBroadcastSecrets(await this.broadcastService.broadcastSelection(this.broadcastContext(), selection));
       return;
     }
 
@@ -2177,12 +2179,28 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     if (!view || (!view.content && !view.blobUrl)) return;
 
     const isMarkdown = view.fileType.viewer === 'markdown';
-    await this.broadcastService.broadcastDocument({
+    this.reportBroadcastSecrets(await this.broadcastService.broadcastDocument({
       ...this.broadcastContext(),
       fileName: view.name,
       markdown: isMarkdown ? view.content : null,
       html: isMarkdown ? this.getEditorHtml() : undefined,
-    });
+    }));
+  }
+
+  /** Tells the GM what was kept back, so they can trust secrets stay secret. */
+  private reportBroadcastSecrets(report: BroadcastSecretsReport): void {
+    if (report.allSecret) {
+      this.snackBar.open('That selection is GM-only, so nothing was broadcast.', 'OK', { duration: 4000 });
+    } else if (report.removed > 0) {
+      this.snackBar.open(`${this.pluralize(report.removed, 'GM secret')} left out of the broadcast.`, 'OK', { duration: 4000 });
+    }
+  }
+
+  /** ⋯ menu: wrap the selection in a GM-only secret block, or insert an empty one. */
+  insertSecretBlock(): void {
+    if (!this.noteEditor?.insertSecretBlock()) {
+      this.snackBar.open('Open a note in edit mode to add a GM secret.', 'OK', { duration: 3000 });
+    }
   }
 
   private broadcastContext() {

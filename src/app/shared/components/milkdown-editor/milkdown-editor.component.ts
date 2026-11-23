@@ -13,7 +13,8 @@ import {
 } from '@angular/core';
 import { Crepe } from '@milkdown/crepe';
 import { wikilinkPlugin } from './wikilink-plugin';
-import { editorViewOptionsCtx } from '@milkdown/core';
+import { editorViewCtx, editorViewOptionsCtx } from '@milkdown/core';
+import { SECRET_MENU_ICON, insertSecretBlock, secretBlocksPlugin } from './secret-blocks-plugin';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
 import { DndStatsheetService } from '../../services/ObsidianVault/dnd-statsheet.service';
 import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
@@ -158,6 +159,25 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     const localCrepe = new Crepe({
       root: this.editorRef.nativeElement,
       defaultValue: body,
+      featureConfigs: {
+        // "GM secret" in the + / slash block menu, next to Quote.
+        [Crepe.Feature.BlockEdit]: {
+          buildMenu: builder => {
+            const textGroup = builder.getGroup('text');
+            textGroup.addItem('gm-secret', {
+              label: 'GM secret',
+              icon: SECRET_MENU_ICON,
+              onRun: ctx => insertSecretBlock(ctx.get(editorViewCtx), { replaceCurrentLine: true }),
+            });
+            // Show it right after Quote rather than at the end of the group.
+            const items = textGroup.group.items;
+            const quoteAt = items.findIndex(item => item.key === 'quote');
+            if (quoteAt >= 0) {
+              items.splice(quoteAt + 1, 0, items.pop()!);
+            }
+          },
+        },
+      },
     });
 
     localCrepe.editor
@@ -166,7 +186,8 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       })
       .use(dndStatsheetNodeViewPlugin(this.statsheetService))
       .use(wikilinkPlugin)
-      .use(wikilinkSuggestPlugin(this.wikilinkCandidates));
+      .use(wikilinkSuggestPlugin(this.wikilinkCandidates))
+      .use(secretBlocksPlugin);
 
     localCrepe.on((listener) => {
       listener.markdownUpdated((ctx, markdown, prevMarkdown) => {
@@ -391,6 +412,16 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
   private revokeObjectUrls() {
     this.objectUrls.forEach((url) => URL.revokeObjectURL(url));
     this.objectUrls = [];
+  }
+
+  /**
+   * Inserts a GM-only `> [!secret]` callout (see `insertSecretBlock`). Returns false if the editor
+   * isn't ready or is read-only.
+   */
+  insertSecretBlock(): boolean {
+    if (!this.crepe || this.isPreview) return false;
+    this.crepe.editor.action(ctx => insertSecretBlock(ctx.get(editorViewCtx)));
+    return true;
   }
 
   ngOnDestroy() {
