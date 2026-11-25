@@ -26,6 +26,8 @@ import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVa
 import { WikilinkCandidate, wikilinkSuggestPlugin } from './wikilink-suggest-plugin';
 import { StatblockViewHost, statblockNodeViewsPlugin } from './statblock-node-views';
 import { createStatblockPaste } from './statblock-paste-plugin';
+import { DICE_CLASS, dicePlugin } from './dice-plugin';
+import { DiceRollService } from '../../services/dice/dice-roll.service';
 
 @Component({
   selector: 'app-milkdown-editor',
@@ -94,6 +96,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
   constructor(
     private vaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
+    private diceRolls: DiceRollService,
     appRef: ApplicationRef,
     injector: EnvironmentInjector
   ) {
@@ -230,6 +233,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
         });
       })
       .use(statblockPaste.plugin)
+      .use(dicePlugin)
       .use(statblockNodeViewsPlugin(this.statblockHost))
       .use(wikilinkPlugin)
       .use(wikilinkSuggestPlugin(this.wikilinkCandidates))
@@ -263,6 +267,14 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
     this.editorRef.nativeElement.onclick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
+
+      // Dice expressions: a plain click rolls (the cursor still lands there), Shift+click also posts.
+      // Not on double-clicks (selecting a word) or drags that end on the dice.
+      const dice = target.closest<HTMLElement>(`.${DICE_CLASS}`);
+      if (dice?.dataset['dice'] && e.detail <= 1 && (e.shiftKey || window.getSelection()?.isCollapsed !== false)) {
+        this.diceRolls.roll(dice.dataset['dice'], { post: e.shiftKey, label: this.noteTitle() });
+      }
+
       const link = target.closest('a');
       const href = link?.getAttribute('href') || '';
       // Identify links via class OR the custom protocol in case class was stripped
@@ -274,7 +286,11 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       }
     };
 
-    this.editorRef.nativeElement.onmousedown = () => (this.cursorPlaced = true);
+    this.editorRef.nativeElement.onmousedown = (e: MouseEvent) => {
+      this.cursorPlaced = true;
+      // Shift+click on dice posts the roll; don't let it extend the text selection too.
+      if (e.shiftKey && (e.target as HTMLElement).closest(`.${DICE_CLASS}`)) e.preventDefault();
+    };
     this.editorRef.nativeElement.onkeydown = () => (this.cursorPlaced = true);
 
     this.editorRef.nativeElement.onmouseover = (e: MouseEvent) => {
@@ -474,6 +490,12 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     if (!this.crepe || this.isPreview) return false;
     this.crepe.editor.action(ctx => insertCallout(ctx.get(editorViewCtx), SECRET_TEMPLATE));
     return true;
+  }
+
+  /** The open note's name, used to label dice rolled from it. */
+  private noteTitle(): string | undefined {
+    const name = this.currentFilePath.split('/').pop();
+    return name ? getVaultDisplayName(name) : undefined;
   }
 
   /**

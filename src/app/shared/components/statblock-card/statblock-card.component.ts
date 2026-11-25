@@ -29,6 +29,8 @@ import {
 } from '../../services/ObsidianVault/statblock';
 import { StatblockField, StatblockSystem, getStatblockSystem, systemsFor } from '../../services/ObsidianVault/statblock-systems';
 import { StatblockVttService } from '../../services/ObsidianVault/statblock-vtt.service';
+import { findDiceExpressions } from '../../services/dice/dice';
+import { DiceRollService } from '../../services/dice/dice-roll.service';
 import { VaultIndex, VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getFileExtension, getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 
@@ -132,7 +134,8 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
     private snackBar: MatSnackBar,
     private vaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
-    private statblockVtt: StatblockVttService
+    private statblockVtt: StatblockVttService,
+    private diceRolls: DiceRollService
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -276,13 +279,19 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
     }
   }
 
-  /** Statblock text with **bold**, *italic* and [[links]]. */
+  /** Statblock text with **bold**, *italic*, [[links]] and clickable dice (`2d6 + 3`). */
   html(text: string): SafeHtml {
     let cached = this.htmlCache.get(text);
     if (!cached) {
-      const markup = escapeHtml(text)
-        .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, target: string, alias?: string) =>
-          `<a class="sb-link" href="#" data-link="${target.trim()}">${(alias ?? target).trim()}</a>`)
+      const markup = text
+        .split(/(\[\[[^\]]+\]\])/)
+        .map(segment => {
+          const link = segment.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/);
+          return link
+            ? `<a class="sb-link" href="#" data-link="${escapeHtml(link[1].trim())}">${escapeHtml((link[2] ?? link[1]).trim())}</a>`
+            : diceHtml(segment);
+        })
+        .join('')
         .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
         .replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>')
         .replace(/\n/g, '<br>');
@@ -294,10 +303,39 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
   }
 
   onTextClick(event: MouseEvent): void {
+    const dice = (event.target as HTMLElement).closest<HTMLElement>('.sb-dice');
+    if (dice) {
+      event.preventDefault();
+      this.rollDice(dice, event.shiftKey);
+      return;
+    }
+
     const link = (event.target as HTMLElement).closest('a.sb-link') as HTMLElement | null;
     if (!link) return;
     event.preventDefault();
     this.openNote.emit(link.dataset['link'] ?? '');
+  }
+
+  /** Shift+click on dice posts the roll; don't let it extend the text selection too. */
+  onTextMouseDown(event: MouseEvent): void {
+    if (event.shiftKey && (event.target as HTMLElement).closest('.sb-dice')) event.preventDefault();
+  }
+
+  /** Enter or Space on focused dice rolls them (Shift to post). */
+  onTextKeydown(event: KeyboardEvent): void {
+    const dice = (event.target as HTMLElement).closest<HTMLElement>('.sb-dice');
+    if (!dice || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    this.rollDice(dice, event.shiftKey);
+  }
+
+  /** Rolls clicked dice, labelled with the entry they're in, e.g. "Bite (Adult Red Dragon)". */
+  private rollDice(element: HTMLElement, post: boolean): void {
+    const expression = element.dataset['dice'];
+    if (!expression) return;
+    const entry = element.closest<HTMLElement>('[data-roll-label]')?.dataset['rollLabel']?.trim();
+    const label = entry && this.name ? `${entry} (${this.name})` : entry || this.name || undefined;
+    this.diceRolls.roll(expression, { label, post });
   }
 
   // ---- Header ----
@@ -621,6 +659,19 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
       this.addingToMap = false;
     }
   }
+}
+
+/** Escaped text with each dice expression wrapped in a focusable, clickable span. */
+function diceHtml(raw: string): string {
+  let html = '';
+  let last = 0;
+  for (const match of findDiceExpressions(raw)) {
+    html += escapeHtml(raw.slice(last, match.index));
+    const expression = escapeHtml(match.text);
+    html += `<span class="sb-dice" role="button" tabindex="0" data-dice="${expression}" title="Roll ${expression} (Shift+click to post it to chat)">${expression}</span>`;
+    last = match.index + match.text.length;
+  }
+  return html + escapeHtml(raw.slice(last));
 }
 
 /** Text being typed, as stored: exactly as typed, except that a plain whole number is a number. */

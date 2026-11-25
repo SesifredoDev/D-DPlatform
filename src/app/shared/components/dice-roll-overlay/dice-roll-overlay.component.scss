@@ -1,0 +1,311 @@
+// Dice roll overlay: bottom-right, above the app (and the search drawer).
+
+:host {
+  --roll-bg: rgba(20, 22, 28, 0.92);
+  --roll-border: rgba(255, 255, 255, 0.1);
+  --roll-text: var(--on-background, #eef0f6);
+  --roll-muted: rgba(255, 255, 255, 0.58);
+  --roll-accent: var(--primary, #7289da);
+  --roll-accent-rgb: var(--primary-rgb, 114, 137, 218);
+  --roll-crit: #f2c14e;
+  --roll-fumble: #ff7a7a;
+
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 4300;
+  pointer-events: none;
+}
+
+.rolls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.roll {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 10px 14px 12px;
+  overflow: hidden;
+  border: 1px solid var(--roll-border);
+  border-radius: 12px;
+  background: var(--roll-bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--roll-text);
+  font-family: var(--font-family-main, inherit);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: arrive 180ms ease-out;
+
+  --total-color: var(--roll-accent);
+  --total-rgb: var(--roll-accent-rgb);
+
+  &.is-crit {
+    --total-color: var(--roll-crit);
+    --total-rgb: 242, 193, 78;
+  }
+
+  &.is-fumble {
+    --total-color: var(--roll-fumble);
+    --total-rgb: 255, 122, 122;
+  }
+}
+
+// The one loud thing: the total on a die-like badge.
+.total {
+  min-width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  padding: 0 8px;
+  border: 2px solid rgba(var(--total-rgb), 0.75);
+  border-radius: 14px;
+  background: rgba(var(--total-rgb), 0.14);
+  color: var(--total-color);
+  font-size: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.detail {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--roll-text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expression {
+  color: var(--roll-muted);
+  font-family: inherit;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.chip {
+  min-width: 24px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+
+  &.is-flat {
+    border-style: dashed;
+    background: transparent;
+    color: var(--roll-muted);
+  }
+
+  &.is-max {
+    border-color: rgba(var(--roll-accent-rgb), 0.7);
+    color: #fff;
+    background: rgba(var(--roll-accent-rgb), 0.25);
+  }
+
+  &.is-min {
+    color: var(--roll-muted);
+  }
+}
+
+.note {
+  margin: 0;
+  color: var(--total-color);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.post {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--roll-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  .material-icons {
+    font-size: 15px;
+  }
+
+  &:hover:not(:disabled) {
+    border-color: rgba(var(--roll-accent-rgb), 0.6);
+    background: rgba(var(--roll-accent-rgb), 0.16);
+  }
+
+  &[aria-expanded='true'] {
+    border-color: rgba(var(--roll-accent-rgb), 0.7);
+  }
+
+  &.is-done {
+    border-color: transparent;
+    color: #8fe0ad;
+    opacity: 1;
+    cursor: default;
+  }
+
+  &:disabled:not(.is-done) {
+    opacity: 0.55;
+    cursor: default;
+  }
+}
+
+.error {
+  color: var(--roll-fumble);
+  font-size: 12px;
+}
+
+.picker {
+  display: grid;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--roll-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 30px;
+    padding: 0 10px;
+    border: 0;
+    background: transparent;
+    color: var(--roll-text);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: rgba(var(--roll-accent-rgb), 0.2);
+    }
+  }
+
+  .hash {
+    color: var(--roll-muted);
+  }
+
+  .empty {
+    padding: 8px 10px;
+    color: var(--roll-muted);
+    font-size: 12px;
+  }
+}
+
+.dismiss {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--roll-muted);
+  cursor: pointer;
+
+  .material-icons {
+    font-size: 16px;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--roll-text);
+  }
+}
+
+button:focus-visible {
+  outline: 2px solid rgba(var(--roll-accent-rgb), 0.9);
+  outline-offset: 2px;
+}
+
+// Time left before the roll goes away.
+.countdown {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: rgba(var(--total-rgb), 0.7);
+  transform-origin: left center;
+  animation-name: drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roll {
+    animation: none;
+  }
+
+  .countdown {
+    animation: none;
+  }
+}

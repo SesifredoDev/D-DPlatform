@@ -1,0 +1,79 @@
+@if (dice.rolls().length) {
+  <section
+    class="rolls"
+    aria-label="Dice rolls"
+    aria-live="polite"
+    (pointerenter)="dice.hold()"
+    (pointerleave)="dice.release()"
+    (focusin)="dice.hold()"
+    (focusout)="dice.release()">
+    @for (item of dice.rolls(); track item.id) {
+      <article
+        class="roll"
+        [class.is-crit]="item.roll.critical === 'success'"
+        [class.is-fumble]="item.roll.critical === 'failure'">
+        <div class="total" [attr.aria-label]="'Total ' + item.roll.total">{{ item.roll.total }}</div>
+
+        <div class="detail">
+          <div class="heading">
+            @if (item.label) {
+              <span class="label">{{ item.label }}</span>
+            }
+            <code class="expression">{{ item.roll.expression }}</code>
+          </div>
+          <div class="chips">
+            @for (part of item.roll.parts; track $index) {
+              @for (chip of chips(part); track $index) {
+                <span class="chip" [class.is-flat]="!part.rolls.length" [class.is-max]="chip.max" [class.is-min]="chip.min">{{ chip.value }}</span>
+              }
+            }
+          </div>
+          @if (item.roll.critical === 'success') {
+            <p class="note">Natural 20</p>
+          } @else if (item.roll.critical === 'failure') {
+            <p class="note">Natural 1</p>
+          }
+
+          <div class="actions">
+            <button
+              type="button"
+              class="post"
+              [class.is-done]="!!item.postedTo"
+              (click)="togglePicker(item)"
+              [disabled]="item.posting || !!item.postedTo || !item.serverId"
+              [attr.aria-expanded]="item.picking"
+              [title]="item.serverId ? '' : 'Open a server to post rolls to its chat'">
+              <span class="material-icons" aria-hidden="true">{{ item.postedTo ? 'check' : 'forum' }}</span>
+              {{ postLabel(item) }}
+            </button>
+            @if (item.error) {
+              <span class="error" role="alert">{{ item.error }}</span>
+            }
+          </div>
+
+          @if (item.picking) {
+            <div class="picker" role="listbox" aria-label="Post to channel">
+              @for (channel of channels(); track channel._id) {
+                <button type="button" role="option" (click)="dice.post(item.id, channel._id!)">
+                  <span class="hash" aria-hidden="true">#</span>{{ channel.name }}
+                </button>
+              } @empty {
+                <span class="empty">This server has no text channels.</span>
+              }
+            </div>
+          }
+        </div>
+
+        <button type="button" class="dismiss" (click)="dice.dismiss(item.id)" aria-label="Dismiss roll">
+          <span class="material-icons" aria-hidden="true">close</span>
+        </button>
+
+        @if (item.countdownFrom; as started) {
+          @for (stamp of [started]; track stamp) {
+            <span class="countdown" [style.animation-duration.ms]="showForMs" aria-hidden="true"></span>
+          }
+        }
+      </article>
+    }
+  </section>
+}

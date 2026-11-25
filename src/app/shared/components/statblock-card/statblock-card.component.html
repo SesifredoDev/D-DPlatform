@@ -6,7 +6,9 @@
   [class.is-item]="kind === 'item'"
   [class.is-spell]="kind === 'spell'"
   [attr.aria-label]="kindLabel + ': ' + (name || 'Unnamed')"
-  (click)="onTextClick($event)">
+  (click)="onTextClick($event)"
+  (mousedown)="onTextMouseDown($event)"
+  (keydown)="onTextKeydown($event)">
   <header class="sb-head">
     <button
       type="button"
@@ -289,7 +291,7 @@
                       @if (field.value) {
                         <div>
                           <dt>{{ field.label }}</dt>
-                          <dd [innerHTML]="html(field.extraValue ? field.value + ' (' + field.extraValue + ')' : field.value)"></dd>
+                          <dd [attr.data-roll-label]="field.label" [innerHTML]="html(field.extraValue ? field.value + ' (' + field.extraValue + ')' : field.value)"></dd>
                         </div>
                       }
                     }
@@ -316,14 +318,14 @@
                         @if (entry.name) {
                           <strong class="sb-entry-name">{{ entry.name }}.</strong>
                         }
-                        <span [innerHTML]="html(entry.desc)"></span>
+                        <span [attr.data-roll-label]="entry.name || block.title" [innerHTML]="html(entry.desc)"></span>
                       </p>
                     }
                   </section>
                 } @else {
                   <section class="sb-section">
                     <h4>{{ block.title }}</h4>
-                    <p [innerHTML]="html(block.value)"></p>
+                    <p [attr.data-roll-label]="block.title" [innerHTML]="html(block.value)"></p>
                   </section>
                 }
               }
@@ -334,7 +336,7 @@
                 @for (field of extraFields; track field.key) {
                   <div>
                     <dt>{{ field.label }}</dt>
-                    <dd [innerHTML]="html(field.value)"></dd>
+                    <dd [attr.data-roll-label]="field.label" [innerHTML]="html(field.value)"></dd>
                   </div>
                 }
               </dl>
@@ -347,7 +349,7 @@
                     @if (entry.name) {
                       <strong class="sb-entry-name">{{ entry.name }}.</strong>
                     }
-                    <span [innerHTML]="html(entry.desc)"></span>
+                    <span [attr.data-roll-label]="entry.name || section.title" [innerHTML]="html(entry.desc)"></span>
                   </p>
                 }
               </section>
