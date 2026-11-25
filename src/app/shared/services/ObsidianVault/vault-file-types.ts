@@ -3,7 +3,7 @@
  * To support a new file type, add an entry here (and a viewer branch in the view template
  * if it needs a new `viewer`).
  */
-export type VaultFileViewer = 'markdown' | 'canvas' | 'image' | 'pdf' | 'download';
+export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'image' | 'pdf' | 'download';
 
 export interface VaultFileType {
   id: string;
@@ -35,6 +35,18 @@ export const VAULT_FILE_TYPES: readonly VaultFileType[] = [
     defaultExtension: 'md',
   },
   {
+    // Family trees: people, their relations and links to their notes (see family-tree.ts).
+    id: 'family-tree',
+    extensions: ['familytree'],
+    icon: 'family_restroom',
+    viewer: 'family-tree',
+    readAs: 'text',
+    editable: true,
+    label: 'Tree',
+    hideExtensionInTitle: true,
+    defaultExtension: 'familytree',
+  },
+  {
     id: 'canvas',
     extensions: ['canvas'],
     icon: 'account_tree',
@@ -44,6 +56,18 @@ export const VAULT_FILE_TYPES: readonly VaultFileType[] = [
     label: 'Canvas',
     hideExtensionInTitle: true,
     defaultExtension: 'canvas',
+  },
+  {
+    // Obsidian Bases: database views over notes and their properties.
+    id: 'base',
+    extensions: ['base'],
+    icon: 'table_chart',
+    viewer: 'database',
+    readAs: 'text',
+    editable: true,
+    label: 'Base',
+    hideExtensionInTitle: true,
+    defaultExtension: 'base',
   },
   {
     id: 'image',

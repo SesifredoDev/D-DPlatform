@@ -1,0 +1,281 @@
+<section class="properties" [class.is-open]="isOpen" aria-label="Properties">
+  <button
+    type="button"
+    class="properties-header"
+    (click)="toggleOpen()"
+    [attr.aria-expanded]="isOpen">
+    <mat-icon class="chevron" [class.is-open]="isOpen">chevron_right</mat-icon>
+    <span>Properties</span>
+    @if (rows.length) {
+      <span class="properties-count">{{ rows.length }}</span>
+    }
+  </button>
+
+  @if (isOpen) {
+    <div class="property-list" role="list">
+      @for (row of rows; track trackRow($index, row)) {
+        <div class="property" role="listitem" [class.is-complex]="row.shownType === 'complex'">
+          <div class="property-key">
+            @if (isEditable) {
+              <button
+                type="button"
+                class="type-btn"
+                [matMenuTriggerFor]="propertyMenu"
+                [matMenuTriggerData]="{ row: row }"
+                [matMenuTriggerRestoreFocus]="false"
+                [matTooltip]="labelFor(row.shownType) + ' · change type or remove'"
+                [attr.aria-label]="'Options for ' + row.key">
+                <mat-icon>{{ iconFor(row.shownType) }}</mat-icon>
+              </button>
+            } @else {
+              <mat-icon class="type-icon" [matTooltip]="labelFor(row.shownType)">{{ iconFor(row.shownType) }}</mat-icon>
+            }
+
+            @if (renamingKey === row.key) {
+              <span class="key-input-wrap">
+                <input
+                  id="prop-rename"
+                  class="key-input"
+                  [(ngModel)]="renameDraft"
+                  (ngModelChange)="renameError = ''"
+                  (keydown)="onRenameKeydown($event)"
+                  (blur)="commitRename()"
+                  aria-label="Property name"
+                  autocomplete="off"
+                  spellcheck="false">
+                @if (renameError) {
+                  <span class="field-error" role="alert">{{ renameError }}</span>
+                }
+              </span>
+            } @else {
+              <button
+                type="button"
+                class="key-label"
+                [disabled]="!isEditable"
+                (click)="startRename(row)"
+                [title]="isEditable ? 'Rename ' + row.key : row.key">
+                {{ row.key }}
+              </button>
+            }
+          </div>
+
+          <div class="property-value">
+            @switch (row.shownType) {
+              @case ('checkbox') {
+                <input
+                  type="checkbox"
+                  class="value-checkbox"
+                  [id]="valueInputId(row)"
+                  [checked]="row.value === 'true'"
+                  [disabled]="!isEditable"
+                  (change)="setScalar(row, $any($event.target).checked ? 'true' : 'false')"
+                  [attr.aria-label]="row.key">
+              }
+
+              @case ('date') {
+                <input
+                  type="date"
+                  class="value-input"
+                  [id]="valueInputId(row)"
+                  [value]="row.value"
+                  [readOnly]="!isEditable"
+                  (change)="setScalar(row, $any($event.target).value)"
+                  [attr.aria-label]="row.key">
+              }
+
+              @case ('datetime') {
+                <input
+                  type="datetime-local"
+                  class="value-input"
+                  [id]="valueInputId(row)"
+                  [value]="datetimeInputValue(row.value)"
+                  [readOnly]="!isEditable"
+                  (change)="setScalar(row, $any($event.target).value)"
+                  [attr.aria-label]="row.key">
+              }
+
+              @case ('list') {
+                <div class="value-list">
+                  @for (item of row.items; track $index) {
+                    <span class="value-chip">
+                      <span class="value-chip-label">
+                        @for (segment of itemSegments(item); track $index) {
+                          @if (segment.link) {
+                            <a href="#" class="value-link" (click)="onLinkClick($event, segment.link)" [title]="'Open ' + segment.link">{{ segment.text }}</a>
+                          } @else {
+                            {{ segment.text }}
+                          }
+                        }
+                      </span>
+                      @if (isEditable) {
+                        <button
+                          type="button"
+                          class="value-chip-remove"
+                          (click)="removeItem(row, $index)"
+                          [attr.aria-label]="'Remove ' + item">
+                          <mat-icon>close</mat-icon>
+                        </button>
+                      }
+                    </span>
+                  }
+                  @if (isEditable) {
+                    <span class="suggest-anchor">
+                      <input
+                        class="item-input"
+                        [id]="itemInputId(row)"
+                        [(ngModel)]="itemDrafts[row.key]"
+                        (input)="updateSuggest($event, row, 'item')"
+                        (focus)="updateSuggest($event, row, 'item')"
+                        (keydown)="onItemKeydown($event, row)"
+                        (blur)="onItemBlur(row)"
+                        [placeholder]="row.items.length ? '+' : 'Empty'"
+                        [attr.aria-label]="'Add to ' + row.key + ' (type [[ to link a note)'"
+                        autocomplete="off"
+                        spellcheck="false">
+                      @if (isSuggestFor(row, 'item')) {
+                        <ng-container [ngTemplateOutlet]="suggestions" [ngTemplateOutletContext]="{ row: row }"></ng-container>
+                      }
+                    </span>
+                  } @else if (!row.items.length) {
+                    <span class="value-empty">Empty</span>
+                  }
+                </div>
+              }
+
+              @case ('complex') {
+                <pre class="value-complex" [title]="'Nested values can only be edited in Obsidian'">{{ row.raw }}</pre>
+              }
+
+              @default {
+                @if (row.hasLinks && focusedKey !== row.key) {
+                  <div
+                    class="value-display"
+                    [class.is-editable]="isEditable"
+                    [attr.tabindex]="isEditable ? 0 : null"
+                    (click)="focusValue(row.key)"
+                    (keydown.enter)="focusValue(row.key)">
+                    @for (segment of row.segments; track $index) {
+                      @if (segment.link) {
+                        <a href="#" class="value-link" (click)="onLinkClick($event, segment.link)" [title]="'Open ' + segment.link">{{ segment.text }}</a>
+                      } @else {
+                        <span>{{ segment.text }}</span>
+                      }
+                    }
+                  </div>
+                } @else if (!isEditable) {
+                  <div class="value-display">
+                    @if (row.value) {
+                      {{ row.value }}
+                    } @else {
+                      <span class="value-empty">Empty</span>
+                    }
+                  </div>
+                } @else {
+                  <span class="suggest-anchor">
+                    <input
+                      class="value-input"
+                      [id]="valueInputId(row)"
+                      [type]="row.shownType === 'number' ? 'number' : 'text'"
+                      [ngModel]="focusedKey === row.key ? draft : row.value"
+                      (ngModelChange)="onDraftChange(row, ($event ?? '') + '')"
+                      (focus)="onValueFocus(row); updateSuggest($event, row, 'value')"
+                      (input)="updateSuggest($event, row, 'value')"
+                      (keydown)="onValueKeydown($event, row)"
+                      (blur)="onValueBlur(row)"
+                      placeholder="Empty"
+                      [attr.aria-label]="row.key + (row.shownType === 'text' ? ' (type [[ to link a note)' : '')"
+                      autocomplete="off"
+                      spellcheck="false">
+                    @if (isSuggestFor(row, 'value')) {
+                      <ng-container [ngTemplateOutlet]="suggestions" [ngTemplateOutletContext]="{ row: row }"></ng-container>
+                    }
+                  </span>
+                }
+              }
+            }
+          </div>
+        </div>
+      }
+
+      @if (isAdding) {
+        <div class="property is-new">
+          <div class="property-key">
+            <mat-icon class="type-icon">add</mat-icon>
+            <span class="key-input-wrap suggest-anchor">
+              <input
+                id="prop-new-key"
+                class="key-input"
+                [(ngModel)]="newKey"
+                (input)="updateSuggest($event, null, 'newKey')"
+                (focus)="updateSuggest($event, null, 'newKey')"
+                (keydown)="onNewKeyKeydown($event)"
+                (blur)="onNewKeyBlur()"
+                placeholder="Property name"
+                aria-label="New property name (Enter to add, Esc to cancel)"
+                autocomplete="off"
+                spellcheck="false">
+              @if (newKeyError) {
+                <span class="field-error" role="alert">{{ newKeyError }}</span>
+              } @else if (isSuggestFor(null, 'newKey')) {
+                <ng-container [ngTemplateOutlet]="suggestions" [ngTemplateOutletContext]="{ row: null }"></ng-container>
+              }
+            </span>
+          </div>
+        </div>
+      } @else if (isEditable) {
+        <button type="button" class="add-property" (click)="startAdding()">
+          <mat-icon>add</mat-icon>
+          Add property
+        </button>
+      }
+    </div>
+  }
+</section>
+
+<ng-template #suggestions let-row="row">
+  @if (suggest; as state) {
+    <span class="suggestions" role="listbox">
+      @for (item of state.items; track item.insert; let i = $index) {
+        <button
+          type="button"
+          role="option"
+          [class.is-active]="i === state.active"
+          [attr.aria-selected]="i === state.active"
+          (mousedown)="$event.preventDefault()"
+          (click)="pickSuggestion(item, row)">
+          @if (item.kind === 'link') {
+            <mat-icon>description</mat-icon>
+          }
+          <span class="suggestion-label">{{ item.label }}</span>
+          @if (item.detail) {
+            <span class="suggestion-detail">{{ item.detail }}</span>
+          }
+        </button>
+      }
+    </span>
+  }
+</ng-template>
+
+<mat-menu #propertyMenu="matMenu" panelClass="custom-glass-menu">
+  <ng-template matMenuContent let-row="row">
+    @if (row.shownType !== 'complex') {
+      @for (option of types; track option.type) {
+        <button mat-menu-item (click)="changeType(row, option.type)">
+          <mat-icon>{{ option.icon }}</mat-icon>
+          <span>{{ option.label }}</span>
+          @if (row.shownType === option.type) {
+            <mat-icon class="menu-check">check</mat-icon>
+          }
+        </button>
+      }
+    }
+    <button mat-menu-item (click)="startRename(row)">
+      <mat-icon>edit</mat-icon>
+      <span>Rename</span>
+    </button>
+    <button mat-menu-item (click)="remove(row)">
+      <mat-icon>delete</mat-icon>
+      <span>Remove property</span>
+    </button>
+  </ng-template>
+</mat-menu>

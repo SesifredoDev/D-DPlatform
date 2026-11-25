@@ -6,6 +6,13 @@ import { ObsidianVaultService } from './obsidian-vault-service';
 import { VaultIndexService } from './vault-index.service';
 import { inferImageMimeType, isVaultFileType } from './vault-file-types';
 import { SECRET_SELECTOR, stripSecrets } from './secrets';
+import { CALLOUT_ACTION_CLASS, CALLOUT_MARKER_CLASS, formatCalloutsForBroadcast, resolveCalloutType } from './callouts';
+
+/**
+ * Statblock cards and note embeds in the editor (see statblock-node-views.ts). They're interactive
+ * GM tools (edit fields, "Add to map"), so they're left out of broadcast HTML.
+ */
+const STATBLOCK_SELECTOR = '.statblock-node';
 
 /** Where a broadcast comes from: the vault and the note whose relative links should be resolved. */
 export interface VaultBroadcastContext {
@@ -69,7 +76,7 @@ export class ObsidianBroadcastService {
       const stripped = stripSecrets(request.markdown);
       removed = stripped.removed;
       const state = this.newTokenizeState();
-      data.text = await this.tokenizeMarkdownImages(request, stripped.markdown, state);
+      data.text = await this.tokenizeMarkdownImages(request, formatCalloutsForBroadcast(stripped.markdown), state);
       data.embeddedFiles = state.embeddedFiles;
       data.htmlContent = request.html === undefined ? undefined : removeSecretElements(request.html);
       data.preferTextForBroadcast = true;
@@ -98,6 +105,8 @@ export class ObsidianBroadcastService {
     container.appendChild(range.cloneContents());
     const secretElements = container.querySelectorAll(SECRET_SELECTOR);
     secretElements.forEach(element => element.remove());
+    container.querySelectorAll(`.${CALLOUT_ACTION_CLASS}, ${STATBLOCK_SELECTOR}`).forEach(element => element.remove());
+    formatCalloutElements(container);
     // Text from the cleaned HTML (selection.toString() would still include the secrets), then
     // strip any secret syntax the editor didn't mark.
     const stripped = stripSecrets(selectionText(container));
@@ -118,7 +127,7 @@ export class ObsidianBroadcastService {
     }
 
     const data: BroadcastData = {
-      text: await this.tokenizeMarkdownImages(context, stripped.markdown, state),
+      text: await this.tokenizeMarkdownImages(context, formatCalloutsForBroadcast(stripped.markdown), state),
       embeddedFiles: state.embeddedFiles,
       htmlContent: container.innerHTML,
       source: 'obsidian-view-selection',
@@ -130,6 +139,25 @@ export class ObsidianBroadcastService {
 
     this.openDialog(data);
     return { removed, allSecret: false };
+  }
+
+  /**
+   * Broadcasts a single block (a read-aloud callout's Broadcast button): its Markdown and rendered
+   * HTML, with GM secrets removed and the callout header turned into a bold title.
+   */
+  async broadcastBlock(context: VaultBroadcastContext, block: { markdown: string; html: string }): Promise<BroadcastSecretsReport> {
+    const stripped = stripSecrets(block.markdown);
+    const state = this.newTokenizeState();
+    const data: BroadcastData = {
+      source: 'obsidian-view-read-aloud',
+      text: await this.tokenizeMarkdownImages(context, formatCalloutsForBroadcast(stripped.markdown), state),
+      embeddedFiles: state.embeddedFiles,
+      htmlContent: block.html ? removeSecretElements(block.html) : undefined,
+      preferTextForBroadcast: true,
+    };
+
+    this.openDialog(data);
+    return { removed: stripped.removed, allSecret: false };
   }
 
   /** Broadcasts a right-clicked image, sending the vault file itself when it can be resolved. */
@@ -281,12 +309,59 @@ async function replaceAsync(
   return output + input.slice(lastIndex);
 }
 
-/** Removes GM-only elements (as marked by the editor) from an HTML string. */
+/** Removes GM-only elements (as marked by the editor) from an HTML string and tidies callouts. */
 function removeSecretElements(html: string): string {
   const container = document.createElement('div');
   container.innerHTML = html;
-  container.querySelectorAll(SECRET_SELECTOR).forEach(element => element.remove());
+  container.querySelectorAll(`${SECRET_SELECTOR}, .${CALLOUT_ACTION_CLASS}, ${STATBLOCK_SELECTOR}`).forEach(element => element.remove());
+  formatCalloutElements(container);
   return container.innerHTML;
+}
+
+/**
+ * Replaces the editor's `[!type]` marker spans with a bold title, so players see "Read aloud" or
+ * the callout's own title instead of the raw syntax.
+ */
+function formatCalloutElements(container: HTMLElement): void {
+  container.querySelectorAll<HTMLElement>(`.${CALLOUT_MARKER_CLASS}`).forEach(marker => {
+    const line = marker.parentElement;
+    const label = marker.closest('[data-callout-label]')?.getAttribute('data-callout-label')
+      ?? resolveCalloutType(marker.textContent?.match(/\[!([\w-]+)\]/)?.[1] ?? 'note').label;
+    marker.remove();
+    if (!line) return;
+
+    // The header is everything up to the first line break; the rest of the paragraph is body text.
+    const title: Node[] = [];
+    let rest: Node[] = [];
+    const children = Array.from(line.childNodes);
+    for (let i = 0; i < children.length; i++) {
+      const node = children[i];
+      // Milkdown renders soft line breaks as <span data-type="hardbreak">, hard ones as <br>.
+      if (node.nodeName === 'BR' || (node instanceof HTMLElement && node.dataset['type'] === 'hardbreak')) {
+        rest = children.slice(i + 1);
+        break;
+      }
+      const newline = node.nodeType === Node.TEXT_NODE ? (node.textContent ?? '').indexOf('\n') : -1;
+      if (newline >= 0) {
+        const text = node.textContent ?? '';
+        title.push(document.createTextNode(text.slice(0, newline)));
+        rest = [document.createTextNode(text.slice(newline + 1)), ...children.slice(i + 1)];
+        break;
+      }
+      title.push(node);
+    }
+
+    const strong = document.createElement('strong');
+    if (title.some(node => (node.textContent ?? '').trim())) {
+      if (title[0]?.nodeType === Node.TEXT_NODE) {
+        title[0].textContent = (title[0].textContent ?? '').trimStart();
+      }
+      strong.append(...title);
+    } else {
+      strong.textContent = label;
+    }
+    line.replaceChildren(strong, ...(rest.length ? [document.createElement('br'), ...rest] : []));
+  });
 }
 
 const BLOCK_TAGS = /^(P|H[1-6]|LI|UL|OL|BLOCKQUOTE|PRE|DIV|TABLE|TR)$/;

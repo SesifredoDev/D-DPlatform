@@ -58,6 +58,15 @@ export interface VttCharacterTokenPayload {
   name: string;
   icon: string | null;
   ownerId: string | null;
+  /** Defaults to true (a player character). Creatures from statblocks are false. */
+  isPlayer?: boolean;
+  maxHealth?: number | null;
+  currentHealth?: number | null;
+  /** Size in grid squares (1 = Medium, 2 = Large…). */
+  size?: number;
+  notes?: string;
+  /** When set and the turn order is running, the token is added to it with this initiative. */
+  initiative?: number | null;
 }
 
 export interface VttAddCharacterTokenCommand {

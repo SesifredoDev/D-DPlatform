@@ -1,0 +1,763 @@
+// Family tree. Uses the vault view's --vv-* tokens (inherited from its host).
+
+:host {
+  display: block;
+  height: 100%;
+  min-height: 0;
+}
+
+:host *,
+:host *::before,
+:host *::after {
+  box-sizing: border-box;
+}
+
+:host mat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.family {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--vv-text);
+  font-size: 13px;
+}
+
+.tree-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--vv-border);
+}
+
+.field {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--vv-border);
+  border-radius: var(--radius-s, 6px);
+  outline: 0;
+  background: var(--vv-field-bg);
+  color: var(--vv-text);
+  color-scheme: dark;
+
+  &:focus {
+    border-color: rgba(var(--vv-accent-rgb), 0.6);
+  }
+}
+
+textarea.field {
+  height: auto;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.text-action {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--vv-border);
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+  }
+
+  &:hover:not(:disabled) {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  &.is-primary {
+    border-color: transparent;
+    background: var(--vv-accent);
+    color: #fff;
+
+    &:hover:not(:disabled) {
+      background: var(--vv-accent);
+      color: #fff;
+      filter: brightness(1.1);
+    }
+  }
+
+  &.is-danger {
+    align-self: flex-start;
+    color: var(--vv-danger, #f0716b);
+
+    &:hover {
+      color: var(--vv-danger, #f0716b);
+    }
+  }
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.summary {
+  color: var(--vv-text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.icon-action {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text-3);
+  cursor: pointer;
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+}
+
+.segmented {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: 2px;
+  border-radius: var(--radius-s, 6px);
+  background: var(--vv-field-bg);
+
+  button {
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vv-text-3);
+    font-size: 12px;
+    cursor: pointer;
+
+    &.is-active {
+      background: var(--vv-selected);
+      color: var(--vv-text);
+    }
+  }
+}
+
+.tree-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  outline: 0;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &:focus-visible {
+    box-shadow: inset 0 0 0 2px rgba(var(--vv-accent-rgb), 0.6);
+  }
+}
+
+.tree-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.connector {
+  fill: none;
+  stroke: var(--vv-text-3);
+  stroke-width: 1.5;
+  opacity: 0.7;
+
+  &.is-spouse {
+    stroke: var(--vv-accent);
+    stroke-width: 2;
+    opacity: 0.85;
+  }
+}
+
+.person {
+  cursor: pointer;
+  outline: 0;
+
+  .card {
+    fill: var(--vv-field-bg);
+    stroke: var(--vv-border);
+    stroke-width: 1;
+  }
+
+  .card-bg {
+    fill: var(--vv-main-bg, #2b2d31);
+  }
+
+  .stripe {
+    fill: var(--vv-accent);
+  }
+
+  .portrait-ring {
+    fill: var(--vv-field-bg);
+    stroke: var(--vv-border);
+  }
+
+  .name {
+    fill: var(--vv-text);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .details {
+    fill: var(--vv-text-3);
+    font-size: 12px;
+  }
+
+  &:hover .card {
+    stroke: rgba(var(--vv-accent-rgb), 0.6);
+  }
+
+  &.is-missing {
+    .card {
+      stroke-dasharray: 5 4;
+    }
+
+    .stripe {
+      fill: var(--vv-text-3);
+    }
+  }
+
+  &.is-selected .card,
+  &:focus-visible .card {
+    stroke: var(--vv-accent);
+    stroke-width: 2;
+  }
+}
+
+.tree-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--vv-text-3);
+  text-align: center;
+
+  > mat-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 36px;
+  }
+
+  .hint {
+    max-width: 340px;
+    font-size: 12px;
+  }
+}
+
+// ---- Person panel ----
+
+.person-panel {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--vv-border);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--vv-border);
+
+  > mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    color: var(--vv-text-3);
+  }
+}
+
+.panel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+}
+
+.panel-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .label {
+    color: var(--vv-text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}
+
+.linked-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+
+  > mat-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+    color: var(--vv-accent);
+  }
+
+  &.is-missing > mat-icon {
+    color: var(--vv-text-3);
+  }
+}
+
+.note-link,
+.note-missing {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.note-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vv-accent);
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.note-missing {
+  color: var(--vv-text-3);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.picker-row {
+  display: flex;
+  gap: 6px;
+
+  .field {
+    flex: 1 1 auto;
+  }
+}
+
+.picker-empty {
+  color: var(--vv-text-3);
+  font-size: 12px;
+}
+
+.picker-error {
+  color: var(--vv-danger, #f0716b);
+  font-size: 12px;
+}
+
+.suggestions {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--vv-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--vv-field-bg);
+
+  button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vv-text);
+    text-align: left;
+    cursor: pointer;
+
+    mat-icon {
+      width: 16px;
+      height: 16px;
+      font-size: 16px;
+      color: var(--vv-text-3);
+    }
+
+    &:hover,
+    &.is-active {
+      background: var(--vv-hover);
+    }
+  }
+}
+
+.suggestion-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text-3);
+  font-size: 11.5px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--vv-border);
+  border-radius: 999px;
+
+  button {
+    border: 0;
+    background: transparent;
+    color: var(--vv-text);
+    cursor: pointer;
+  }
+}
+
+.chip-label {
+  padding: 2px 4px 2px 10px;
+
+  &:hover {
+    color: var(--vv-accent);
+  }
+}
+
+.chip-remove {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+
+  mat-icon {
+    width: 14px;
+    height: 14px;
+    font-size: 14px;
+    color: var(--vv-text-3);
+  }
+
+  &:hover mat-icon {
+    color: var(--vv-text);
+  }
+}
+
+.text-action:focus-visible,
+.icon-action:focus-visible,
+.segmented button:focus-visible,
+.chip button:focus-visible,
+.suggestions button:focus-visible {
+  outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+  outline-offset: 1px;
+}
+
+.portrait-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.portrait-preview {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+  border: 1px solid var(--vv-border);
+  border-radius: 50%;
+  object-fit: cover;
+
+  &.is-empty {
+    display: grid;
+    place-items: center;
+    background: var(--vv-field-bg);
+    color: var(--vv-text-3);
+
+    mat-icon {
+      width: 28px;
+      height: 28px;
+      font-size: 28px;
+    }
+  }
+}
+
+.portrait-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.portrait-source {
+  overflow: hidden;
+  color: var(--vv-text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portrait-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  label.text-action:focus-within {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+    outline-offset: 1px;
+  }
+
+  .is-busy {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+}
+
+// ---- "Choose from vault" picker ----
+
+.portrait-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.portrait-dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 21;
+  width: min(720px, calc(100% - 32px));
+  max-height: min(640px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--vv-border);
+  border-radius: var(--radius-m, 10px);
+  background: var(--vv-main-bg, #2b2d31);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  color: var(--vv-text);
+}
+
+.portrait-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 6px 16px;
+}
+
+.portrait-dialog-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portrait-dialog-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid var(--vv-border);
+
+  .field {
+    flex: 1 1 220px;
+  }
+
+  .is-busy {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+}
+
+.portrait-grid {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  align-content: start;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+
+.portrait-option {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text);
+  text-align: left;
+  cursor: pointer;
+
+  img,
+  .portrait-option-placeholder {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 4px;
+    background: var(--vv-field-bg);
+    object-fit: cover;
+  }
+
+  .portrait-option-placeholder {
+    display: grid;
+    place-items: center;
+    color: var(--vv-text-3);
+  }
+
+  &:hover {
+    background: var(--vv-hover);
+  }
+
+  &.is-current {
+    border-color: var(--vv-accent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+    outline-offset: 1px;
+  }
+}
+
+.portrait-option-name,
+.portrait-option-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.portrait-option-name {
+  font-size: 12px;
+}
+
+.portrait-option-path {
+  color: var(--vv-text-3);
+  font-size: 11px;
+}
+
+.portrait-grid-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 0;
+  color: var(--vv-text-3);
+}
+
+.portrait-dialog-footer {
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--vv-border);
+  color: var(--vv-text-3);
+  font-size: 12px;
+}
+
+// Narrow screens: the person panel slides up over the bottom of the tree.
+@media (max-width: 700px) {
+  .tree-toolbar {
+    padding-inline: 10px;
+  }
+
+  .person-panel {
+    position: absolute;
+    inset: auto 0 0 0;
+    max-height: 65%;
+    border-top: 1px solid var(--vv-border);
+    border-left: 0;
+    background: var(--surface, #1e1f22);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
+  }
+}

@@ -25,6 +25,14 @@ describe('vault file types', () => {
     expect(getVaultFileTypeLabel('README')).toBe('File');
   });
 
+  it('recognises family tree files', () => {
+    expect(getVaultFileType('Houses/Stark.familytree').viewer).toBe('family-tree');
+    expect(getVaultFileType('Stark.FamilyTree').id).toBe('family-tree');
+    expect(getVaultFileType('Stark.family.canvas').id).toBe('canvas');
+    expect(getVaultDisplayName('Stark.familytree')).toBe('Stark');
+    expect(getVaultFileTypeLabel('Stark.familytree')).toBe('Tree');
+  });
+
   it('infers image mime types', () => {
     expect(inferImageMimeType('a.jpg')).toBe('image/jpeg');
     expect(inferImageMimeType('a.svg')).toBe('image/svg+xml');

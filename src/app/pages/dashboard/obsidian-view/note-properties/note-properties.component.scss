@@ -1,0 +1,462 @@
+// Properties panel above the note. Uses the vault view's --vv-* tokens (inherited from its host).
+
+:host {
+  // Sits inside the editor's scroll area, lined up with the note text (the global .ProseMirror
+  // gutter in styles.scss is 85px on the left).
+  display: block;
+  padding: 16px 5px 0 85px;
+
+  &.is-hidden {
+    display: none;
+  }
+}
+
+:host *,
+:host *::before,
+:host *::after {
+  box-sizing: border-box;
+}
+
+:host mat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.properties-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px 0 2px;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text-3);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text-2);
+  }
+}
+
+.chevron {
+  width: 16px;
+  height: 16px;
+  font-size: 16px;
+  transition: transform 120ms ease;
+
+  &.is-open {
+    transform: rotate(90deg);
+  }
+}
+
+.properties-count {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.property-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 4px 0 2px;
+}
+
+.property {
+  display: grid;
+  grid-template-columns: minmax(110px, 180px) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 4px;
+  border-radius: var(--radius-s, 6px);
+
+  &:hover,
+  &:focus-within {
+    background: var(--vv-hover);
+  }
+}
+
+.property-key {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  color: var(--vv-text-3);
+  font-size: 13px;
+}
+
+.type-btn,
+.type-icon {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  color: var(--vv-text-3);
+
+  mat-icon,
+  &.type-icon {
+    font-size: 16px;
+  }
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.type-btn {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+}
+
+.key-label {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+
+  &:not(:disabled):hover {
+    color: var(--vv-text-2);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.property-value {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  color: var(--vv-text);
+  font-size: 13px;
+}
+
+.key-input-wrap,
+.suggest-anchor {
+  position: relative;
+  min-width: 0;
+  display: inline-flex;
+}
+
+.suggest-anchor {
+  flex: 1 1 auto;
+}
+
+.key-input,
+.value-input,
+.item-input {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-s, 6px);
+  outline: 0;
+  background: transparent;
+  color: var(--vv-text);
+  font-size: 13px;
+  color-scheme: dark;
+
+  &::placeholder {
+    color: var(--vv-text-3);
+    opacity: 0.7;
+  }
+
+  &:hover {
+    background: var(--vv-field-bg);
+  }
+
+  &:focus {
+    border-color: rgba(var(--vv-accent-rgb), 0.6);
+    background: var(--vv-field-bg);
+  }
+
+  &[readonly] {
+    pointer-events: none;
+  }
+}
+
+.key-input {
+  color: var(--vv-text-2);
+}
+
+.item-input {
+  flex: 1 1 60px;
+  width: auto;
+  min-width: 60px;
+}
+
+.value-input[type='date'],
+.value-input[type='datetime-local'] {
+  width: auto;
+}
+
+.value-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0 6px;
+  accent-color: var(--vv-accent);
+  cursor: pointer;
+}
+
+.value-display {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 3px 7px;
+  border-radius: var(--radius-s, 6px);
+  overflow-wrap: anywhere;
+
+  &.is-editable {
+    cursor: text;
+
+    &:hover {
+      background: var(--vv-field-bg);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+  }
+}
+
+.value-link {
+  color: var(--vv-accent);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.value-empty {
+  color: var(--vv-text-3);
+  opacity: 0.7;
+}
+
+.value-list {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.value-chip {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: var(--radius-pill, 999px);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--vv-text-2);
+  font-size: 12px;
+}
+
+.value-chip-label {
+  overflow: hidden;
+  padding: 0 4px 0 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  .value-chip:not(:has(.value-chip-remove)) & {
+    padding-right: 9px;
+  }
+}
+
+.value-chip-remove {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  margin-right: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vv-text-3);
+  cursor: pointer;
+
+  mat-icon {
+    width: 12px;
+    height: 12px;
+    font-size: 12px;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--vv-text);
+  }
+}
+
+.value-complex {
+  max-height: 120px;
+  margin: 2px 0;
+  overflow: auto;
+  padding: 4px 7px;
+  border-radius: var(--radius-s, 6px);
+  background: var(--vv-field-bg);
+  color: var(--vv-text-3);
+  font-family: var(--font-family-mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.add-property {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  margin-top: 2px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text-3);
+  font-size: 13px;
+  cursor: pointer;
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+
+  &:hover {
+    background: var(--vv-hover);
+    color: var(--vv-text);
+  }
+}
+
+.type-btn:focus-visible,
+.key-label:focus-visible,
+.add-property:focus-visible,
+.properties-header:focus-visible,
+.value-chip-remove:focus-visible {
+  outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+  outline-offset: 1px;
+}
+
+.suggestions,
+.field-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+}
+
+.suggestions {
+  min-width: 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-m, 8px);
+  background: var(--surface, #1e1f22);
+  box-shadow: var(--shadow-2);
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: var(--radius-s, 6px);
+    background: transparent;
+    color: var(--vv-text-2);
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+
+    mat-icon {
+      flex: 0 0 14px;
+      width: 14px;
+      height: 14px;
+      font-size: 14px;
+      color: var(--vv-text-3);
+    }
+
+    &:hover,
+    &.is-active {
+      background: var(--vv-hover);
+      color: var(--vv-text);
+    }
+
+    &.is-active {
+      background: rgba(var(--vv-accent-rgb), 0.18);
+    }
+  }
+}
+
+.suggestion-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-detail {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--vv-text-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.field-error {
+  padding: 4px 8px;
+  border-radius: var(--radius-s, 6px);
+  background: var(--surface, #1e1f22);
+  color: var(--vv-danger);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.menu-check {
+  margin-left: auto;
+  margin-right: 0 !important;
+}
+
+@media (max-width: 480px) {
+  :host {
+    padding: 8px 4px 0 28px;
+  }
+
+  .property {
+    grid-template-columns: minmax(90px, 38%) minmax(0, 1fr);
+  }
+}

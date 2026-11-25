@@ -1,5 +1,7 @@
 import {
+  ApplicationRef,
   Component,
+  EnvironmentInjector,
   ElementRef,
   EventEmitter,
   Input,
@@ -13,20 +15,23 @@ import {
 } from '@angular/core';
 import { Crepe } from '@milkdown/crepe';
 import { wikilinkPlugin } from './wikilink-plugin';
-import { editorViewCtx, editorViewOptionsCtx } from '@milkdown/core';
-import { SECRET_MENU_ICON, insertSecretBlock, secretBlocksPlugin } from './secret-blocks-plugin';
+import { editorViewCtx, editorViewOptionsCtx, serializerCtx } from '@milkdown/core';
+import { Selection } from '@milkdown/prose/state';
+import { insert } from '@milkdown/utils';
+import { CALLOUT_MENU_ITEMS, SECRET_MENU_ICON, SECRET_TEMPLATE, calloutPlugin, insertCallout } from './callout-plugin';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
-import { DndStatsheetService } from '../../services/ObsidianVault/dnd-statsheet.service';
 import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 import { WikilinkCandidate, wikilinkSuggestPlugin } from './wikilink-suggest-plugin';
-import { dndStatsheetNodeViewPlugin } from './dnd-statsheet-node-view';
+import { StatblockViewHost, statblockNodeViewsPlugin } from './statblock-node-views';
+import { createStatblockPaste } from './statblock-paste-plugin';
 
 @Component({
   selector: 'app-milkdown-editor',
   standalone: true,
-  template: `<div #editorRef class="milkdown-container"></div>`,
+  // Projected content (e.g. the note's properties) sits above the text and scrolls with it.
+  template: `<div class="milkdown-container"><ng-content></ng-content><div #editorRef class="milkdown-root"></div></div>`,
   styleUrls: ['./milkdown-editor.component.scss'],
   encapsulation: ViewEncapsulation.None,
 })
@@ -51,6 +56,17 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
   @Output() linkHover = new EventEmitter<{ target: string; rect: DOMRect } | null>();
 
   private hoveredLink: HTMLElement | null = null;
+  /** Set once the note is clicked or typed into, so inserts go at the cursor rather than the top. */
+  private cursorPlaced = false;
+
+  /**
+   * A read-aloud block's Broadcast button was clicked: the block as Markdown and as rendered HTML.
+   * Read-aloud blocks only show the button when something listens to this.
+   */
+  @Output() blockBroadcast = new EventEmitter<{ markdown: string; html: string }>();
+
+  /** A statblock saved a picture into the vault, so the file list should be refreshed. */
+  @Output() filesAdded = new EventEmitter<void>();
 
   private crepe?: Crepe;
   /** Full note text (frontmatter + body) as last loaded or emitted. */
@@ -77,9 +93,23 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   constructor(
     private vaultService: ObsidianVaultService,
-    private statsheetService: DndStatsheetService,
-    private vaultIndexService: VaultIndexService
-  ) {}
+    private vaultIndexService: VaultIndexService,
+    appRef: ApplicationRef,
+    injector: EnvironmentInjector
+  ) {
+    this.statblockHost = {
+      appRef,
+      injector,
+      serverId: () => this.serverId,
+      filePath: () => this.currentFilePath,
+      readonly: () => this.isPreview,
+      openLink: link => this.onLinkClick.emit(link),
+      filesAdded: () => this.filesAdded.emit(),
+    };
+  }
+
+  /** Lets statblock cards and note embeds (Angular components inside the editor) reach this editor. */
+  private readonly statblockHost: StatblockViewHost;
 
   /** Notes offered by `[[` autocomplete: every file in this server's vault except the open one. */
   private readonly wikilinkCandidates = (): WikilinkCandidate[] => {
@@ -155,19 +185,20 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
     const { block, body } = splitFrontmatter(this.markdown);
     this.frontmatter = block;
+    this.cursorPlaced = false;
 
     const localCrepe = new Crepe({
       root: this.editorRef.nativeElement,
       defaultValue: body,
       featureConfigs: {
-        // "GM secret" in the + / slash block menu, next to Quote.
+        // + / slash block menu: "GM secret" next to Quote, plus a "Callouts" group.
         [Crepe.Feature.BlockEdit]: {
           buildMenu: builder => {
             const textGroup = builder.getGroup('text');
             textGroup.addItem('gm-secret', {
               label: 'GM secret',
               icon: SECRET_MENU_ICON,
-              onRun: ctx => insertSecretBlock(ctx.get(editorViewCtx), { replaceCurrentLine: true }),
+              onRun: ctx => insertCallout(ctx.get(editorViewCtx), SECRET_TEMPLATE, { replaceCurrentLine: true }),
             });
             // Show it right after Quote rather than at the end of the group.
             const items = textGroup.group.items;
@@ -175,19 +206,37 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
             if (quoteAt >= 0) {
               items.splice(quoteAt + 1, 0, items.pop()!);
             }
+
+            const callouts = builder.addGroup('callouts', 'Callouts');
+            for (const item of CALLOUT_MENU_ITEMS) {
+              callouts.addItem(item.key, {
+                label: item.label,
+                icon: item.icon,
+                onRun: ctx => insertCallout(ctx.get(editorViewCtx), item.template, { replaceCurrentLine: true }),
+              });
+            }
           },
         },
       },
     });
 
+    const statblockPaste = createStatblockPaste();
     localCrepe.editor
       .config((ctx) => {
-        ctx.set(editorViewOptionsCtx, { editable: () => !this.isPreview });
+        ctx.set(editorViewOptionsCtx, {
+          editable: () => !this.isPreview,
+          // Runs before the editor's clipboard plugin, which would otherwise take every paste.
+          handlePaste: (view, event) => statblockPaste.handlePaste(view, event),
+        });
       })
-      .use(dndStatsheetNodeViewPlugin(this.statsheetService))
+      .use(statblockPaste.plugin)
+      .use(statblockNodeViewsPlugin(this.statblockHost))
       .use(wikilinkPlugin)
       .use(wikilinkSuggestPlugin(this.wikilinkCandidates))
-      .use(secretBlocksPlugin);
+      .use(calloutPlugin({
+        canBroadcast: () => this.blockBroadcast.observed,
+        onBroadcastBlock: pos => this.emitBlockBroadcast(pos),
+      }));
 
     localCrepe.on((listener) => {
       listener.markdownUpdated((ctx, markdown, prevMarkdown) => {
@@ -224,6 +273,9 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
         e.preventDefault();
       }
     };
+
+    this.editorRef.nativeElement.onmousedown = () => (this.cursorPlaced = true);
+    this.editorRef.nativeElement.onkeydown = () => (this.cursorPlaced = true);
 
     this.editorRef.nativeElement.onmouseover = (e: MouseEvent) => {
       const link = (e.target as HTMLElement).closest('a');
@@ -420,8 +472,39 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
    */
   insertSecretBlock(): boolean {
     if (!this.crepe || this.isPreview) return false;
-    this.crepe.editor.action(ctx => insertSecretBlock(ctx.get(editorViewCtx)));
+    this.crepe.editor.action(ctx => insertCallout(ctx.get(editorViewCtx), SECRET_TEMPLATE));
     return true;
+  }
+
+  /**
+   * Inserts Markdown (e.g. a statblock block or an `![[embed]]`) at the cursor, or at the end of the
+   * note if it hasn't been clicked into yet. Returns false if the editor isn't ready or is read-only.
+   */
+  insertMarkdown(markdown: string): boolean {
+    if (!this.crepe || this.isPreview) return false;
+    const editor = this.crepe.editor;
+    if (!this.cursorPlaced) {
+      editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)));
+      });
+    }
+    editor.action(insert(markdown));
+    this.cursorPlaced = true;
+    return true;
+  }
+
+  /** Serialises the block at `pos` (a read-aloud callout) and emits it for broadcasting. */
+  private emitBlockBroadcast(pos: number): void {
+    this.crepe?.editor.action(ctx => {
+      const view = ctx.get(editorViewCtx);
+      const node = view.state.doc.nodeAt(pos);
+      if (!node) return;
+
+      const markdown = ctx.get(serializerCtx)(view.state.schema.topNodeType.create(null, [node]));
+      const dom = view.nodeDOM(pos);
+      this.blockBroadcast.emit({ markdown, html: dom instanceof HTMLElement ? dom.outerHTML : '' });
+    });
   }
 
   ngOnDestroy() {

@@ -3,6 +3,12 @@ import { CommonModule } from '@angular/common';
 import { ObsidianVaultService, VaultConflictError, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
 import { TextSegment, highlightTerms } from '../../../shared/services/ObsidianVault/vault-search-utils';
 import { VaultQuickSwitcherComponent } from './quick-switcher/quick-switcher.component';
+import { NotePropertiesComponent } from './note-properties/note-properties.component';
+import { DatabaseNewNote, DatabasePropertyChange, DatabaseViewComponent } from './database-view/database-view.component';
+import { NEW_BASE_CONTENT, QUEST_TRACKER_CONTENT } from '../../../shared/services/ObsidianVault/bases';
+import { VaultGraphComponent } from './graph-view/graph-view.component';
+import { FamilyTreeComponent } from './family-tree/family-tree.component';
+import { emptyFamilyTree, isFamilyTreePath } from '../../../shared/services/ObsidianVault/family-tree';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -14,13 +20,24 @@ import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { MilkdownEditorComponent } from '../../../shared/components/milkdown-editor/milkdown-editor.component';
 import { ObsidianCanvasEditorComponent } from '../../../shared/components/obsidian-canvas-editor/obsidian-canvas-editor.component';
-import { DndStatsheetService } from '../../../shared/services/ObsidianVault/dnd-statsheet.service';
-import { BacklinkMention, VaultIndex, VaultIndexService, extractInlineTags } from '../../../shared/services/ObsidianVault/vault-index.service';
-import { normalizeTagInput, readFrontmatterTags, setFrontmatterTags } from '../../../shared/services/ObsidianVault/frontmatter';
+import { BlockKind, blockIcon, blockNoun, canAddToMap, findStatblocks, newStatblockNote, newStatblockSource, parseStatblock, statblockFence } from '../../../shared/services/ObsidianVault/statblock';
+import { STATBLOCK_SYSTEMS, StatblockSystem, getStatblockSystem, systemsFor } from '../../../shared/services/ObsidianVault/statblock-systems';
+import { StatblockVttService } from '../../../shared/services/ObsidianVault/statblock-vtt.service';
+import { NoteInsertService, NoteInsertTarget } from '../../../shared/services/ObsidianVault/note-insert.service';
+import { BacklinkMention, GraphColorGroup, PropertyTypeMap, VaultIndex, VaultIndexService, extractInlineTags } from '../../../shared/services/ObsidianVault/vault-index.service';
+import {
+  PropertyValue,
+  normalizeTagInput,
+  readFrontmatterTags,
+  removeProperty,
+  setFrontmatterTags,
+  setProperty,
+} from '../../../shared/services/ObsidianVault/frontmatter';
+import { writeNoteProperty } from '../../../shared/services/ObsidianVault/note-property-writer';
 import { rewriteMovedLinks } from '../../../shared/services/ObsidianVault/link-rewrite';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { BroadcastSecretsReport, ObsidianBroadcastService, VaultImageBroadcast } from '../../../shared/services/ObsidianVault/obsidian-broadcast.service';
-import { NOTE_TEMPLATES, findNoteTemplate, loadNoteTemplate } from '../../../shared/services/ObsidianVault/note-templates';
+import { NOTE_TEMPLATES, findNoteTemplate, findTemplateForTags, loadNoteTemplate } from '../../../shared/services/ObsidianVault/note-templates';
 import {
   VaultFileType,
   getVaultDisplayName,
@@ -73,7 +90,29 @@ interface PendingSave {
 type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
 
 const NO_VIEW: ActiveView = { kind: 'none' };
+
+
+const STATBLOCK_SYSTEM_STORAGE_KEY = 'obsidian-view.statblock-system';
+
+type NewFileKind = 'note' | 'statblock' | 'item' | 'spell' | 'canvas' | 'database' | 'family';
+
+/** The block kind a "New …" file kind creates, if it's a statblock, item or spell. */
+const NEW_BLOCK_KINDS: Partial<Record<NewFileKind, BlockKind>> = { statblock: 'creature', item: 'item', spell: 'spell' };
+const NEW_FILE_KINDS: Record<NewFileKind, { typeId: string; label: string; icon: string; placeholder: string }> = {
+  note: { typeId: 'markdown', label: 'note', icon: 'note_add', placeholder: 'e.g. Session notes' },
+  statblock: { typeId: 'markdown', label: 'statblock', icon: blockIcon('creature'), placeholder: 'e.g. Goblin' },
+  item: { typeId: 'markdown', label: 'item', icon: blockIcon('item'), placeholder: 'e.g. Flame Tongue' },
+  spell: { typeId: 'markdown', label: 'spell', icon: blockIcon('spell'), placeholder: 'e.g. Fireball' },
+  canvas: { typeId: 'canvas', label: 'canvas', icon: 'account_tree', placeholder: 'e.g. Heist plan' },
+  database: { typeId: 'base', label: 'database', icon: 'table_chart', placeholder: 'e.g. NPCs' },
+  family: { typeId: 'family-tree', label: 'family tree', icon: 'family_restroom', placeholder: 'e.g. House Stark' },
+};
 const LINKS_PANEL_STORAGE_KEY = 'obsidian-view.links-panel-open';
+const GRAPH_TYPE_STORAGE_KEY = 'obsidian-view.graph-type';
+
+/** The graph page's kinds: the vault's link graph, or a family tree built by hand. */
+export type GraphType = 'links' | 'family';
+
 const TAGS_SECTION_STORAGE_KEY = 'obsidian-view.tags-open';
 const RECENT_FILES_STORAGE_PREFIX = 'obsidian-view.recent.';
 const MAX_RECENT_FILES = 10;
@@ -138,7 +177,11 @@ interface ContentHit {
     MatMenuModule,
     MilkdownEditorComponent,
     ObsidianCanvasEditorComponent,
-    VaultQuickSwitcherComponent
+    VaultQuickSwitcherComponent,
+    NotePropertiesComponent,
+    DatabaseViewComponent,
+    VaultGraphComponent,
+    FamilyTreeComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -168,9 +211,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   vaultError: string | null = null;
 
   readonly noteTemplates = NOTE_TEMPLATES;
+  /** Game system for new statblocks and items (remembered; both kinds share the ids). */
+  newStatblockSystemId = readStoredValue(STATBLOCK_SYSTEM_STORAGE_KEY) ?? STATBLOCK_SYSTEMS[0].id;
 
   isCreatingFile = false;
-  newFileKind: 'note' | 'canvas' = 'note';
+  newFileKind: NewFileKind = 'note';
   newFileName = '';
   selectedTemplateFileName = '';
   createFileError = '';
@@ -191,6 +236,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   @ViewChild('entryMenuTrigger') private entryMenuTrigger?: MatMenuTrigger;
   /** The main note editor (not the one inside hover cards). */
   @ViewChild('noteEditor') private noteEditor?: MilkdownEditorComponent;
+  @ViewChild('noteProperties') private noteProperties?: NotePropertiesComponent;
   /** Focuses the name field whenever a create form appears. */
   @ViewChild('createInput') private set createInput(ref: ElementRef<HTMLInputElement> | undefined) {
     if (ref) {
@@ -251,7 +297,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     private obsidianVaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
     private broadcastService: ObsidianBroadcastService,
-    private statsheetService: DndStatsheetService,
+    private statblockVtt: StatblockVttService,
+    private noteInsert: NoteInsertService,
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
     private cdr: ChangeDetectorRef,
@@ -303,6 +350,32 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   get isCanvasFileSelected(): boolean {
     return this.selectedViewer === 'canvas';
+  }
+
+  get isDatabaseFileSelected(): boolean {
+    return this.selectedViewer === 'database';
+  }
+
+  get isFamilyTreeSelected(): boolean {
+    return this.selectedViewer === 'family-tree';
+  }
+
+  /** Systems offered when creating a statblock or item. */
+  get newFileSystems(): StatblockSystem[] {
+    return systemsFor(NEW_BLOCK_KINDS[this.newFileKind] ?? 'creature');
+  }
+
+  /** True while the create form is making a statblock, item or spell (so it shows a system picker). */
+  get isNewBlockFile(): boolean {
+    return !!NEW_BLOCK_KINDS[this.newFileKind];
+  }
+
+  get newFileKindInfo() {
+    return NEW_FILE_KINDS[this.newFileKind];
+  }
+
+  get isIndexingContent(): boolean {
+    return this.contentIndexState === 'indexing';
   }
 
   get isImage(): boolean {
@@ -423,6 +496,31 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   /** Filters the tree to notes with this tag (nested tags included); clicking the active tag clears it. */
   toggleTag(tag: string): void {
     this.activeTag = this.activeTag === tag ? null : tag;
+  }
+
+  // ---- Properties on the open note ----
+
+  /** Property types assigned in Obsidian (`.obsidian/types.json`). */
+  propertyTypeHints: PropertyTypeMap = {};
+
+  get propertyIndex(): VaultIndex | null {
+    return this.vaultIndex;
+  }
+
+  get propertyIndexVersion(): number {
+    return this.vaultIndex?.contentVersion ?? 0;
+  }
+
+  /** ⋯ → Add property: opens the new-property input in the properties panel. */
+  addNoteProperty(): void {
+    this.noteProperties?.startAdding();
+  }
+
+  private loadPropertyTypeHints(force: boolean): void {
+    const serverId = this.serverId;
+    void this.vaultIndexService.getPropertyTypes(serverId, { force }).then(types => {
+      if (this.serverId === serverId) this.propertyTypeHints = types;
+    });
   }
 
   // ---- Tags on the open note ----
@@ -593,7 +691,28 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   // ---- Lifecycle ----
 
+  /** Lets the search drawer insert into the note open here (see NoteInsertService). */
+  private readonly insertTarget: NoteInsertTarget = {
+    serverId: () => this.serverId,
+    notePath: () => (!this.previewOnly && this.isMarkdownFileSelected && this.noteEditor ? this.selectedFileRelativePath : null),
+    insert: markdown => !!this.noteEditor?.insertMarkdown(markdown),
+  };
+  private unregisterInsertTarget?: () => void;
+  private vaultChangedSubscription?: Subscription;
+
+  /** The view used last is where the search drawer inserts. */
+  @HostListener('pointerdown')
+  @HostListener('focusin')
+  markUsedForInserts(): void {
+    this.noteInsert.touch(this.insertTarget);
+  }
+
   ngOnInit(): void {
+    this.unregisterInsertTarget = this.noteInsert.register(this.insertTarget);
+    // Notes saved from the search drawer: show them in the file list.
+    this.vaultChangedSubscription = this.noteInsert.vaultChanged$.subscribe(serverId => {
+      if (serverId === this.serverId && this.permissionGranted) void this.loadVaultEntries(true);
+    });
     this.syncResponsiveSidebarState(false);
     this.fileSystemApiSupported = this.obsidianVaultService.isFileSystemApiSupported();
 
@@ -653,6 +772,9 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     } else if (key === 'f' && event.shiftKey) {
       event.preventDefault();
       this.focusSearch();
+    } else if (key === 'g' && !event.shiftKey) {
+      event.preventDefault();
+      void this.openGraph();
     }
   }
 
@@ -809,6 +931,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     // Don't lose the last second of typing when the view closes. The vault service is a
     // root singleton, so the write completes after this component is gone.
     void this.flushPendingSave();
+    this.unregisterInsertTarget?.();
+    this.vaultChangedSubscription?.unsubscribe();
     this.revokeObjectUrls();
     this.autoSaveSubscription?.unsubscribe();
     this.contentQuerySubscription?.unsubscribe();
@@ -837,6 +961,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
     let node: Node | null = selection.getRangeAt(0).commonAncestorContainer;
     while (node) {
+      // Text selected in the properties panel isn't note text.
+      if (node instanceof HTMLElement && node.tagName === 'APP-NOTE-PROPERTIES') return null;
       if (node instanceof HTMLElement && node.classList.contains('milkdown-container')) {
         return selection;
       }
@@ -928,6 +1054,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       this.vaultIndex = await this.vaultIndexService.load(this.serverId, useCache);
       this.vaultEntries = this.vaultIndex.entries;
       void this.indexVaultContent(!!options.reindexContent);
+      this.loadPropertyTypeHints(!useCache);
+      this.loadGraphColorGroups(!useCache);
       await this.openPendingPath();
       await this.refreshSelectedFolder();
     } catch (err) {
@@ -998,6 +1126,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     this.revokeObjectUrls();
     if (objectUrl) this.objectUrls.push(objectUrl);
 
+    this.graphPage = null;
     this.activeView = {
       kind: 'file',
       name: entry.name,
@@ -1046,6 +1175,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
     this.revokeObjectUrls();
     this.objectUrls.push(...objectUrls);
+    this.graphPage = null;
     this.activeView = {
       kind: 'folder',
       name: sourceEntry.name,
@@ -1089,7 +1219,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     if (newContent !== undefined) {
       view.content = newContent;
     }
-    this.vaultIndexService.indexNoteContent(this.serverId, view.relativePath, view.content);
+    this.vaultIndexService.indexNoteContent(this.serverId, view.relativePath, view.content, Date.now());
 
     this.pendingSave = { serverId: this.serverId, view, content: view.content };
     if (this.saveState !== 'conflict') {
@@ -1192,7 +1322,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   // ---- Create / rename / move / delete ----
 
-  startNewFile(kind: 'note' | 'canvas' = 'note'): void {
+  startNewFile(kind: NewFileKind = 'note'): void {
     if (!this.permissionGranted) return;
 
     this.isCreatingFile = true;
@@ -1207,6 +1337,155 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   startNewCanvas(): void {
     this.startNewFile('canvas');
+  }
+
+  startNewDatabase(): void {
+    this.startNewFile('database');
+  }
+
+  /** Opens `Quests/Quests.base`, creating a ready-made quest board there first if needed. */
+  async createQuestTracker(): Promise<void> {
+    if (!this.permissionGranted) return;
+    const path = 'Quests/Quests.base';
+    try {
+      if (!this.vaultIndex?.getByPath(path)) {
+        await this.queueVaultOp(() => this.obsidianVaultService.writeFile(this.serverId, path, QUEST_TRACKER_CONTENT));
+        await this.loadVaultEntries(false);
+      }
+      const entry = this.vaultIndex?.getByPath(path);
+      if (entry) await this.selectFile(entry);
+    } catch (err) {
+      console.error('Failed to create the quest tracker:', err);
+      this.snackBar.open('Unable to create the quest tracker.', 'OK', { duration: 4000 });
+    }
+  }
+
+  // ---- Graph page (link graph and family trees) ----
+
+  /** The graph page replaces the open file while it's shown; null when it isn't. */
+  graphPage: { type: GraphType } | null = null;
+  /** Colour groups from Obsidian's graph settings; null uses the vault's top tags. */
+  graphColorGroups: GraphColorGroup[] | null = null;
+
+  /** Every family tree file in the vault, for the graph page's Family tree list. */
+  get familyTreeFiles(): VaultEntry[] {
+    return (this.vaultIndex?.files ?? [])
+      .filter(entry => isFamilyTreePath(entry.relativePath))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Shows the graph page (closing the open file); without a type, the last one used. */
+  async openGraph(type?: GraphType): Promise<void> {
+    if (!this.permissionGranted || this.previewOnly) return;
+    const nextType: GraphType = type ?? (readStoredValue(GRAPH_TYPE_STORAGE_KEY) === 'family' ? 'family' : 'links');
+    await this.closeView();
+    this.graphPage = { type: nextType };
+    this.closeMobileSidebar();
+    this.setGraphType(nextType);
+  }
+
+  private loadGraphColorGroups(force: boolean): void {
+    const serverId = this.serverId;
+    void this.vaultIndexService.getGraphColorGroups(serverId, { force }).then(groups => {
+      if (this.serverId === serverId) this.graphColorGroups = groups;
+    });
+  }
+
+  closeGraph(): void {
+    this.graphPage = null;
+  }
+
+  setGraphType(type: GraphType): void {
+    if (!this.graphPage) return;
+    this.graphPage = { type };
+    writeStoredValue(GRAPH_TYPE_STORAGE_KEY, type);
+  }
+
+  /** Opens a note or file clicked in the graph, a family tree, or the graph page's tree list. */
+  openGraphFile(path: string): void {
+    const entry = this.vaultIndex?.getByPath(path);
+    if (entry) void this.selectFile(entry);
+  }
+
+  // ---- Writes from database views ----
+
+  /** A database view changed a property of a note (a moved board card or an edited cell). */
+  async onDatabasePropertyChange(change: DatabasePropertyChange): Promise<void> {
+    try {
+      const previous = await this.writeNoteProperty(change.path, change.key, change.value);
+      if (change.undoLabel) {
+        const ref = this.snackBar.open(change.undoLabel, 'Undo', { duration: 6000 });
+        ref.onAction().subscribe(() => {
+          this.writeNoteProperty(change.path, change.key, previous).catch(err => this.reportPropertyWriteError(err, change.path));
+        });
+      }
+    } catch (err) {
+      this.reportPropertyWriteError(err, change.path);
+    }
+  }
+
+  /** A database view asked for a new note that matches it (e.g. "+ New" in a board column). */
+  async onDatabaseCreateNote(request: DatabaseNewNote): Promise<void> {
+    const name = request.title.trim().replace(/[\\/:*?"<>|#^[\]]+/g, '-').replace(/^\.+/, '');
+    if (!name) return;
+    const folder = request.folder.replace(/^\/+|\/+$/g, '');
+    const path = `${folder ? `${folder}/` : ''}${name}.md`;
+    if (this.vaultIndex?.getByPath(path)) {
+      this.snackBar.open(`A note called “${name}” already exists there.`, 'OK', { duration: 4000 });
+      return;
+    }
+
+    try {
+      const template = findTemplateForTags(request.tags);
+      let content = template ? await loadNoteTemplate(template, path) : '';
+      const tags = readFrontmatterTags(content);
+      const missingTags = request.tags.filter(tag => !tags.some(existing => existing.toLowerCase() === tag.toLowerCase()));
+      if (missingTags.length) content = setFrontmatterTags(content, [...tags, ...missingTags]);
+      for (const property of request.properties) {
+        content = property.value ? setProperty(content, property.key, property.value) : removeProperty(content, property.key);
+      }
+
+      const serverId = this.serverId;
+      const modified = await this.queueVaultOp(() => this.obsidianVaultService.writeFile(serverId, path, content));
+      this.knownModified.set(path, modified);
+      await this.loadVaultEntries(false);
+      this.vaultIndexService.indexNoteContent(serverId, path, content, modified);
+
+      const ref = this.snackBar.open(`Created “${name}”.`, 'Open', { duration: 5000 });
+      ref.onAction().subscribe(() => {
+        const entry = this.vaultIndex?.getByPath(path);
+        if (entry) void this.selectFile(entry);
+      });
+    } catch (err) {
+      console.error('Failed to create note from database:', err);
+      this.snackBar.open(`Unable to create “${name}”.`, 'OK', { duration: 4000 });
+    }
+  }
+
+  /**
+   * Sets (or with `null`, removes) one frontmatter property of a note that isn't open, without
+   * touching the rest of the file. Queued after pending saves, refused if the file changed on disk
+   * in between, and re-indexed. Returns the property's previous value (for undo).
+   */
+  private writeNoteProperty(path: string, key: string, value: PropertyValue | null): Promise<PropertyValue | null> {
+    const serverId = this.serverId;
+    return this.queueVaultOp(async () => {
+      const write = await writeNoteProperty(this.obsidianVaultService, serverId, path, key, value);
+      if (write.modified !== null) {
+        this.knownModified.set(path, write.modified);
+        this.vaultIndexService.indexNoteContent(serverId, path, write.content, write.modified);
+      }
+      return write.previous;
+    });
+  }
+
+  private reportPropertyWriteError(err: unknown, path: string): void {
+    const name = getVaultDisplayName(path.split('/').pop() || path);
+    console.error('Failed to update note property:', path, err);
+    const message = err instanceof VaultConflictError
+      ? `“${name}” changed outside the app just now, so it wasn't changed. Try again.`
+      : `Couldn't update “${name}”.`;
+    this.snackBar.open(message, 'OK', { duration: 5000 });
   }
 
   cancelNewFile(): void {
@@ -1239,7 +1518,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     const fullFileName = this.buildNewFilePath(this.newFileName);
     const attemptedKind = this.newFileKind;
     if (!fullFileName) {
-      this.createFileError = attemptedKind === 'canvas' ? 'Enter a canvas name.' : 'Enter a note name.';
+      this.createFileError = `Enter a ${NEW_FILE_KINDS[attemptedKind].label} name.`;
       return;
     }
 
@@ -1259,7 +1538,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
         await this.selectFile(newEntry);
       }
     } catch (err) {
-      this.createFileError = attemptedKind === 'canvas' ? 'Unable to create canvas.' : 'Unable to create note.';
+      this.createFileError = `Unable to create ${NEW_FILE_KINDS[attemptedKind].label}.`;
       console.error('Failed to create file:', err);
     }
   }
@@ -1287,8 +1566,19 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   }
 
   private async loadInitialContent(filePath: string): Promise<string> {
+    const blockKind = NEW_BLOCK_KINDS[this.newFileKind];
+    if (blockKind) {
+      writeStoredValue(STATBLOCK_SYSTEM_STORAGE_KEY, this.newStatblockSystemId);
+      return newStatblockNote(getVaultDisplayName(filePath.split('/').pop() || filePath), getStatblockSystem(this.newStatblockSystemId, blockKind));
+    }
+    if (getVaultFileType(filePath).id === 'family-tree') {
+      return emptyFamilyTree();
+    }
     if (getVaultFileType(filePath).id === 'canvas') {
       return this.obsidianVaultService.getObsidianCanvasTemplate();
+    }
+    if (getVaultFileType(filePath).id === 'base') {
+      return NEW_BASE_CONTENT;
     }
 
     const template = this.selectedTemplateFileName ? findNoteTemplate(this.selectedTemplateFileName) : undefined;
@@ -1300,7 +1590,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     if (!normalized) return null;
 
     const filePart = normalized.split('/').pop() || normalized;
-    const typeId = this.newFileKind === 'canvas' ? 'canvas' : 'markdown';
+    const typeId = NEW_FILE_KINDS[this.newFileKind].typeId;
     const defaultExtension = getVaultFileTypeById(typeId)?.defaultExtension ?? 'md';
     return filePart.includes('.') ? normalized : `${normalized}.${defaultExtension}`;
   }
@@ -1671,6 +1961,19 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     return getVaultFileType(name).icon;
   }
 
+  /** Like getFileIcon, but notes holding a statblock or item get their own icon. */
+  getEntryIcon(entry: VaultEntry): string {
+    const kind = entry.kind === 'file' ? this.vaultIndex?.getStatblockKind(entry.relativePath) : null;
+    if (kind) return blockIcon(kind);
+    return getVaultFileType(entry.name).icon;
+  }
+
+  /** A note whose block can become a map token (a statblock or item, not a spell). */
+  canAddEntryToMap(entry: VaultEntry | null | undefined): boolean {
+    const kind = entry?.kind === 'file' ? this.vaultIndex?.getStatblockKind(entry.relativePath) : null;
+    return !!kind && canAddToMap(kind);
+  }
+
   getFileTypeLabel(name: string): string {
     return getVaultFileTypeLabel(name);
   }
@@ -1770,7 +2073,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     }
   }
 
-  startNewFileInFolder(entry: VaultEntry, kind: 'note' | 'canvas' = 'note', event?: Event): void {
+  startNewFileInFolder(entry: VaultEntry, kind: NewFileKind = 'note', event?: Event): void {
     event?.stopPropagation();
     if (entry.kind !== 'directory') return;
 
@@ -1786,13 +2089,46 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     this.newFolderName = entry.relativePath ? `${entry.relativePath}/` : '';
   }
 
-  insertStatsheetTemplate(): void {
+  /** Adds a new statblock (or item) at the end of the open note. */
+  insertStatblock(kind: BlockKind = 'creature'): void {
     const view = this.fileView;
     if (this.previewOnly || !view || view.fileType.viewer !== 'markdown') return;
 
     const content = view.content.trimEnd();
-    const statsheet = this.statsheetService.getDndStatsheetTemplate();
-    this.onContentChange(`${content}${content ? '\n\n' : ''}${statsheet}\n`);
+    const system = getStatblockSystem(this.newStatblockSystemId, kind);
+    const block = statblockFence(newStatblockSource(getVaultDisplayName(view.name), system), kind);
+    this.onContentChange(`${content}${content ? '\n\n' : ''}${block}\n`);
+  }
+
+  /** File list menu → Add to VTT map: the note's first statblock or item, as one token. */
+  async addEntryToMap(entry: VaultEntry): Promise<void> {
+    if (entry.kind !== 'file') return;
+    try {
+      const content = await this.obsidianVaultService.readFile(this.serverId, entry.relativePath);
+      const block = findStatblocks(content)[0];
+      const parsed = block ? parseStatblock(block.source, block.kind) : null;
+      if (!block || !parsed || parsed.error) {
+        this.snackBar.open(parsed?.error ? `That ${blockNoun(parsed.kind)} can’t be read. Open the note to fix it.` : 'That note has no statblock or item.', 'OK', { duration: 4000 });
+        return;
+      }
+      const result = await this.statblockVtt.addToVtt({
+        serverId: this.serverId,
+        notePath: entry.relativePath,
+        data: parsed.data,
+        kind: block.kind,
+        rollInitiative: readStoredFlag('statblock.roll-initiative', true),
+      });
+      if (!result.added) {
+        this.snackBar.open('Open or join the VTT map first.', 'OK', { duration: 3500 });
+        return;
+      }
+      const rolls = result.initiative.length ? ` · initiative ${result.initiative[0]}` : '';
+      const problem = result.imageProblem ? ` (${result.imageProblem})` : '';
+      this.snackBar.open(`Added ${getVaultDisplayName(entry.name)} to the map${rolls}${problem}.`, 'OK', { duration: 5000 });
+    } catch (error) {
+      console.error('Failed to add statblock to the map:', error);
+      this.snackBar.open('Couldn’t add the token to the map.', 'OK', { duration: 4000 });
+    }
   }
 
   /**
@@ -1861,7 +2197,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       return;
     }
 
-    if (this.vaultEntries.length === 0) {
+    // Not listed yet (or just created elsewhere, e.g. saved from the search drawer): re-scan first.
+    if (this.vaultEntries.length === 0 || !this.vaultIndex?.getByPath(relativePath)) {
       await this.loadVaultEntries();
       return;
     }
@@ -2196,6 +2533,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     }
   }
 
+  /** A read-aloud block's Broadcast button: send just that block to players. */
+  async broadcastBlock(block: { markdown: string; html: string }): Promise<void> {
+    this.reportBroadcastSecrets(await this.broadcastService.broadcastBlock(this.broadcastContext(), block));
+  }
+
   /** ⋯ menu: wrap the selection in a GM-only secret block, or insert an empty one. */
   insertSecretBlock(): void {
     if (!this.noteEditor?.insertSecretBlock()) {
@@ -2226,6 +2568,22 @@ function readStoredFlag(key: string, fallback: boolean): boolean {
     return value === null ? fallback : value === 'true';
   } catch {
     return fallback;
+  }
+}
+
+function readStoredValue(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredValue(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // ignore
   }
 }
 

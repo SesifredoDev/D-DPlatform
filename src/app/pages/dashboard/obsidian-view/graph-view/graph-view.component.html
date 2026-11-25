@@ -1,0 +1,70 @@
+<div class="graph" [class.is-compact]="compact">
+  <div class="graph-toolbar">
+    @if (!focusPath) {
+      <label class="search">
+        <mat-icon>search</mat-icon>
+        <input
+          [(ngModel)]="filters.search"
+          (ngModelChange)="onFiltersChange()"
+          (keydown.enter)="openFirstMatch()"
+          placeholder="Filter notes"
+          aria-label="Filter notes by name or folder (Enter opens the first match)"
+          autocomplete="off"
+          spellcheck="false">
+      </label>
+      <select class="field" [(ngModel)]="filters.tag" (ngModelChange)="onFiltersChange()" aria-label="Only notes with tag">
+        <option [ngValue]="null">All tags</option>
+        @for (tag of tagOptions; track tag) {
+          <option [ngValue]="tag">#{{ tag }}</option>
+        }
+      </select>
+    } @else {
+      <span class="segmented" role="radiogroup" aria-label="Link depth">
+        <button type="button" role="radio" [attr.aria-checked]="depth === 1" [class.is-active]="depth === 1" (click)="setDepth(1)">1 step</button>
+        <button type="button" role="radio" [attr.aria-checked]="depth === 2" [class.is-active]="depth === 2" (click)="setDepth(2)">2 steps</button>
+      </span>
+    }
+
+    @if (!compact) {
+      <label class="toggle"><input type="checkbox" [(ngModel)]="filters.showAttachments" (ngModelChange)="onFiltersChange()">Attachments</label>
+      <label class="toggle"><input type="checkbox" [(ngModel)]="filters.showMissing" (ngModelChange)="onFiltersChange()">Missing notes</label>
+      @if (!focusPath) {
+        <label class="toggle"><input type="checkbox" [(ngModel)]="filters.showOrphans" (ngModelChange)="onFiltersChange()">Unlinked notes</label>
+      }
+    }
+
+    <span class="spacer"></span>
+    @if (!compact) {
+      <span class="summary">{{ summary }}</span>
+    }
+    <button type="button" class="icon-action" (click)="zoomBy(0.8)" matTooltip="Zoom out (−)" aria-label="Zoom out"><mat-icon>remove</mat-icon></button>
+    <button type="button" class="icon-action" (click)="zoomBy(1.25)" matTooltip="Zoom in (+)" aria-label="Zoom in"><mat-icon>add</mat-icon></button>
+    <button type="button" class="icon-action" (click)="fit()" matTooltip="Fit to view (0)" aria-label="Fit to view"><mat-icon>fit_screen</mat-icon></button>
+    @if (compact) {
+      <button type="button" class="icon-action" (click)="expand.emit()" matTooltip="Open the full graph" aria-label="Open the full graph"><mat-icon>open_in_full</mat-icon></button>
+    }
+  </div>
+
+  <div class="graph-canvas">
+    <canvas
+      #canvas
+      tabindex="0"
+      role="img"
+      [attr.aria-label]="(focusPath ? 'Notes linked to this one: ' : 'Graph of the vault: ') + summary + '. Click a note to open it; drag to move; + and − to zoom, 0 to fit, arrow keys to pan.'">
+    </canvas>
+    @if (!graph.nodes.length) {
+      <div class="graph-empty">
+        <mat-icon>hub</mat-icon>
+        <span>{{ filters.search || filters.tag ? 'No notes match.' : 'No notes to show yet.' }}</span>
+      </div>
+    }
+  </div>
+
+  @if (!compact && groups.length) {
+    <div class="legend" aria-label="Colours">
+      @for (group of groups; track group.query) {
+        <span class="legend-item"><span class="swatch" [style.background]="group.color"></span>{{ group.query }}</span>
+      }
+    </div>
+  }
+</div>

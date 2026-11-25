@@ -1,0 +1,493 @@
+<article
+  class="sb"
+  [class.is-embed]="mode === 'embed'"
+  [class.is-open]="expanded"
+  [class.is-editing]="editing"
+  [class.is-item]="kind === 'item'"
+  [class.is-spell]="kind === 'spell'"
+  [attr.aria-label]="kindLabel + ': ' + (name || 'Unnamed')"
+  (click)="onTextClick($event)">
+  <header class="sb-head">
+    <button
+      type="button"
+      class="sb-avatar"
+      (click)="expanded || toggleExpanded(); setTab('properties')"
+      [matTooltip]="tokenUrl ? pictureLabel : 'No ' + pictureLabel.toLowerCase() + ' yet'">
+      @if (tokenUrl) {
+        <img [src]="tokenUrl" alt="">
+      } @else if (kind !== 'creature') {
+        <mat-icon>{{ kindIcon }}</mat-icon>
+      } @else {
+        <span>{{ initials }}</span>
+      }
+    </button>
+
+    <div class="sb-title" [class.is-toggle]="mode === 'embed'" (click)="toggleExpanded()">
+      @if (editing) {
+        <input
+          class="sb-name-input"
+          [value]="name"
+          (click)="$event.stopPropagation()"
+          (input)="setField('name', $any($event.target).value)"
+          (change)="setField('name', $any($event.target).value, true)"
+          placeholder="Name"
+          aria-label="Name"
+          spellcheck="false">
+        <div class="sb-subtitle-inputs">
+          @for (field of subtitleFields; track field.key) {
+            <input
+              [value]="field.value"
+              (input)="setField(field.key, $any($event.target).value)"
+              (change)="setField(field.key, $any($event.target).value, true)"
+              [placeholder]="field.placeholder || field.label"
+              [attr.aria-label]="field.label"
+              [title]="field.label">
+          }
+        </div>
+      } @else {
+        <h3 class="sb-name">{{ name || 'Unnamed' }}</h3>
+        @if (subtitle) {
+          <p class="sb-subtitle">{{ subtitle }}</p>
+        }
+      }
+      @if (mode === 'embed' && !expanded && summary.length) {
+        <div class="sb-summary">
+          @for (item of summary; track item.label) {
+            <span><b>{{ item.label }}</b> {{ item.value }}</span>
+          }
+        </div>
+      }
+    </div>
+
+    <div class="sb-actions">
+      @if (canAddToMap) {
+      <div class="sb-add">
+        <button
+          type="button"
+          class="sb-add-main"
+          (click)="addToMap(1)"
+          [disabled]="addingToMap || !!parsed.error"
+          matTooltip="Add a token to the VTT map">
+          <mat-icon [class.spin]="addingToMap">{{ addingToMap ? 'progress_activity' : 'add_location_alt' }}</mat-icon>
+          <span class="sb-add-label">Add to map</span>
+        </button>
+        <button
+          type="button"
+          class="sb-add-more"
+          [matMenuTriggerFor]="addMenu"
+          [disabled]="addingToMap || !!parsed.error"
+          [attr.aria-label]="kind === 'creature' ? 'Add several, or roll initiative' : 'Add several'">
+          <mat-icon>expand_more</mat-icon>
+        </button>
+      </div>
+      }
+      @if (canEdit) {
+        <button
+          type="button"
+          class="sb-icon"
+          [class.is-active]="editing"
+          (click)="toggleEditing()"
+          [attr.aria-pressed]="editing"
+          [matTooltip]="editing ? 'Done editing' : 'Edit ' + noun">
+          <mat-icon>{{ editing ? 'check' : 'edit' }}</mat-icon>
+        </button>
+      }
+      @if (mode === 'embed') {
+        <button type="button" class="sb-icon" (click)="openNote.emit(notePath)" [matTooltip]="'Open ' + noteTitle">
+          <mat-icon>open_in_new</mat-icon>
+        </button>
+        <button
+          type="button"
+          class="sb-icon"
+          (click)="toggleExpanded()"
+          [attr.aria-expanded]="expanded"
+          [matTooltip]="expanded ? 'Collapse' : 'Expand'">
+          <mat-icon>{{ expanded ? 'expand_less' : 'expand_more' }}</mat-icon>
+        </button>
+      }
+    </div>
+  </header>
+
+  <mat-menu #addMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+    @for (count of [2, 3, 4, 5, 6]; track count) {
+      <button mat-menu-item (click)="addToMap(count)">
+        <mat-icon>group_add</mat-icon>
+        <span>Add {{ count }}</span>
+      </button>
+    }
+    @if (kind === 'creature') {
+      <div class="menu-divider"></div>
+      <button mat-menu-item (click)="$event.stopPropagation(); setRollInitiative(!rollInitiative)">
+        <mat-icon>{{ rollInitiative ? 'check_box' : 'check_box_outline_blank' }}</mat-icon>
+        <span>Roll initiative into the turn order</span>
+      </button>
+    }
+  </mat-menu>
+
+  @if (expanded) {
+    @if (parsed.error) {
+      <div class="sb-error" role="alert">
+        <mat-icon>error</mat-icon>
+        <span>This {{ noun }}'s YAML can't be read: {{ parsed.error }}</span>
+      </div>
+      @if (mode === 'block' && !readonly) {
+        <textarea
+          class="sb-source"
+          [value]="sourceDraft"
+          (input)="onSourceInput($any($event.target).value)"
+          [attr.aria-label]="noun + ' YAML'"
+          spellcheck="false"></textarea>
+      }
+    } @else {
+      <nav class="sb-tabs" role="tablist">
+        <button type="button" role="tab" [class.is-active]="tab === 'stats'" [attr.aria-selected]="tab === 'stats'" (click)="setTab('stats')">
+          Stats
+        </button>
+        <button type="button" role="tab" [class.is-active]="tab === 'properties'" [attr.aria-selected]="tab === 'properties'" (click)="setTab('properties')">
+          Properties
+          @if (usedIn.length) {
+            <span class="sb-count">{{ usedIn.length }}</span>
+          }
+        </button>
+        <span class="sb-tabs-spacer"></span>
+        <span class="sb-system">{{ system.label }}</span>
+        @if (editing && tab === 'stats') {
+          <button type="button" class="sb-source-toggle" [class.is-active]="showSource" (click)="toggleSource()">
+            <mat-icon>code</mat-icon>
+            YAML
+          </button>
+        }
+      </nav>
+
+      @if (tab === 'stats') {
+        @if (showSource) {
+          <textarea
+            class="sb-source"
+            [value]="sourceDraft"
+            (input)="onSourceInput($any($event.target).value)"
+            [attr.aria-label]="noun + ' YAML'"
+            spellcheck="false"></textarea>
+        } @else if (editing) {
+          <div class="sb-body is-form">
+            @for (block of blocks; track $index) {
+              @if (block.kind === 'fields') {
+                <div class="sb-form-fields">
+                  @for (field of block.fields; track field.key) {
+                    <label class="sb-form-field" [class.has-extra]="field.extraKey">
+                      <span>{{ field.label }}</span>
+                      <input
+                        [value]="field.value"
+                        (input)="setField(field.key, $any($event.target).value)"
+                        (change)="setField(field.key, $any($event.target).value, true)"
+                        [placeholder]="field.placeholder">
+                      @if (field.extraKey) {
+                        <input
+                          class="sb-extra-input"
+                          [value]="field.extraValue ?? ''"
+                          (input)="setField(field.extraKey, $any($event.target).value)"
+                          (change)="setField(field.extraKey, $any($event.target).value, true)"
+                          [placeholder]="field.extraLabel ?? ''"
+                          [attr.aria-label]="field.extraLabel">
+                      }
+                    </label>
+                  }
+                </div>
+              } @else if (block.kind === 'scores') {
+                <div class="sb-scores is-form">
+                  @for (item of block.items; track item.label; let i = $index) {
+                    <label>
+                      <span>{{ item.label }}</span>
+                      <input
+                        [value]="item.value.replace('+', '')"
+                        inputmode="numeric"
+                        (input)="setScore(block.key, i, block.items.length, $any($event.target).value)"
+                        (change)="setScore(block.key, i, block.items.length, $any($event.target).value, true)"
+                        [attr.aria-label]="item.label">
+                      <small>{{ item.note }}</small>
+                    </label>
+                  }
+                </div>
+              } @else if (block.kind === 'entries') {
+                <section class="sb-section is-form">
+                  <h4>{{ block.title }}</h4>
+                  @for (entry of block.entries; track $index; let i = $index) {
+                    <div class="sb-entry-form">
+                      <input
+                        [value]="entry.name"
+                        (input)="setEntry(block.key, i, 'name', $any($event.target).value)"
+                        placeholder="Name"
+                        aria-label="Name">
+                      <textarea
+                        [value]="entry.desc"
+                        (input)="setEntry(block.key, i, 'desc', $any($event.target).value)"
+                        placeholder="Description"
+                        aria-label="Description"
+                        rows="2"></textarea>
+                      <button type="button" class="sb-icon is-small" (click)="removeEntry(block.key, i)" [attr.aria-label]="'Remove ' + (entry.name || 'entry')">
+                        <mat-icon>close</mat-icon>
+                      </button>
+                    </div>
+                  }
+                  <button type="button" class="sb-add-entry" (click)="addEntry(block.key)">
+                    <mat-icon>add</mat-icon>
+                    Add to {{ block.title }}
+                  </button>
+                </section>
+              } @else {
+                <section class="sb-section is-form">
+                  <h4>{{ block.title }}</h4>
+                  <textarea
+                    [value]="block.value"
+                    (input)="setField(block.key, $any($event.target).value)"
+                    (change)="setField(block.key, $any($event.target).value, true)"
+                    rows="3"
+                    [attr.aria-label]="block.title"></textarea>
+                </section>
+              }
+            }
+
+            @if (extraFields.length) {
+              <div class="sb-form-fields">
+                @for (field of extraFields; track field.key) {
+                  <label class="sb-form-field">
+                    <span>{{ field.label }}</span>
+                    <input
+                      [value]="field.value"
+                      (input)="setField(field.key, $any($event.target).value)"
+                      (change)="setField(field.key, $any($event.target).value, true)">
+                  </label>
+                }
+              </div>
+            }
+            @for (section of extraEntries; track section.key) {
+              <section class="sb-section is-form">
+                <h4>{{ section.title }}</h4>
+                @for (entry of section.entries; track $index; let i = $index) {
+                  <div class="sb-entry-form">
+                    <input [value]="entry.name" (input)="setEntry(section.key, i, 'name', $any($event.target).value)" placeholder="Name" aria-label="Name">
+                    <textarea [value]="entry.desc" (input)="setEntry(section.key, i, 'desc', $any($event.target).value)" placeholder="Description" aria-label="Description" rows="2"></textarea>
+                    <button type="button" class="sb-icon is-small" (click)="removeEntry(section.key, i)" [attr.aria-label]="'Remove ' + (entry.name || 'entry')">
+                      <mat-icon>close</mat-icon>
+                    </button>
+                  </div>
+                }
+                <button type="button" class="sb-add-entry" (click)="addEntry(section.key)">
+                  <mat-icon>add</mat-icon>
+                  Add to {{ section.title }}
+                </button>
+              </section>
+            }
+            <p class="sb-hint">Other keys can be added in the <button type="button" class="sb-inline-btn" (click)="toggleSource()">YAML</button>.</p>
+          </div>
+        } @else {
+          <div class="sb-body">
+            @for (block of blocks; track $index) {
+              @if (visible(block)) {
+                @if (block.kind === 'fields') {
+                  <dl class="sb-fields">
+                    @for (field of block.fields; track field.key) {
+                      @if (field.value) {
+                        <div>
+                          <dt>{{ field.label }}</dt>
+                          <dd [innerHTML]="html(field.extraValue ? field.value + ' (' + field.extraValue + ')' : field.value)"></dd>
+                        </div>
+                      }
+                    }
+                  </dl>
+                } @else if (block.kind === 'scores') {
+                  <div class="sb-scores">
+                    @for (item of block.items; track item.label) {
+                      <div>
+                        <span>{{ item.label }}</span>
+                        <strong>{{ item.value || '—' }}</strong>
+                        @if (item.note) {
+                          <small>{{ item.note }}</small>
+                        }
+                      </div>
+                    }
+                  </div>
+                } @else if (block.kind === 'entries') {
+                  <section class="sb-section">
+                    @if (!block.untitled) {
+                      <h4>{{ block.title }}</h4>
+                    }
+                    @for (entry of block.entries; track $index) {
+                      <p>
+                        @if (entry.name) {
+                          <strong class="sb-entry-name">{{ entry.name }}.</strong>
+                        }
+                        <span [innerHTML]="html(entry.desc)"></span>
+                      </p>
+                    }
+                  </section>
+                } @else {
+                  <section class="sb-section">
+                    <h4>{{ block.title }}</h4>
+                    <p [innerHTML]="html(block.value)"></p>
+                  </section>
+                }
+              }
+            }
+
+            @if (extraFields.length) {
+              <dl class="sb-fields">
+                @for (field of extraFields; track field.key) {
+                  <div>
+                    <dt>{{ field.label }}</dt>
+                    <dd [innerHTML]="html(field.value)"></dd>
+                  </div>
+                }
+              </dl>
+            }
+            @for (section of extraEntries; track section.key) {
+              <section class="sb-section">
+                <h4>{{ section.title }}</h4>
+                @for (entry of section.entries; track $index) {
+                  <p>
+                    @if (entry.name) {
+                      <strong class="sb-entry-name">{{ entry.name }}.</strong>
+                    }
+                    <span [innerHTML]="html(entry.desc)"></span>
+                  </p>
+                }
+              </section>
+            }
+          </div>
+        }
+      } @else {
+        <div class="sb-props">
+          <section class="sb-prop">
+            <h4>{{ pictureLabel }}</h4>
+            <div class="sb-token">
+              <div class="sb-token-preview">
+                @if (tokenUrl) {
+                  <img [src]="tokenUrl" alt="">
+                } @else {
+                  <mat-icon>{{ imageRef ? 'broken_image' : kind === 'creature' ? 'account_circle' : kindIcon }}</mat-icon>
+                }
+              </div>
+              <div class="sb-token-info">
+                <span class="sb-token-label">
+                  @if (!imageRef) {
+                    No picture: tokens show the name's initials.
+                  } @else if (imagePath && tokenUrl) {
+                    {{ imageRef }}
+                  } @else {
+                    Not found: {{ imageRef }}
+                  }
+                </span>
+                @if (canEdit) {
+                  <div class="sb-token-actions">
+                    <button type="button" class="sb-btn" (click)="isPicking ? closePicker() : openPicker()">
+                      <mat-icon>photo_library</mat-icon>
+                      Choose from vault
+                    </button>
+                    <label class="sb-btn" [class.is-busy]="isUploading">
+                      <mat-icon>{{ isUploading ? 'progress_activity' : 'upload' }}</mat-icon>
+                      Upload
+                      <input type="file" accept="image/*" (change)="uploadImage($event)" [disabled]="isUploading" hidden>
+                    </label>
+                    @if (imageRef) {
+                      <button type="button" class="sb-btn is-danger" (click)="clearImage()">
+                        <mat-icon>close</mat-icon>
+                        Remove
+                      </button>
+                    }
+                  </div>
+                  <form class="sb-url" (submit)="$event.preventDefault(); applyImageUrl()">
+                    <input
+                      name="imageUrl"
+                      [(ngModel)]="imageUrlDraft"
+                      placeholder="…or paste an image web address"
+                      aria-label="Image web address">
+                    <button type="submit" class="sb-btn" [disabled]="!imageUrlDraft.trim()">Use</button>
+                  </form>
+                } @else if (mode === 'embed') {
+                  <span class="sb-muted">Change it in <button type="button" class="sb-inline-btn" (click)="openNote.emit(notePath)">{{ noteTitle }}</button>.</span>
+                }
+              </div>
+            </div>
+
+            @if (isPicking) {
+              <div class="sb-picker">
+                <input
+                  class="sb-picker-search"
+                  [(ngModel)]="pickerQuery"
+                  (ngModelChange)="updatePicker()"
+                  (keydown.escape)="closePicker()"
+                  placeholder="Filter images"
+                  aria-label="Filter images">
+                @if (pickerImages.length) {
+                  <div class="sb-picker-grid">
+                    @for (image of pickerImages; track image.relativePath) {
+                      <button type="button" (click)="pickImage(image)" [title]="image.relativePath">
+                        @if (imageUrlFor(image.relativePath); as url) {
+                          <img [src]="url" alt="" loading="lazy">
+                        } @else {
+                          <mat-icon>image</mat-icon>
+                        }
+                        <span>{{ displayName(image) }}</span>
+                      </button>
+                    }
+                  </div>
+                  @if (pickerTotal > pickerImages.length) {
+                    <p class="sb-muted">Showing {{ pickerImages.length }} of {{ pickerTotal }} images. Type to narrow them down.</p>
+                  }
+                } @else {
+                  <p class="sb-muted">No images {{ pickerQuery ? 'match' : 'in the vault' }}.</p>
+                }
+              </div>
+            }
+          </section>
+
+          <section class="sb-prop">
+            <h4>System</h4>
+            @if (canEdit) {
+              <select class="sb-select" [value]="system.id" (change)="setSystem($any($event.target).value)" aria-label="Game system">
+                @for (option of systems; track option.id) {
+                  <option [value]="option.id">{{ option.label }}</option>
+                }
+              </select>
+            } @else {
+              <span>{{ system.label }}</span>
+            }
+          </section>
+
+          @if (mode === 'embed') {
+            <section class="sb-prop">
+              <h4>{{ kindLabel }} note</h4>
+              <button type="button" class="sb-note-link" (click)="openNote.emit(notePath)">
+                <mat-icon>description</mat-icon>
+                {{ notePath }}
+              </button>
+            </section>
+          }
+
+          <section class="sb-prop">
+            <h4>
+              Used in
+              @if (usedInLoading) {
+                <mat-icon class="spin sb-inline-icon">progress_activity</mat-icon>
+              }
+            </h4>
+            @if (usedIn.length) {
+              <ul class="sb-used">
+                @for (use of usedIn; track use.entry.relativePath) {
+                  <li>
+                    <button type="button" class="sb-note-link" (click)="openNote.emit(use.entry.relativePath)" [title]="use.entry.relativePath">
+                      <mat-icon>{{ use.embedded ? 'picture_in_picture' : 'link' }}</mat-icon>
+                      {{ displayName(use.entry) }}
+                    </button>
+                    <span class="sb-muted">{{ use.embedded ? 'embedded' : 'linked' }}</span>
+                  </li>
+                }
+              </ul>
+            } @else if (!usedInLoading) {
+              <p class="sb-muted">No notes link to or embed {{ noteTitle }} yet. Embed it with <code>![[{{ noteTitle }}]]</code>.</p>
+            }
+          </section>
+        </div>
+      }
+    }
+  }
+</article>

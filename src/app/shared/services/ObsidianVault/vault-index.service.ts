@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { ObsidianVaultService, VaultEntry } from './obsidian-vault-service';
 import { isVaultFileType } from './vault-file-types';
-import { readFrontmatterTags, splitFrontmatter } from './frontmatter';
+import { BlockKind, findStatblocks } from './statblock';
+import { PropertyType, PropertyValue, propertyTypeFromObsidian, readFrontmatterTags, readProperties, splitFrontmatter } from './frontmatter';
 
 const ZERO_WIDTH = /[​-‍﻿]/g;
 
@@ -24,6 +25,12 @@ export class VaultIndex {
   /** Per note: raw link target -> the lines of text it appears in. */
   private readonly linkSnippets = new Map<string, Map<string, string[]>>();
   private readonly tagsByNote = new Map<string, string[]>();
+  private readonly propertiesByNote = new Map<string, IndexedProperty[]>();
+  private readonly modifiedByNote = new Map<string, number>();
+  /** Notes containing a ```statblock or ```item block, with the kind of their first one. */
+  private readonly statblockNotes = new Map<string, BlockKind>();
+  /** `source:` keys of each note's statblock blocks (e.g. `open5e/srd_goblin`), lower-cased. */
+  private readonly sourcesByNote = new Map<string, string[]>();
   private backlinkCache: Map<string, Set<string>> | null = null;
   private version = 0;
 
@@ -114,9 +121,13 @@ export class VaultIndex {
     return candidates.find(entry => entry?.kind === 'file') ?? null;
   }
 
-  /** Records the links and tags found in a note. Call when a note is read or saved. */
-  indexNoteContent(path: string, content: string): void {
+  /**
+   * Records the links, tags and properties found in a note. Call when a note is read or saved.
+   * `modified` (ms) is the file's last-modified time when known; otherwise the previous one is kept.
+   */
+  indexNoteContent(path: string, content: string, modified?: number): void {
     const key = normalizeKey(path);
+    if (modified !== undefined) this.modifiedByNote.set(key, modified);
     const mentions = extractLinkMentions(content);
     const snippets = new Map<string, string[]>();
     for (const mention of mentions) {
@@ -128,12 +139,47 @@ export class VaultIndex {
     this.outgoingLinks.set(key, Array.from(snippets.keys()));
     this.linkSnippets.set(key, snippets);
     this.tagsByNote.set(key, extractTags(content));
+    this.propertiesByNote.set(key, extractProperties(content));
+    const blocks = content.includes('```') || content.includes('~~~') ? findStatblocks(content) : [];
+    if (blocks.length) this.statblockNotes.set(key, blocks[0].kind);
+    else this.statblockNotes.delete(key);
+    const sources = blocks.map(block => blockSourceKey(block.source)).filter((source): source is string => !!source);
+    if (sources.length) this.sourcesByNote.set(key, sources);
+    else this.sourcesByNote.delete(key);
     this.backlinkCache = null;
     this.version++;
   }
 
+  /** True when the note contains a statblock or item (only known once the note has been indexed). */
+  isStatblockNote(path: string): boolean {
+    return this.statblockNotes.has(normalizeKey(path));
+  }
+
+  /**
+   * The note holding a block imported from `sourceKey` (e.g. `open5e/srd_goblin`), if any. Only
+   * covers notes indexed so far (see VaultIndexService.ensureContentIndexed).
+   */
+  findBySource(sourceKey: string): VaultEntry | null {
+    const wanted = sourceKey.trim().toLowerCase();
+    if (!wanted) return null;
+    for (const [key, sources] of this.sourcesByNote) {
+      if (sources.includes(wanted)) return this.byPath.get(key) ?? null;
+    }
+    return null;
+  }
+
+  /** What the note's first statblock block is (creature, item or spell), or null when it has none. */
+  getStatblockKind(path: string): BlockKind | null {
+    return this.statblockNotes.get(normalizeKey(path)) ?? null;
+  }
+
   isNoteIndexed(path: string): boolean {
     return this.outgoingLinks.has(normalizeKey(path));
+  }
+
+  /** Link targets as written in a note (including ones that don't resolve to a file). */
+  getLinkTargets(path: string): readonly string[] {
+    return this.outgoingLinks.get(normalizeKey(path)) ?? [];
   }
 
   getOutgoingLinks(path: string): VaultEntry[] {
@@ -206,6 +252,59 @@ export class VaultIndex {
     return uniqueEntries(keys.map(key => this.byPath.get(key) ?? null));
   }
 
+  /** When the note was last modified (ms), if known. */
+  getModified(path: string): number | null {
+    return this.modifiedByNote.get(normalizeKey(path)) ?? null;
+  }
+
+  /** A note's frontmatter properties (as of its last indexing). */
+  getProperties(path: string): IndexedProperty[] {
+    return this.propertiesByNote.get(normalizeKey(path)) ?? [];
+  }
+
+  /**
+   * Every property key used in the vault, most used first. Keys are grouped case-insensitively
+   * (like Obsidian); each gets its most common spelling and the most common type of its values.
+   */
+  getPropertyKeys(): PropertyKeySummary[] {
+    const groups = new Map<string, { spellings: Map<string, number>; types: Map<PropertyType, number>; count: number }>();
+    for (const properties of this.propertiesByNote.values()) {
+      for (const property of properties) {
+        const id = property.key.toLowerCase();
+        const group = groups.get(id) ?? { spellings: new Map(), types: new Map(), count: 0 };
+        group.count++;
+        group.spellings.set(property.key, (group.spellings.get(property.key) ?? 0) + 1);
+        if (!property.empty && property.type !== 'complex') {
+          group.types.set(property.type, (group.types.get(property.type) ?? 0) + 1);
+        }
+        groups.set(id, group);
+      }
+    }
+    return Array.from(groups.values(), group => ({
+      key: mostCommon(group.spellings) ?? '',
+      type: mostCommon(group.types),
+      count: group.count,
+    })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  }
+
+  /** Values used for a property across the vault (list items included), most used first. */
+  getPropertyValues(key: string): { value: string; count: number }[] {
+    const wanted = key.toLowerCase();
+    const counts = new Map<string, { value: string; count: number }>();
+    for (const properties of this.propertiesByNote.values()) {
+      for (const property of properties) {
+        if (property.key.toLowerCase() !== wanted) continue;
+        for (const value of property.values) {
+          const id = value.toLowerCase();
+          const item = counts.get(id) ?? { value, count: 0 };
+          item.count++;
+          counts.set(id, item);
+        }
+      }
+    }
+    return Array.from(counts.values()).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+  }
+
   /** Carries already-indexed note content over to a rebuilt index (paths that no longer exist are dropped). */
   copyContentIndexTo(next: VaultIndex): void {
     for (const [key, links] of this.outgoingLinks) {
@@ -216,6 +315,18 @@ export class VaultIndex {
     }
     for (const [key, tags] of this.tagsByNote) {
       if (next.byPath.has(key)) next.tagsByNote.set(key, tags);
+    }
+    for (const [key, properties] of this.propertiesByNote) {
+      if (next.byPath.has(key)) next.propertiesByNote.set(key, properties);
+    }
+    for (const [key, modified] of this.modifiedByNote) {
+      if (next.byPath.has(key)) next.modifiedByNote.set(key, modified);
+    }
+    for (const [key, kind] of this.statblockNotes) {
+      if (next.byPath.has(key)) next.statblockNotes.set(key, kind);
+    }
+    for (const [key, sources] of this.sourcesByNote) {
+      if (next.byPath.has(key)) next.sourcesByNote.set(key, sources);
     }
   }
 
@@ -243,6 +354,8 @@ export class VaultIndex {
 export class VaultIndexService {
   private readonly indexes = new Map<string, VaultIndex>();
   private readonly contentIndexing = new Map<string, Promise<void>>();
+  private readonly propertyTypes = new Map<string, Promise<PropertyTypeMap>>();
+  private readonly graphGroups = new Map<string, Promise<GraphColorGroup[] | null>>();
 
   constructor(private vaultService: ObsidianVaultService) {}
 
@@ -265,9 +378,39 @@ export class VaultIndexService {
     return existing && existing.entries === entries ? existing : this.rebuild(serverId, entries);
   }
 
-  indexNoteContent(serverId: string, path: string, content: string): void {
+  /**
+   * Property types assigned in Obsidian (`.obsidian/types.json`), keyed by lower-cased property name.
+   * Empty if the vault has none or it can't be read. Cached per server; pass `force` to re-read.
+   */
+  getPropertyTypes(serverId: string, options: { force?: boolean } = {}): Promise<PropertyTypeMap> {
+    const cached = this.propertyTypes.get(serverId);
+    if (cached && !options.force) return cached;
+
+    const load = this.vaultService.readFile(serverId, '.obsidian/types.json')
+      .then(text => parsePropertyTypes(text))
+      .catch(() => ({}));
+    this.propertyTypes.set(serverId, load);
+    return load;
+  }
+
+  /**
+   * Colour groups from Obsidian's graph settings (`.obsidian/graph.json`), or null if the vault has
+   * none (or they can't be read). Cached per server; pass `force` to re-read.
+   */
+  getGraphColorGroups(serverId: string, options: { force?: boolean } = {}): Promise<GraphColorGroup[] | null> {
+    const cached = this.graphGroups.get(serverId);
+    if (cached && !options.force) return cached;
+
+    const load = this.vaultService.readFile(serverId, '.obsidian/graph.json')
+      .then(text => parseGraphColorGroups(text))
+      .catch(() => null);
+    this.graphGroups.set(serverId, load);
+    return load;
+  }
+
+  indexNoteContent(serverId: string, path: string, content: string, modified?: number): void {
     if (isVaultFileType(path, 'markdown')) {
-      this.indexes.get(serverId)?.indexNoteContent(path, content);
+      this.indexes.get(serverId)?.indexNoteContent(path, content, modified);
     }
   }
 
@@ -289,7 +432,8 @@ export class VaultIndexService {
       for (let i = 0; i < pending.length; i += batchSize) {
         await Promise.all(pending.slice(i, i + batchSize).map(async file => {
           try {
-            index.indexNoteContent(file.relativePath, await this.vaultService.readFile(serverId, file.relativePath));
+            const { content, lastModified } = await this.vaultService.readFileWithMeta(serverId, file.relativePath);
+            index.indexNoteContent(file.relativePath, content, lastModified);
           } catch (error) {
             console.warn('[VaultIndex] Failed to index note', file.relativePath, error);
           }
@@ -300,6 +444,12 @@ export class VaultIndexService {
     this.contentIndexing.set(serverId, run);
     return run;
   }
+}
+
+/** A block's `source:` value (lower-cased), read without parsing the whole YAML. */
+function blockSourceKey(source: string): string | null {
+  const match = source.match(/^source:[ \t]*["']?([^"'\n#]+?)["']?[ \t]*$/m);
+  return match ? match[1].trim().toLowerCase() : null;
 }
 
 function normalizeKey(path: string): string {
@@ -345,6 +495,87 @@ function uniqueEntries(entries: (VaultEntry | null)[]): VaultEntry[] {
 
 function stripCode(content: string): string {
   return content.replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+}
+
+/** A frontmatter property as kept in the index: enough for suggestions and (later) database views. */
+export interface IndexedProperty {
+  key: string;
+  type: PropertyType;
+  empty: boolean;
+  /** Scalar value, or list items; empty for complex values. */
+  values: string[];
+}
+
+export interface PropertyKeySummary {
+  key: string;
+  /** Most common type of the key's non-empty values; null if it's always empty or complex. */
+  type: PropertyType | null;
+  /** Number of notes using the key. */
+  count: number;
+}
+
+/** Frontmatter properties of a note, without `tags` (indexed separately). */
+export function extractProperties(content: string): IndexedProperty[] {
+  return readProperties(content)
+    .filter(property => !/^tags?$/i.test(property.key))
+    .map(property => ({
+      key: property.key,
+      type: property.type,
+      empty: property.empty,
+      values: property.type === 'list' ? property.items : property.type === 'complex' || property.empty ? [] : [property.value],
+    }));
+}
+
+export type PropertyTypeMap = Record<string, PropertyValue['type']>;
+
+/** A graph colour group: notes matching `query` (Obsidian search syntax) get `color`. */
+export interface GraphColorGroup {
+  query: string;
+  /** CSS colour, e.g. '#e03e3e'. */
+  color: string;
+}
+
+/** Parses the `colorGroups` of Obsidian's `graph.json`; null if there are none. */
+export function parseGraphColorGroups(text: string): GraphColorGroup[] | null {
+  try {
+    const groups = JSON.parse(text)?.colorGroups;
+    if (!Array.isArray(groups)) return null;
+    const result = groups
+      .filter(group => typeof group?.query === 'string' && group.query.trim() && typeof group?.color?.rgb === 'number')
+      .map(group => ({ query: group.query.trim(), color: `#${(group.color.rgb >>> 0).toString(16).padStart(6, '0').slice(-6)}` }));
+    return result.length ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parses Obsidian's `types.json` (`{"types": {"status": "text", ...}}`). */
+export function parsePropertyTypes(text: string): PropertyTypeMap {
+  const result: PropertyTypeMap = {};
+  try {
+    const types = JSON.parse(text)?.types;
+    if (types && typeof types === 'object') {
+      for (const [key, name] of Object.entries(types)) {
+        const type = propertyTypeFromObsidian(name);
+        if (type) result[key.toLowerCase()] = type;
+      }
+    }
+  } catch {
+    // Not valid JSON: treat as no types.
+  }
+  return result;
+}
+
+function mostCommon<T>(counts: Map<T, number>): T | null {
+  let best: T | null = null;
+  let bestCount = 0;
+  for (const [value, count] of counts) {
+    if (count > bestCount) {
+      best = value;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 export interface BacklinkMention {

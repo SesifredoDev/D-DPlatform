@@ -894,7 +894,19 @@ export class VttSync implements OnDestroy {
     x?: number,
     y?: number
   ): Promise<boolean> {
-    const token = this.createCharacterTokenPayload(character);
+    return this.addTokenToActiveVtt(this.createCharacterTokenPayload(character), roomId, x, y);
+  }
+
+  /**
+   * Adds a token to the map open in this window, or asks the window hosting the map to add it.
+   * Resolves false when no map for `roomId` answered.
+   */
+  async addTokenToActiveVtt(
+    token: VttCharacterTokenPayload,
+    roomId?: string | null,
+    x?: number,
+    y?: number
+  ): Promise<boolean> {
     const engine = this.getEngine();
     if (engine && this.canHandleVttWindowCommand(roomId ?? null)) {
       this.addCharacterTokenPayload(engine, token, x, y);
@@ -912,15 +924,31 @@ export class VttSync implements OnDestroy {
     const posX = x ?? 100;
     const posY = y ?? 100;
 
-    const tokenOptions = {
+    const tokenOptions: Record<string, unknown> = {
       id: crypto.randomUUID(),
       name: token.name,
       icon: token.icon,
       ownerId: token.ownerId,
-      isPlayer: true
+      isPlayer: token.isPlayer ?? true
     };
+    if (token.maxHealth != null) tokenOptions['maxHealth'] = token.maxHealth;
+    if (token.currentHealth != null || token.maxHealth != null) {
+      tokenOptions['currentHealth'] = token.currentHealth ?? token.maxHealth;
+    }
+    if (token.size) tokenOptions['size'] = token.size;
+    if (token.notes) tokenOptions['notes'] = token.notes;
 
     engine.addToken(posX, posY, tokenOptions, false);
+
+    const turnOrder = this.turnOrder$.value;
+    if (typeof token.initiative === 'number' && Number.isFinite(token.initiative) && turnOrder.isActive) {
+      this.addTurnOrderEntry({
+        id: tokenOptions['id'] as string,
+        name: token.name,
+        initiative: token.initiative,
+        userId: (engine as any).currentUserId ?? ''
+      });
+    }
   }
 
   private createCharacterTokenPayload(character: ICharacter): VttCharacterTokenPayload {

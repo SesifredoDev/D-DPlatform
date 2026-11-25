@@ -17,6 +17,7 @@ export const NOTE_TEMPLATES: readonly NoteTemplate[] = [
   { label: 'NPC', fileName: 'NPC.md' },
   { label: 'Organisation', fileName: 'Organisation.md' },
   { label: 'Player Character', fileName: 'Player Character.md' },
+  { label: 'Quest', fileName: 'Quest.md' },
   { label: 'Race', fileName: 'Race.md' },
   { label: 'Session', fileName: '🎲 Session {{number}} - {{date}}.md' },
   { label: 'Story Arc', fileName: 'Story Arc.md' },
@@ -38,6 +39,12 @@ const TEMPLATE_VARIABLES: Record<string, TemplateVariableResolver> = {
 
 export function findNoteTemplate(fileName: string): NoteTemplate | undefined {
   return NOTE_TEMPLATES.find(template => template.fileName === fileName);
+}
+
+/** The template named like one of these tags (e.g. #quest → Quest, #npc → NPC), if any. */
+export function findTemplateForTags(tags: readonly string[]): NoteTemplate | undefined {
+  const wanted = new Set(tags.map(tag => tag.replace(/^#/, '').toLowerCase()));
+  return NOTE_TEMPLATES.find(template => wanted.has(template.label.toLowerCase()));
 }
 
 export async function loadNoteTemplate(template: NoteTemplate, filePath: string): Promise<string> {

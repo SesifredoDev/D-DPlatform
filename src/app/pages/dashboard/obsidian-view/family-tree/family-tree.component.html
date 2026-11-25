@@ -1,0 +1,348 @@
+<div class="family">
+  <div class="tree-toolbar">
+    @if (hasTree && !readonly && !parseError) {
+      <button type="button" class="text-action" (click)="addStandalonePerson()">
+        <mat-icon>person_add</mat-icon>Add person
+      </button>
+    }
+
+    <span class="spacer"></span>
+    @if (hasTree && tree.people.length) {
+      <span class="summary">{{ tree.people.length === 1 ? '1 person' : tree.people.length + ' people' }}</span>
+      <button type="button" class="icon-action" (click)="zoomBy(0.8)" matTooltip="Zoom out (−)" aria-label="Zoom out"><mat-icon>remove</mat-icon></button>
+      <button type="button" class="icon-action" (click)="zoomBy(1.25)" matTooltip="Zoom in (+)" aria-label="Zoom in"><mat-icon>add</mat-icon></button>
+      <button type="button" class="icon-action" (click)="fit()" matTooltip="Fit to view (0)" aria-label="Fit to view"><mat-icon>fit_screen</mat-icon></button>
+    }
+  </div>
+
+  <div class="tree-main">
+    <div
+      #viewport
+      class="viewport"
+      tabindex="0"
+      [attr.aria-label]="'Family tree. Drag to pan, + and − to zoom, 0 to fit. Tab to a person and press Enter to select them.'"
+      (wheel)="onWheel($event)"
+      (pointerdown)="onPointerDown($event)"
+      (pointermove)="onPointerMove($event)"
+      (pointerup)="onPointerUp()"
+      (pointercancel)="onPointerUp()"
+      (keydown)="onViewportKeydown($event)">
+      @if (hasTree && !parseError && tree.people.length) {
+        <svg class="tree-svg" aria-hidden="false">
+          <defs>
+            <clipPath id="family-tree-portrait-clip" clipPathUnits="objectBoundingBox">
+              <circle cx="0.5" cy="0.5" r="0.5"></circle>
+            </clipPath>
+          </defs>
+          <g [attr.transform]="transformAttr">
+            @for (line of connectors; track $index) {
+              <path [attr.d]="line.d" class="connector" [class.is-spouse]="line.kind === 'spouse'"></path>
+            }
+            @for (card of cards; track card.person.id) {
+              <g
+                class="person"
+                role="button"
+                tabindex="0"
+                [class.is-selected]="card.person.id === selectedId"
+                [class.is-linked]="!!card.note"
+                [class.is-missing]="!!card.person.link && !card.note"
+                [attr.transform]="'translate(' + card.x + ' ' + card.y + ')'"
+                [attr.aria-label]="card.person.name + (card.note ? ', linked to ' + card.note.name : '') + (card.person.details ? ', ' + card.person.details : '')"
+                (click)="select(card.person.id)"
+                (dblclick)="openCard(card)"
+                (keydown)="onCardKeydown($event, card)">
+                <title>{{ card.note ? card.person.name + ' · ' + card.note.relativePath + ' (double-click to open)' : card.person.link ? card.person.name + ' · no note called “' + card.person.link + '” yet' : card.person.name }}</title>
+                <rect class="card-bg" [attr.width]="cardWidth" [attr.height]="cardHeight" rx="8"></rect>
+                <rect class="card" [attr.width]="cardWidth" [attr.height]="cardHeight" rx="8"></rect>
+                @if (card.note || card.person.link) {
+                  <rect class="stripe" x="0" y="8" width="3" [attr.height]="cardHeight - 16" rx="1.5"></rect>
+                }
+                @if (portraitUrl(card); as url) {
+                  <circle class="portrait-ring" cx="38" [attr.cy]="cardHeight / 2" r="27"></circle>
+                  <image
+                    x="12"
+                    [attr.y]="cardHeight / 2 - 26"
+                    width="52"
+                    height="52"
+                    preserveAspectRatio="xMidYMid slice"
+                    clip-path="url(#family-tree-portrait-clip)"
+                    [attr.href]="url"></image>
+                }
+                <text class="name" [attr.x]="portraitUrl(card) ? 74 : 16" [attr.y]="card.person.details ? 30 : 41">{{ truncate(card.person.name, portraitUrl(card) ? 16 : 24) }}</text>
+                @if (card.person.details) {
+                  <text class="details" [attr.x]="portraitUrl(card) ? 74 : 16" y="50">{{ truncate(firstLine(card.person.details), portraitUrl(card) ? 20 : 30) }}</text>
+                }
+              </g>
+            }
+          </g>
+        </svg>
+      }
+
+      @if (parseError) {
+        <div class="tree-empty"><mat-icon>error</mat-icon><span>{{ parseError }}</span></div>
+      } @else if (hasTree && !tree.people.length) {
+        <div class="tree-empty">
+          <mat-icon>person_add</mat-icon>
+          <span>This tree is empty.</span>
+          @if (!readonly) {
+            <button type="button" class="text-action is-primary" (click)="addStandalonePerson()"><mat-icon>add</mat-icon>Add the first person</button>
+          }
+        </div>
+      }
+    </div>
+
+    @if (selected; as card) {
+      <aside class="person-panel" aria-label="Person">
+        <header class="panel-header">
+          <mat-icon>person</mat-icon>
+          <span class="panel-title">{{ card.person.name }}</span>
+          <button type="button" class="icon-action" (click)="select(null)" aria-label="Close" matTooltip="Close"><mat-icon>close</mat-icon></button>
+        </header>
+
+        <div class="panel-body">
+          <label class="panel-field">
+            <span class="label">Name</span>
+            <input
+              #nameInput
+              class="field"
+              [(ngModel)]="nameDraft"
+              [readonly]="readonly"
+              (blur)="saveName()"
+              (keydown.enter)="$any($event.target).blur()"
+              autocomplete="off">
+          </label>
+
+          <label class="panel-field">
+            <span class="label">Details</span>
+            <textarea
+              class="field"
+              rows="2"
+              [(ngModel)]="detailsDraft"
+              [readonly]="readonly"
+              (blur)="saveDetails()"
+              placeholder="e.g. b. 263 AC · Lord of Winterfell"></textarea>
+          </label>
+
+          <div class="panel-field">
+            <span class="label">Note</span>
+            @if (card.person.link) {
+              <div class="linked-note" [class.is-missing]="!card.note">
+                <mat-icon>{{ card.note ? 'description' : 'link_off' }}</mat-icon>
+                @if (card.note) {
+                  <button type="button" class="note-link" (click)="openCard(card)" [title]="'Open ' + card.note.relativePath">
+                    {{ card.note.relativePath }}
+                  </button>
+                } @else {
+                  <span class="note-missing" [title]="'No note called ' + card.person.link + ' yet'">{{ card.person.link }} (no note yet)</span>
+                }
+                @if (!readonly) {
+                  <button type="button" class="icon-action" (click)="unlinkNote()" aria-label="Unlink note" matTooltip="Unlink"><mat-icon>link_off</mat-icon></button>
+                }
+              </div>
+            }
+            @if (!readonly && (!card.person.link || !card.note)) {
+              <div class="picker">
+                <input
+                  class="field"
+                  [(ngModel)]="noteQuery"
+                  (keydown)="onNoteQueryKeydown($event)"
+                  [placeholder]="card.person.link ? 'Link a different note…' : 'Link to a note…'"
+                  aria-label="Find a note to link"
+                  autocomplete="off"
+                  spellcheck="false">
+                @if (noteSuggestions.length) {
+                  <ul class="suggestions" role="listbox" aria-label="Notes">
+                    @for (note of noteSuggestions; track note.relativePath) {
+                      <li>
+                        <button type="button" role="option" (mousedown)="$event.preventDefault()" (click)="linkNote(note)">
+                          <mat-icon>description</mat-icon>
+                          <span class="suggestion-label">{{ displayName(note) }}</span>
+                          @if (note.parentPath) {
+                            <span class="suggestion-hint">{{ note.parentPath }}</span>
+                          }
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                } @else if (noteQuery.trim()) {
+                  <span class="picker-empty">No notes match.</span>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="panel-field">
+            <span class="label">Portrait</span>
+            <div class="portrait-row">
+              @if (portraitUrl(card); as url) {
+                <img class="portrait-preview" [src]="url" alt="">
+              } @else {
+                <span class="portrait-preview is-empty"><mat-icon>person</mat-icon></span>
+              }
+              <div class="portrait-info">
+                <span class="portrait-source" [title]="card.portrait ?? ''">{{ portraitLabel(card) }}</span>
+                @if (!readonly) {
+                  <div class="portrait-actions">
+                    <button type="button" class="text-action" (click)="openPortraitPicker()">
+                      <mat-icon>photo_library</mat-icon>Choose from vault
+                    </button>
+                    <label class="text-action" [class.is-busy]="isUploadingPortrait">
+                      <mat-icon>upload</mat-icon>{{ isUploadingPortrait ? 'Saving…' : 'Upload' }}
+                      <input type="file" accept="image/*" hidden [disabled]="isUploadingPortrait" (change)="uploadPortrait($event)">
+                    </label>
+                    @if (card.person.portrait) {
+                      <button type="button" class="text-action" (click)="clearPortrait()" [matTooltip]="card.note ? 'Use the linked note’s image instead' : ''">Remove</button>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          </div>
+
+          @for (group of [
+            { label: 'Parents', items: relatives.parents },
+            { label: 'Spouses', items: relatives.spouses },
+            { label: 'Children', items: relatives.children }
+          ]; track group.label) {
+            @if (group.items.length) {
+              <div class="panel-field">
+                <span class="label">{{ group.label }}</span>
+                <div class="chips">
+                  @for (item of group.items; track item.relation.id) {
+                    <span class="chip">
+                      <button type="button" class="chip-label" (click)="select(item.person.id)">{{ item.person.name }}</button>
+                      @if (!readonly) {
+                        <button type="button" class="chip-remove" (click)="removeRelationById(item.relation)" [attr.aria-label]="'Remove relation to ' + item.person.name">
+                          <mat-icon>close</mat-icon>
+                        </button>
+                      }
+                    </span>
+                  }
+                </div>
+              </div>
+            }
+          }
+
+          @if (!readonly) {
+            <div class="panel-field">
+              <span class="label">Add relative</span>
+              <span class="segmented" role="radiogroup" aria-label="Relation">
+                @for (kind of ['parent', 'spouse', 'child']; track kind) {
+                  <button
+                    type="button"
+                    role="radio"
+                    [attr.aria-checked]="relativeKind === kind"
+                    [class.is-active]="relativeKind === kind"
+                    (click)="relativeKind = $any(kind); relationError = ''">
+                    {{ kind === 'parent' ? 'Parent' : kind === 'spouse' ? 'Spouse' : 'Child' }}
+                  </button>
+                }
+              </span>
+              <div class="picker">
+                <div class="picker-row">
+                  <input
+                    class="field"
+                    [(ngModel)]="relativeQuery"
+                    (ngModelChange)="activeSuggestion = -1; relationError = ''"
+                    (keydown)="onRelativeKeydown($event)"
+                    placeholder="Name, a note, or someone in the tree"
+                    aria-label="Relative's name (Enter adds a new person)"
+                    autocomplete="off"
+                    spellcheck="false">
+                  <button type="button" class="text-action is-primary" (click)="addRelative()" [disabled]="!relativeQuery.trim()">Add</button>
+                </div>
+                @if (relativeSuggestions.length) {
+                  <ul class="suggestions" role="listbox" aria-label="Existing people and notes">
+                    @for (suggestion of relativeSuggestions; track $index) {
+                      <li>
+                        <button
+                          type="button"
+                          role="option"
+                          [class.is-active]="$index === activeSuggestion"
+                          [attr.aria-selected]="$index === activeSuggestion"
+                          (mousedown)="$event.preventDefault()"
+                          (click)="addRelative(suggestion)">
+                          <mat-icon>{{ suggestion.kind === 'person' ? 'person' : 'description' }}</mat-icon>
+                          <span class="suggestion-label">{{ suggestion.label }}</span>
+                          <span class="suggestion-hint">{{ suggestion.hint }}</span>
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (relationError) {
+                  <span class="picker-error" role="alert">{{ relationError }}</span>
+                }
+              </div>
+            </div>
+
+            <button type="button" class="text-action is-danger" (click)="deleteSelected()">
+              <mat-icon>delete</mat-icon>Remove from tree
+            </button>
+          }
+        </div>
+      </aside>
+    }
+  </div>
+
+  @if (isPickingPortrait && selected; as card) {
+    <div class="portrait-backdrop" (click)="closePortraitPicker()"></div>
+    <div
+      class="portrait-dialog"
+      role="dialog"
+      aria-modal="true"
+      [attr.aria-label]="'Choose a portrait for ' + card.person.name"
+      (keydown.escape)="closePortraitPicker()">
+      <header class="portrait-dialog-header">
+        <span class="portrait-dialog-title">Portrait for {{ card.person.name }}</span>
+        <button type="button" class="icon-action" (click)="closePortraitPicker()" aria-label="Close" matTooltip="Close"><mat-icon>close</mat-icon></button>
+      </header>
+      <div class="portrait-dialog-tools">
+        <input
+          #pickerSearch
+          class="field"
+          [(ngModel)]="pickerQuery"
+          (ngModelChange)="updatePickerImages()"
+          (keydown.enter)="pickerImages.length && pickPortrait(pickerImages[0])"
+          placeholder="Filter images by name or folder"
+          aria-label="Filter images"
+          autocomplete="off"
+          spellcheck="false">
+        <label class="text-action" [class.is-busy]="isUploadingPortrait">
+          <mat-icon>upload</mat-icon>{{ isUploadingPortrait ? 'Saving…' : 'Upload from computer' }}
+          <input type="file" accept="image/*" hidden [disabled]="isUploadingPortrait" (change)="uploadPortrait($event)">
+        </label>
+      </div>
+      <div class="portrait-grid" role="listbox" aria-label="Images in the vault">
+        @for (image of pickerImages; track image.relativePath) {
+          <button
+            type="button"
+            class="portrait-option"
+            role="option"
+            [attr.aria-selected]="card.portrait === image.relativePath"
+            [class.is-current]="card.portrait === image.relativePath"
+            [title]="image.relativePath"
+            (click)="pickPortrait(image)">
+            @if (imageUrls[image.relativePath]) {
+              <img [src]="imageUrls[image.relativePath]" alt="" loading="lazy">
+            } @else {
+              <span class="portrait-option-placeholder"><mat-icon>image</mat-icon></span>
+            }
+            <span class="portrait-option-name">{{ image.name }}</span>
+            @if (image.parentPath) {
+              <span class="portrait-option-path">{{ image.parentPath }}</span>
+            }
+          </button>
+        } @empty {
+          <div class="portrait-grid-empty">
+            <mat-icon>hide_image</mat-icon>
+            <span>{{ pickerQuery.trim() ? 'No images match.' : 'No images in this vault yet. Upload one instead.' }}</span>
+          </div>
+        }
+      </div>
+      @if (pickerTotal > pickerImages.length) {
+        <footer class="portrait-dialog-footer">Showing {{ pickerImages.length }} of {{ pickerTotal }} images. Type to narrow them down.</footer>
+      }
+    </div>
+  }
+</div>

@@ -1,0 +1,653 @@
+<div class="database">
+  @if (config.error) {
+    <div class="db-message is-error" role="alert">
+      <mat-icon>error</mat-icon>
+      <div>
+        <strong>This database file can't be read.</strong>
+        <span>{{ config.error }}</span>
+        <span>Fix it in Obsidian or a text editor; the app won't change it until it's valid.</span>
+      </div>
+    </div>
+  } @else {
+    <div class="db-toolbar">
+      <div class="view-tabs" role="tablist" aria-label="Views">
+        @for (item of config.views; track $index) {
+          <button
+            type="button"
+            role="tab"
+            class="view-tab"
+            [class.is-active]="$index === activeView"
+            [attr.aria-selected]="$index === activeView"
+            (click)="selectView($index)">
+            <mat-icon>{{ item.type === 'cards' ? 'grid_view' : item.type === 'kanban' ? 'view_kanban' : 'table_rows' }}</mat-icon>
+            <span>{{ item.name }}</span>
+          </button>
+        }
+        @if (!readonly) {
+          <button type="button" class="icon-action" (click)="addView()" matTooltip="Add a view" aria-label="Add a view">
+            <mat-icon>add</mat-icon>
+          </button>
+        }
+      </div>
+
+      <div class="db-actions">
+        @if (result) {
+          <span class="result-count">
+            {{ result.total === 1 ? '1 result' : result.total + ' results' }}
+            @if (view?.limit && result.total > result.rows.length) {
+              <span class="muted">· showing {{ result.rows.length }}</span>
+            }
+          </span>
+        }
+        @if (!readonly && view) {
+          @if (layout !== 'board') {
+            <button type="button" class="tool-btn" (click)="startNewNote(null)" matTooltip="New note that matches this view">
+              <mat-icon>add</mat-icon>
+              <span>New</span>
+            </button>
+          }
+          <button type="button" class="tool-btn" [class.is-active]="panel === 'filter'" (click)="togglePanel('filter')">
+            <mat-icon>filter_list</mat-icon>
+            <span>Filter</span>
+            @if (filterCount) {
+              <span class="badge">{{ filterCount }}</span>
+            }
+          </button>
+          <button type="button" class="tool-btn" [class.is-active]="panel === 'columns'" (click)="togglePanel('columns')">
+            <mat-icon>view_column</mat-icon>
+            <span>{{ layout === 'cards' ? 'Fields' : 'Columns' }}</span>
+          </button>
+          <button type="button" class="tool-btn" [class.is-active]="panel === 'settings'" (click)="togglePanel('settings')" aria-label="View settings">
+            <mat-icon>tune</mat-icon>
+            <span>View</span>
+          </button>
+        }
+      </div>
+    </div>
+
+    @if (newNote && !newNote.group) {
+      <div class="db-panel new-note">
+        <mat-icon>note_add</mat-icon>
+        <input
+          class="field"
+          [(ngModel)]="newNoteTitle"
+          (keydown)="onNewNoteKeydown($event)"
+          placeholder="Title of the new note (Enter to create, Esc to cancel)"
+          aria-label="New note title"
+          autocomplete="off">
+        <button type="button" class="icon-action" (click)="cancelNewNote()" aria-label="Cancel"><mat-icon>close</mat-icon></button>
+      </div>
+    }
+
+    @if (editError) {
+      <div class="db-message is-error" role="alert">
+        <mat-icon>error</mat-icon>
+        <span>Couldn't change the file: {{ editError }}</span>
+      </div>
+    }
+
+    @if (indexing) {
+      <div class="db-message">
+        <mat-icon class="spin">progress_activity</mat-icon>
+        <span>Still reading the vault, so results may be incomplete.</span>
+      </div>
+    }
+
+    @if (unsupportedLayout) {
+      <div class="db-message">
+        <mat-icon>info</mat-icon>
+        <span>Shown as a table: the app doesn't have Obsidian's “{{ unsupportedLayout }}” layout.</span>
+      </div>
+    }
+
+    @if (result?.warnings?.length) {
+      <div class="db-message is-warning">
+        <mat-icon>warning</mat-icon>
+        <div>
+          <button type="button" class="link-btn" (click)="showWarnings = !showWarnings">
+            {{ result!.warnings.length === 1 ? '1 filter or column uses' : result!.warnings.length + ' filters or columns use' }}
+            something the app can't evaluate yet, so {{ result!.warnings.length === 1 ? 'it is' : 'they are' }} ignored here.
+            {{ showWarnings ? 'Hide' : 'Show' }}
+          </button>
+          @if (showWarnings) {
+            <ul>
+              @for (warning of result!.warnings; track warning) {
+                <li><code>{{ warning }}</code></li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- ---------------------------------------------------------------- panels -->
+
+    @if (panel === 'filter' && view) {
+      <section class="db-panel" aria-label="Filters">
+        <div class="panel-head">
+          <div class="segmented" role="radiogroup" aria-label="Filter applies to">
+            <button type="button" [class.is-active]="filterScope === 'view'" (click)="setFilterScope('view')">This view</button>
+            <button type="button" [class.is-active]="filterScope === 'all'" (click)="setFilterScope('all')">All views</button>
+          </div>
+          <span class="muted">Notes must match every condition.</span>
+        </div>
+
+        @if (!filterEditable) {
+          <p class="muted">These filters use “or”/“not” groups, which can only be edited in Obsidian for now.</p>
+        } @else {
+          @for (condition of conditions; track $index; let i = $index) {
+            <div class="condition">
+              @switch (condition.kind) {
+                @case ('tag') {
+                  <span class="condition-label">Has tag</span>
+                  <input
+                    class="field"
+                    [(ngModel)]="condition.value"
+                    (change)="saveConditions()"
+                    (keydown.enter)="saveConditions()"
+                    list="db-tags"
+                    placeholder="npc"
+                    aria-label="Tag">
+                }
+                @case ('folder') {
+                  <span class="condition-label">In folder</span>
+                  <input
+                    class="field"
+                    [(ngModel)]="condition.value"
+                    (change)="saveConditions()"
+                    (keydown.enter)="saveConditions()"
+                    list="db-folders"
+                    placeholder="NPCs"
+                    aria-label="Folder">
+                }
+                @case ('property') {
+                  <input
+                    class="field is-key"
+                    [(ngModel)]="condition.property"
+                    (change)="saveConditions()"
+                    (keydown.enter)="saveConditions()"
+                    list="db-properties"
+                    placeholder="Property"
+                    aria-label="Property">
+                  <select class="field is-op" [(ngModel)]="condition.op" (ngModelChange)="saveConditions()" aria-label="Comparison">
+                    @for (item of conditionOps; track item.op) {
+                      <option [value]="item.op">{{ item.label }}</option>
+                    }
+                  </select>
+                  @if (opNeedsValue(condition.op)) {
+                    <input
+                      class="field"
+                      [(ngModel)]="condition.value"
+                      (change)="saveConditions()"
+                      (keydown.enter)="saveConditions()"
+                      [attr.list]="'db-values-' + i"
+                      placeholder="Value"
+                      aria-label="Value">
+                    <datalist [id]="'db-values-' + i">
+                      @for (option of valueOptions(condition.property); track option) {
+                        <option [value]="option"></option>
+                      }
+                    </datalist>
+                  }
+                }
+                @case ('raw') {
+                  <span class="condition-label">Formula</span>
+                  <input
+                    class="field is-code"
+                    [(ngModel)]="condition.expression"
+                    (change)="saveConditions()"
+                    (keydown.enter)="saveConditions()"
+                    placeholder='e.g. file.mtime > now() - "1 week"'
+                    spellcheck="false"
+                    aria-label="Filter expression">
+                }
+              }
+              <button type="button" class="icon-action" (click)="removeCondition(i)" aria-label="Remove condition">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+          }
+
+          <div class="add-row">
+            <span class="muted">Add:</span>
+            <button type="button" class="chip-btn" (click)="addCondition('tag')"><mat-icon>sell</mat-icon>Tag</button>
+            <button type="button" class="chip-btn" (click)="addCondition('folder')"><mat-icon>folder</mat-icon>Folder</button>
+            <button type="button" class="chip-btn" (click)="addCondition('property')"><mat-icon>list_alt</mat-icon>Property</button>
+            <button type="button" class="chip-btn" (click)="addCondition('raw')"><mat-icon>functions</mat-icon>Formula</button>
+          </div>
+        }
+
+        <datalist id="db-tags">
+          @for (tag of tagOptions; track tag) {
+            <option [value]="tag"></option>
+          }
+        </datalist>
+        <datalist id="db-folders">
+          @for (folder of folderOptions; track folder) {
+            <option [value]="folder"></option>
+          }
+        </datalist>
+        <datalist id="db-properties">
+          @for (key of propertyOptions; track key) {
+            <option [value]="key"></option>
+          }
+        </datalist>
+      </section>
+    }
+
+    @if (panel === 'columns' && view) {
+      <section class="db-panel" aria-label="Columns">
+        @for (property of columns; track property; let i = $index; let first = $first; let last = $last) {
+          <div class="column-row">
+            <input
+              class="field"
+              [value]="columnName(property)"
+              (change)="renameColumn(property, $any($event.target).value)"
+              (keydown.enter)="$any($event.target).blur()"
+              [attr.aria-label]="'Name of column ' + property">
+            <code class="muted">{{ property }}</code>
+            <span class="spacer"></span>
+            <button type="button" class="icon-action" [disabled]="first" (click)="moveColumn(i, -1)" aria-label="Move up"><mat-icon>arrow_upward</mat-icon></button>
+            <button type="button" class="icon-action" [disabled]="last" (click)="moveColumn(i, 1)" aria-label="Move down"><mat-icon>arrow_downward</mat-icon></button>
+            <button type="button" class="icon-action" (click)="removeColumn(i)" aria-label="Remove column"><mat-icon>close</mat-icon></button>
+          </div>
+        }
+        <div class="add-row">
+          <select #addColumnSelect class="field" (change)="addColumn(addColumnSelect.value); addColumnSelect.value = ''" aria-label="Add a column">
+            <option value="">+ Add {{ layout === 'cards' ? 'field' : 'column' }}…</option>
+            @for (option of columnOptions; track option.property) {
+              <option [value]="option.property">{{ option.label }}</option>
+            }
+          </select>
+        </div>
+      </section>
+    }
+
+    @if (panel === 'settings' && view) {
+      <section class="db-panel settings" aria-label="View settings">
+        <label>
+          <span>Name</span>
+          <input class="field" [value]="view.name" (change)="setViewName($any($event.target).value)" (keydown.enter)="$any($event.target).blur()">
+        </label>
+        <label>
+          <span>Layout</span>
+          <span class="segmented">
+            <button type="button" [class.is-active]="layout === 'table'" (click)="setLayout('table')"><mat-icon>table_rows</mat-icon>Table</button>
+            <button type="button" [class.is-active]="layout === 'cards'" (click)="setLayout('cards')"><mat-icon>grid_view</mat-icon>Cards</button>
+            <button type="button" [class.is-active]="layout === 'board'" (click)="setLayout('kanban')"><mat-icon>view_kanban</mat-icon>Board</button>
+          </span>
+        </label>
+        <label>
+          <span>{{ layout === 'board' ? 'Columns from' : 'Group by' }}</span>
+          <span class="inline">
+            <select class="field" (change)="setGroupBy($any($event.target).value)" aria-label="Group by">
+              <option value="" [selected]="!view.groupBy">None</option>
+              @for (key of propertyOptions; track key) {
+                <option [value]="key" [selected]="view.groupBy?.property === key">{{ key }}</option>
+              }
+              @if (view.groupBy && !propertyOptions.includes(view.groupBy.property)) {
+                <option [value]="view.groupBy.property" selected>{{ view.groupBy.property }}</option>
+              }
+            </select>
+            @if (view.groupBy && layout !== 'board') {
+              <select class="field" (change)="setGroupBy(view.groupBy.property, $any($event.target).value)" aria-label="Group order">
+                <option value="ASC" [selected]="view.groupBy.direction === 'ASC'">A → Z</option>
+                <option value="DESC" [selected]="view.groupBy.direction === 'DESC'">Z → A</option>
+              </select>
+            }
+          </span>
+        </label>
+        @if (layout !== 'table') {
+          <label>
+            <span>Cover image</span>
+            <select class="field" (change)="setImage($any($event.target).value)" aria-label="Cover image">
+              <option value="" [selected]="!view.image">None</option>
+              @for (key of propertyOptions; track key) {
+                <option [value]="'note.' + key" [selected]="view.image === 'note.' + key || view.image === key">{{ key }}</option>
+              }
+              @if (view.image && !propertyOptions.includes(view.image.replace('note.', ''))) {
+                <option [value]="view.image" selected>{{ view.image }}</option>
+              }
+            </select>
+          </label>
+        }
+        <label>
+          <span>Show at most</span>
+          <input class="field is-number" type="number" min="1" [value]="view.limit ?? ''" placeholder="All" (change)="setLimit($any($event.target).value)">
+        </label>
+        <div class="settings-footer">
+          <button type="button" class="danger-btn" [disabled]="config.views.length <= 1" (click)="deleteView()"
+            [matTooltip]="config.views.length <= 1 ? 'A database needs at least one view' : ''">
+            <mat-icon>delete</mat-icon>
+            Delete view
+          </button>
+        </div>
+      </section>
+    }
+
+    <!-- ---------------------------------------------------------------- results -->
+
+    <div class="db-body">
+      @if (showPresets) {
+        <div class="presets">
+          <strong>What should this database show?</strong>
+          <span class="muted">Pick a tag to list those notes, or use Filter for folders and properties.</span>
+          <div class="preset-list">
+            @for (tag of tagPresets; track tag) {
+              <button type="button" class="chip-btn" (click)="applyTagPreset(tag)">#{{ tag }}</button>
+            }
+          </div>
+        </div>
+      }
+
+      @if (result && !rows.length && layout !== 'board') {
+        <div class="db-empty">
+          <mat-icon>search_off</mat-icon>
+          <span>No notes match{{ filterCount ? ' these filters' : '' }}.</span>
+        </div>
+      } @else if (layout === 'board') {
+        <ng-container *ngTemplateOutlet="board"></ng-container>
+      } @else if (layout === 'cards') {
+        @if (groups) {
+          @for (group of groups; track group.label) {
+            <h3 class="group-title">{{ group.label }} <span class="muted">{{ group.rows.length }}</span></h3>
+            <ng-container *ngTemplateOutlet="cardGrid; context: { rows: group.rows }"></ng-container>
+          }
+        } @else {
+          <ng-container *ngTemplateOutlet="cardGrid; context: { rows: rows }"></ng-container>
+        }
+      } @else if (result) {
+        <div class="table-wrap">
+          <table class="db-table">
+            <thead>
+              <tr>
+                @for (property of columns; track property) {
+                  <th scope="col" [attr.aria-sort]="sortOf(property) === 'ASC' ? 'ascending' : sortOf(property) === 'DESC' ? 'descending' : null">
+                    <button type="button" class="th-btn" [disabled]="readonly" (click)="toggleSort(property)" [title]="readonly ? '' : 'Sort by ' + columnName(property)">
+                      <span>{{ columnName(property) }}</span>
+                      @if (sortOf(property)) {
+                        <mat-icon>{{ sortOf(property) === 'ASC' ? 'arrow_upward' : 'arrow_downward' }}</mat-icon>
+                      }
+                    </button>
+                  </th>
+                }
+              </tr>
+            </thead>
+            @if (groups) {
+              @for (group of groups; track group.label) {
+                <tbody>
+                  <tr class="group-row">
+                    <th [attr.colspan]="columns.length" scope="rowgroup">{{ group.label }} <span class="muted">{{ group.rows.length }}</span></th>
+                  </tr>
+                  @for (row of group.rows; track trackRow($index, row)) {
+                    <ng-container *ngTemplateOutlet="tableRow; context: { row: row }"></ng-container>
+                  }
+                </tbody>
+              }
+            } @else {
+              <tbody>
+                @for (row of rows; track trackRow($index, row)) {
+                  <ng-container *ngTemplateOutlet="tableRow; context: { row: row }"></ng-container>
+                }
+              </tbody>
+            }
+          </table>
+        </div>
+      }
+    </div>
+  }
+</div>
+
+<ng-template #tableRow let-row="row">
+  <tr>
+    @for (cell of row.cells; track $index; let ci = $index) {
+      <td
+        [class.is-editable]="columns[ci] !== 'file.name' && !!editableType(columns[ci])"
+        (click)="columns[ci] !== 'file.name' && startEdit(row, ci)"
+        [title]="columns[ci] !== 'file.name' && editableType(columns[ci]) ? 'Click to edit' : ''">
+        @if (columns[ci] === 'file.name') {
+          <button type="button" class="name-link" (click)="open(row.path)" [title]="row.path">
+            <mat-icon>{{ row.icon }}</mat-icon>
+            <span>{{ row.title }}</span>
+          </button>
+        } @else if (isEditing(row, ci)) {
+          <input
+            class="cell-input"
+            [type]="editInputType(ci)"
+            [(ngModel)]="editDraft"
+            (keydown)="onEditKeydown($event, row, ci)"
+            (blur)="commitEdit(row, ci)"
+            [attr.aria-label]="'Edit ' + columnName(columns[ci])"
+            spellcheck="false">
+        } @else {
+          <ng-container *ngTemplateOutlet="cellView; context: { cell: cell }"></ng-container>
+        }
+      </td>
+    }
+  </tr>
+</ng-template>
+
+<ng-template #cardGrid let-rows="rows">
+  <div class="card-grid">
+    @for (row of rows; track trackRow($index, row)) {
+      <article class="card" tabindex="0" (click)="open(row.path)" (keydown.enter)="open(row.path)">
+        @if (view?.image) {
+          <div class="card-cover">
+            @if (row.image && imageUrls[row.image]) {
+              <img [src]="imageUrls[row.image]" [alt]="''" loading="lazy">
+            } @else {
+              <mat-icon>{{ row.image ? 'image' : row.icon }}</mat-icon>
+            }
+          </div>
+        }
+        <h4 class="card-title">{{ row.title }}</h4>
+        <dl class="card-fields">
+          @for (cell of row.cells; track $index; let ci = $index) {
+            @if (columns[ci] !== 'file.name' && cell.kind !== 'empty') {
+              <div class="card-field">
+                <dt>{{ columnName(columns[ci]) }}</dt>
+                <dd><ng-container *ngTemplateOutlet="cellView; context: { cell: cell }"></ng-container></dd>
+              </div>
+            }
+          }
+        </dl>
+      </article>
+    }
+  </div>
+</ng-template>
+
+<ng-template #cellView let-cell="cell">
+  @switch (cell.kind) {
+    @case ('bool') {
+      <mat-icon class="cell-bool" [class.is-on]="cell.value" [attr.aria-label]="cell.value ? 'Yes' : 'No'">
+        {{ cell.value ? 'check_box' : 'check_box_outline_blank' }}
+      </mat-icon>
+    }
+    @case ('list') {
+      <span class="cell-list">
+        @for (item of cell.items; track $index) {
+          <span class="cell-chip">
+            <ng-container *ngTemplateOutlet="segmentsView; context: { segments: item }"></ng-container>
+          </span>
+        }
+      </span>
+    }
+    @case ('text') {
+      <ng-container *ngTemplateOutlet="segmentsView; context: { segments: cell.segments }"></ng-container>
+    }
+  }
+</ng-template>
+
+<ng-template #segmentsView let-segments="segments">
+  @for (segment of segments; track $index) {
+    @if (segment.link) {
+      <a href="#" class="cell-link" (click)="onLinkClick($event, segment.link)" [title]="'Open ' + segment.link">{{ segment.text }}</a>
+    } @else {
+      <span>{{ segment.text }}</span>
+    }
+  }
+</ng-template>
+
+<ng-template #board>
+  @if (!view?.groupBy) {
+    <div class="presets">
+      <strong>What should the columns be?</strong>
+      <span class="muted">Cards are put in columns by a property, such as status.</span>
+      <div class="preset-list">
+        <select class="field" (change)="setGroupBy($any($event.target).value)" [disabled]="readonly" aria-label="Columns from">
+          <option value="">Choose a property…</option>
+          @for (key of propertyOptions; track key) {
+            <option [value]="key">{{ key }}</option>
+          }
+        </select>
+      </div>
+    </div>
+  } @else {
+    @if (boardLockedReason && !readonly) {
+      <div class="db-message board-note">
+        <mat-icon>lock</mat-icon>
+        <span>{{ boardLockedReason }}</span>
+      </div>
+    }
+
+    <div class="board" cdkDropListGroup>
+      @for (group of groups ?? []; track group.value ?? '') {
+        <section class="board-column" [attr.aria-label]="group.label">
+          <header class="board-column-head">
+            <span class="board-column-title" [class.is-none]="group.value === null">{{ group.label }}</span>
+            <span class="board-count">{{ group.rows.length }}</span>
+            @if (!readonly) {
+              <button
+                type="button"
+                class="icon-action is-small"
+                [matMenuTriggerFor]="columnMenu"
+                [matMenuTriggerData]="{ group: group }"
+                [attr.aria-label]="'Options for column ' + group.label">
+                <mat-icon>more_horiz</mat-icon>
+              </button>
+            }
+          </header>
+
+          <div
+            class="board-cards"
+            cdkDropList
+            [cdkDropListData]="group"
+            [cdkDropListDisabled]="!!boardLockedReason"
+            (cdkDropListDropped)="onCardDrop($event)">
+            @for (row of group.rows; track row.path) {
+              <article
+                class="board-card"
+                cdkDrag
+                [cdkDragData]="row"
+                (cdkDragEnded)="markDragEnd()"
+                tabindex="0"
+                (click)="openCard(row)"
+                (keydown.enter)="open(row.path)">
+                <div class="board-card-head">
+                  <h4 class="board-card-title">{{ row.title }}</h4>
+                  @if (!boardLockedReason) {
+                    <button
+                      type="button"
+                      class="icon-action is-small"
+                      [matMenuTriggerFor]="moveMenu"
+                      [matMenuTriggerData]="{ row: row, from: group }"
+                      (click)="$event.stopPropagation()"
+                      (keydown.enter)="$event.stopPropagation()"
+                      [attr.aria-label]="'Move ' + row.title + ' to another column'">
+                      <mat-icon>more_vert</mat-icon>
+                    </button>
+                  }
+                </div>
+                @if (view?.image && row.image && imageUrls[row.image]) {
+                  <img class="board-card-cover" [src]="imageUrls[row.image]" alt="" loading="lazy">
+                }
+                <dl class="card-fields">
+                  @for (cell of row.cells; track $index; let ci = $index) {
+                    @if (columns[ci] !== 'file.name' && columns[ci] !== view?.groupBy?.property && cell.kind !== 'empty') {
+                      <div class="card-field">
+                        <dt>{{ columnName(columns[ci]) }}</dt>
+                        <dd><ng-container *ngTemplateOutlet="cellView; context: { cell: cell }"></ng-container></dd>
+                      </div>
+                    }
+                  }
+                </dl>
+              </article>
+            }
+          </div>
+
+          @if (!readonly) {
+            @if (newNote && newNote.group === group) {
+              <input
+                class="field board-new-input"
+                [(ngModel)]="newNoteTitle"
+                (keydown)="onNewNoteKeydown($event)"
+                (blur)="newNoteTitle.trim() ? submitNewNote() : cancelNewNote()"
+                placeholder="Title, then Enter"
+                [attr.aria-label]="'New note in ' + group.label"
+                autocomplete="off">
+            } @else {
+              <button type="button" class="board-add" (click)="startNewNote(group)">
+                <mat-icon>add</mat-icon>
+                New
+              </button>
+            }
+          }
+        </section>
+      }
+
+      @if (!readonly && !boardLockedReason) {
+        <div class="board-column is-add">
+          <input
+            class="field"
+            [(ngModel)]="newColumnName"
+            (keydown.enter)="addBoardColumn()"
+            (blur)="addBoardColumn()"
+            placeholder="+ Add column"
+            aria-label="Add a column"
+            autocomplete="off">
+        </div>
+      }
+    </div>
+
+    @if (result?.hiddenGroups?.length) {
+      <div class="hidden-columns">
+        <span class="muted">Hidden columns:</span>
+        @for (hidden of result!.hiddenGroups; track hidden.label) {
+          <button type="button" class="chip-btn" [disabled]="readonly" (click)="showBoardColumn(hidden.value)" [title]="readonly ? '' : 'Show this column'">
+            {{ hidden.label }} · {{ hidden.count }}
+          </button>
+        }
+      </div>
+    }
+  }
+</ng-template>
+
+<mat-menu #moveMenu="matMenu" panelClass="custom-glass-menu">
+  <ng-template matMenuContent let-row="row" let-from="from">
+    @for (group of groups ?? []; track group.value ?? '') {
+      @if (group !== from) {
+        <button mat-menu-item (click)="moveCard(row, group)">
+          <mat-icon>arrow_forward</mat-icon>
+          <span>Move to {{ group.label }}</span>
+        </button>
+      }
+    }
+  </ng-template>
+</mat-menu>
+
+<mat-menu #columnMenu="matMenu" panelClass="custom-glass-menu">
+  <ng-template matMenuContent let-group="group">
+    <button mat-menu-item (click)="moveBoardColumn(group.value, -1)">
+      <mat-icon>arrow_back</mat-icon>
+      <span>Move left</span>
+    </button>
+    <button mat-menu-item (click)="moveBoardColumn(group.value, 1)">
+      <mat-icon>arrow_forward</mat-icon>
+      <span>Move right</span>
+    </button>
+    <button mat-menu-item (click)="hideBoardColumn(group.value)">
+      <mat-icon>visibility_off</mat-icon>
+      <span>Hide column</span>
+    </button>
+  </ng-template>
+</mat-menu>

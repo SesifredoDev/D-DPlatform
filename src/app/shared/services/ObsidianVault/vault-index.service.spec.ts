@@ -1,5 +1,5 @@
 import type { VaultEntry } from './obsidian-vault-service';
-import { VaultIndex, extractLinks, extractTags } from './vault-index.service';
+import { VaultIndex, extractLinks, extractProperties, extractTags, parsePropertyTypes } from './vault-index.service';
 
 function file(relativePath: string): VaultEntry {
   const parts = relativePath.split('/');
@@ -199,5 +199,82 @@ describe('extractTags', () => {
 
     const block = extractTags('---\ntags:\n  - npc\n  - "faction/zhentarim"\n---\nbody');
     expect(block.sort()).toEqual(['faction/zhentarim', 'npc']);
+  });
+});
+
+describe('properties in the index', () => {
+  const index = new VaultIndex([file('A.md'), file('B.md'), file('C.md')]);
+  index.indexNoteContent('A.md', '---\ntags: [npc]\nfaction: Harpers\nlevel: 3\nallies:\n  - "[[B]]"\n---\n');
+  index.indexNoteContent('B.md', '---\nFaction: harpers\nlevel:\n---\n');
+  index.indexNoteContent('C.md', '---\nfaction: Zhentarim\nstats:\n  str: 10\n---\n');
+
+  it('lists keys case-insensitively, most used first, with their usual type', () => {
+    expect(index.getPropertyKeys()).toEqual([
+      { key: 'faction', type: 'text', count: 3 },
+      { key: 'level', type: 'number', count: 2 },
+      { key: 'allies', type: 'list', count: 1 },
+      { key: 'stats', type: null, count: 1 },
+    ]);
+  });
+
+  it('lists values used for a key, list items included', () => {
+    expect(index.getPropertyValues('FACTION')).toEqual([
+      { value: 'Harpers', count: 2 },
+      { value: 'Zhentarim', count: 1 },
+    ]);
+    expect(index.getPropertyValues('allies')).toEqual([{ value: '[[B]]', count: 1 }]);
+  });
+
+  it('keeps tags out of properties', () => {
+    expect(extractProperties('---\ntags: [a]\ntag: b\nx: 1\n---\n').map(p => p.key)).toEqual(['x']);
+  });
+
+  it('parses Obsidian types.json', () => {
+    expect(parsePropertyTypes('{"types":{"Status":"text","allies":"multitext","x":"odd"}}'))
+      .toEqual({ status: 'text', allies: 'list' });
+    expect(parsePropertyTypes('not json')).toEqual({});
+  });
+});
+
+describe('statblock notes', () => {
+  it('marks notes holding a statblock, and keeps the mark across rebuilds', () => {
+    const index = buildVault();
+    index.indexNoteContent('NPCs/Aldric.md', '# Aldric\n\n```statblock\nname: Aldric\n```\n');
+    index.indexNoteContent('Home.md', '```js\nconst statblock = 1;\n```');
+    expect(index.isStatblockNote('npcs/aldric.md')).toBe(true);
+    expect(index.isStatblockNote('Home.md')).toBe(false);
+
+    const rebuilt = buildVault();
+    index.copyContentIndexTo(rebuilt);
+    expect(rebuilt.isStatblockNote('NPCs/Aldric.md')).toBe(true);
+
+    index.indexNoteContent('NPCs/Aldric.md', '# Aldric, statblock removed');
+    expect(index.isStatblockNote('NPCs/Aldric.md')).toBe(false);
+  });
+});
+
+describe('item notes', () => {
+  it('records whether a note holds a statblock or an item', () => {
+    const index = buildVault();
+    index.indexNoteContent('NPCs/Aldric.md', '```statblock\nname: Aldric\n```');
+    index.indexNoteContent('Home.md', '# Loot\n\n```item\nname: Rope\n```');
+    expect(index.getStatblockKind('NPCs/Aldric.md')).toBe('creature');
+    expect(index.getStatblockKind('Home.md')).toBe('item');
+    expect(index.isStatblockNote('Home.md')).toBe(true);
+    expect(index.getStatblockKind('Locations.md')).toBeNull();
+  });
+});
+
+describe('imported sources', () => {
+  it('finds the note holding a block imported from a source', () => {
+    const index = buildVault();
+    index.indexNoteContent('NPCs/Aldric.md', '```statblock\nname: Goblin\nsource: open5e/srd_goblin\n```');
+    index.indexNoteContent('Home.md', '```spell\nname: Fireball\nsource: "open5e/srd_fireball"\n```');
+    expect(index.findBySource('open5e/SRD_goblin')?.relativePath).toBe('NPCs/Aldric.md');
+    expect(index.findBySource('open5e/srd_fireball')?.relativePath).toBe('Home.md');
+    expect(index.findBySource('open5e/srd_orc')).toBeNull();
+
+    index.indexNoteContent('NPCs/Aldric.md', '```statblock\nname: Goblin\n```');
+    expect(index.findBySource('open5e/srd_goblin')).toBeNull();
   });
 });

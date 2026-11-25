@@ -54,9 +54,33 @@
         <mat-icon>note_add</mat-icon>
         <span>New note</span>
       </button>
+      <button mat-menu-item (click)="startNewFile('statblock')">
+        <mat-icon>shield</mat-icon>
+        <span>New statblock</span>
+      </button>
+      <button mat-menu-item (click)="startNewFile('item')">
+        <mat-icon>diamond</mat-icon>
+        <span>New item</span>
+      </button>
+      <button mat-menu-item (click)="startNewFile('spell')">
+        <mat-icon>auto_fix_high</mat-icon>
+        <span>New spell</span>
+      </button>
       <button mat-menu-item (click)="startNewCanvas()">
         <mat-icon>account_tree</mat-icon>
         <span>New canvas</span>
+      </button>
+      <button mat-menu-item (click)="startNewDatabase()">
+        <mat-icon>table_chart</mat-icon>
+        <span>New database</span>
+      </button>
+      <button mat-menu-item (click)="createQuestTracker()">
+        <mat-icon>view_kanban</mat-icon>
+        <span>Quest tracker</span>
+      </button>
+      <button mat-menu-item (click)="startNewFile('family')">
+        <mat-icon>family_restroom</mat-icon>
+        <span>New family tree</span>
       </button>
       <button mat-menu-item (click)="startNewFolder()">
         <mat-icon>create_new_folder</mat-icon>
@@ -68,6 +92,14 @@
       <button mat-menu-item (click)="openQuickSwitcher()" [disabled]="!permissionGranted">
         <mat-icon>bolt</mat-icon>
         <span>Jump to file… <span class="menu-shortcut">Ctrl+O</span></span>
+      </button>
+      <button mat-menu-item (click)="openGraph('links')" [disabled]="!permissionGranted || previewOnly">
+        <mat-icon>hub</mat-icon>
+        <span>Graph view <span class="menu-shortcut">Ctrl+G</span></span>
+      </button>
+      <button mat-menu-item (click)="openGraph('family')" [disabled]="!permissionGranted || previewOnly">
+        <mat-icon>family_restroom</mat-icon>
+        <span>Family trees</span>
       </button>
       <button mat-menu-item (click)="refreshVault()" [disabled]="!permissionGranted || isVaultLoading">
         <mat-icon>refresh</mat-icon>
@@ -114,13 +146,13 @@
     @if (isCreatingFile) {
       <form class="create-form" (ngSubmit)="createNewFile()" (keydown.escape)="cancelNewFile()">
         <span class="create-form-title">
-          <mat-icon>{{ newFileKind === 'canvas' ? 'account_tree' : 'note_add' }}</mat-icon>
-          {{ newFileKind === 'canvas' ? 'New canvas' : 'New note' }}
+          <mat-icon>{{ newFileKindInfo.icon }}</mat-icon>
+          New {{ newFileKindInfo.label }}
         </span>
         <input
           name="newFileName"
           [(ngModel)]="newFileName"
-          [placeholder]="newFileKind === 'canvas' ? 'e.g. Family tree' : 'e.g. Session notes'"
+          [placeholder]="newFileKindInfo.placeholder"
           aria-label="Name (use folder/name to place it in a folder)"
           autocomplete="off"
           spellcheck="false"
@@ -133,6 +165,15 @@
             <option value="">Blank note</option>
             @for (template of noteTemplates; track template.fileName) {
               <option [value]="template.fileName">{{ template.label }}</option>
+            }
+          </select>
+        } @else if (isNewBlockFile) {
+          <select
+            name="newStatblockSystem"
+            [(ngModel)]="newStatblockSystemId"
+            aria-label="Game system">
+            @for (system of newFileSystems; track system.id) {
+              <option [value]="system.id">{{ system.label }}</option>
             }
           </select>
         }
@@ -378,7 +419,7 @@
               [title]="entry.relativePath"
               [attr.aria-current]="isFileSelected(entry) ? 'page' : null">
               <span class="chevron-spacer"></span>
-              <mat-icon class="row-icon">{{ getFileIcon(entry.name) }}</mat-icon>
+              <mat-icon class="row-icon">{{ getEntryIcon(entry) }}</mat-icon>
               <span class="row-label">{{ getDisplayName(entry.name) }}</span>
               @if (getTreeBadge(entry.name); as badge) {
                 <span class="row-badge">{{ badge }}</span>
@@ -411,9 +452,29 @@
             <mat-icon>note_add</mat-icon>
             <span>New note here</span>
           </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'statblock')">
+            <mat-icon>shield</mat-icon>
+            <span>New statblock here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'item')">
+            <mat-icon>diamond</mat-icon>
+            <span>New item here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'spell')">
+            <mat-icon>auto_fix_high</mat-icon>
+            <span>New spell here</span>
+          </button>
           <button mat-menu-item (click)="startNewFileInFolder(entry, 'canvas')">
             <mat-icon>account_tree</mat-icon>
             <span>New canvas here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'database')">
+            <mat-icon>table_chart</mat-icon>
+            <span>New database here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'family')">
+            <mat-icon>family_restroom</mat-icon>
+            <span>New family tree here</span>
           </button>
           <button mat-menu-item (click)="startNewFolderInFolder(entry)">
             <mat-icon>create_new_folder</mat-icon>
@@ -436,6 +497,12 @@
             <mat-icon>broadcast_on_home</mat-icon>
             <span>Broadcast</span>
           </button>
+          @if (canAddEntryToMap(entry)) {
+            <button mat-menu-item (click)="addEntryToMap(entry)">
+              <mat-icon>add_location_alt</mat-icon>
+              <span>Add to VTT map</span>
+            </button>
+          }
         }
         <div class="menu-divider"></div>
         <button mat-menu-item class="menu-danger" (click)="deleteEntry(entry)">
@@ -509,6 +576,77 @@
               Choose folder again
             </button>
           </div>
+        </div>
+      </section>
+    } @else if (graphPage; as page) {
+      <section class="document graph-page">
+        <header class="doc-header">
+          @if (isCompactSidebarLayout) {
+            <button
+              mat-icon-button
+              class="icon-btn"
+              (click)="openMobileSidebar()"
+              aria-label="Show files"
+              matTooltip="Files">
+              <mat-icon>menu</mat-icon>
+            </button>
+          }
+
+          <div class="doc-heading">
+            <h1 class="doc-title">{{ page.type === 'family' ? 'Family trees' : 'Graph' }}</h1>
+          </div>
+
+          <div class="doc-actions">
+            <span class="graph-type" role="radiogroup" aria-label="Graph type">
+              <button type="button" role="radio" [attr.aria-checked]="page.type === 'links'" [class.is-active]="page.type === 'links'" (click)="setGraphType('links')">
+                <mat-icon>hub</mat-icon><span class="btn-label">Links</span>
+              </button>
+              <button type="button" role="radio" [attr.aria-checked]="page.type === 'family'" [class.is-active]="page.type === 'family'" (click)="setGraphType('family')">
+                <mat-icon>family_restroom</mat-icon><span class="btn-label">Family tree</span>
+              </button>
+            </span>
+            <button
+              mat-icon-button
+              class="icon-btn"
+              (click)="closeGraph()"
+              aria-label="Close graph"
+              matTooltip="Close">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+        </header>
+
+        <div class="graph-body">
+          @if (page.type === 'links') {
+            <app-vault-graph
+              [index]="propertyIndex"
+              [indexVersion]="propertyIndexVersion"
+              [colorGroups]="graphColorGroups"
+              (openFile)="openGraphFile($event)">
+            </app-vault-graph>
+          } @else {
+            <div class="tree-list">
+              @for (tree of familyTreeFiles; track tree.relativePath) {
+                <button type="button" class="tree-list-item" (click)="openGraphFile(tree.relativePath)">
+                  <mat-icon>family_restroom</mat-icon>
+                  <span class="tree-list-name">{{ getDisplayName(tree.name) }}</span>
+                  @if (tree.parentPath) {
+                    <span class="tree-list-path">{{ tree.parentPath }}</span>
+                  }
+                </button>
+              } @empty {
+                <div class="links-empty">
+                  <mat-icon>family_restroom</mat-icon>
+                  <span>No family trees yet.</span>
+                  <span class="links-empty-hint">A family tree is a file like a note: create one in any folder.</span>
+                </div>
+              }
+              <button mat-stroked-button class="btn-secondary tree-list-new" (click)="startNewFile('family')">
+                <mat-icon>add</mat-icon>
+                New family tree
+              </button>
+            </div>
+          }
         </div>
       </section>
     } @else if (!hasActiveView) {
@@ -683,14 +821,16 @@
                 </span>
               }
 
-              <button
-                mat-stroked-button
-                class="btn-secondary btn-broadcast"
-                (click)="broadcast()"
-                [matTooltip]="hasActiveSelection ? 'Send the selected text to players' : 'Send this file to players'">
-                <mat-icon [class.is-accent]="hasActiveSelection">broadcast_on_home</mat-icon>
-                <span class="btn-label">{{ hasActiveSelection ? 'Broadcast selection' : 'Broadcast' }}</span>
-              </button>
+              @if (!isDatabaseFileSelected && !isFamilyTreeSelected) {
+                <button
+                  mat-stroked-button
+                  class="btn-secondary btn-broadcast"
+                  (click)="broadcast()"
+                  [matTooltip]="hasActiveSelection ? 'Send the selected text to players' : 'Send this file to players'">
+                  <mat-icon [class.is-accent]="hasActiveSelection">broadcast_on_home</mat-icon>
+                  <span class="btn-label">{{ hasActiveSelection ? 'Broadcast selection' : 'Broadcast' }}</span>
+                </button>
+              }
 
               <button
                 mat-icon-button
@@ -757,14 +897,30 @@
             <span>Open in preview tab</span>
           </button>
           @if (isMarkdownFileSelected) {
+            @if (!previewOnly) {
+              <button mat-menu-item (click)="addNoteProperty()">
+                <mat-icon>list_alt</mat-icon>
+                <span>Add property</span>
+              </button>
+            }
             <button mat-menu-item (click)="insertSecretBlock()">
               <mat-icon>visibility_off</mat-icon>
               <span>{{ hasActiveSelection ? 'Make selection a GM secret' : 'Insert GM secret' }}</span>
             </button>
-            <button mat-menu-item (click)="insertStatsheetTemplate()">
-              <mat-icon>assignment</mat-icon>
-              <span>Insert 5e statblock</span>
-            </button>
+            @if (!previewOnly) {
+              <button mat-menu-item (click)="insertStatblock()">
+                <mat-icon>shield</mat-icon>
+                <span>Insert statblock</span>
+              </button>
+              <button mat-menu-item (click)="insertStatblock('item')">
+                <mat-icon>diamond</mat-icon>
+                <span>Insert item</span>
+              </button>
+              <button mat-menu-item (click)="insertStatblock('spell')">
+                <mat-icon>auto_fix_high</mat-icon>
+                <span>Insert spell</span>
+              </button>
+            }
           }
           <button mat-menu-item (click)="revealOpenFile()">
             <mat-icon>account_tree</mat-icon>
@@ -814,9 +970,48 @@
                 [isPreview]="previewOnly"
                 (markdownChange)="onContentChange($event)"
                 (onLinkClick)="onWikilinkClick($event)"
-                (linkHover)="onEditorLinkHover($event)">
+                (linkHover)="onEditorLinkHover($event)"
+                (blockBroadcast)="broadcastBlock($event)"
+                (filesAdded)="loadVaultEntries(false)">
+                <app-note-properties
+                  #noteProperties
+                  [content]="selectedFileContent"
+                  [filePath]="selectedFileRelativePath"
+                  [readonly]="previewOnly"
+                  [index]="propertyIndex"
+                  [indexVersion]="propertyIndexVersion"
+                  [typeHints]="propertyTypeHints"
+                  (contentChange)="onContentChange($event)"
+                  (openLink)="onWikilinkClick($event)">
+                </app-note-properties>
               </app-milkdown-editor>
             </div>
+          } @else if (isDatabaseFileSelected) {
+            <app-database-view
+              [content]="selectedFileContent"
+              [filePath]="selectedFileRelativePath"
+              [serverId]="serverId"
+              [readonly]="previewOnly"
+              [index]="propertyIndex"
+              [indexVersion]="propertyIndexVersion"
+              [indexing]="isIndexingContent"
+              (contentChange)="onContentChange($event)"
+              (openFile)="onWikilinkClick($event)"
+              (propertyChange)="onDatabasePropertyChange($event)"
+              (createNote)="onDatabaseCreateNote($event)">
+            </app-database-view>
+          } @else if (isFamilyTreeSelected) {
+            <app-family-tree
+              [content]="selectedFileContent"
+              [path]="selectedFileRelativePath"
+              [readonly]="previewOnly"
+              [index]="propertyIndex"
+              [indexVersion]="propertyIndexVersion"
+              [serverId]="serverId"
+              (contentChange)="onContentChange($event)"
+              (openFile)="openGraphFile($event)"
+              (filesAdded)="loadVaultEntries(false)">
+            </app-family-tree>
           } @else if (isCanvasFileSelected) {
             <div class="canvas">
               <app-obsidian-canvas-editor
@@ -881,7 +1076,7 @@
                     <li>
                       <button type="button" class="backlink" (click)="openBacklink(mention.source)" [title]="mention.source.relativePath">
                         <span class="backlink-title">
-                          <mat-icon>{{ getFileIcon(mention.source.name) }}</mat-icon>
+                          <mat-icon>{{ getEntryIcon(mention.source) }}</mat-icon>
                           <span class="backlink-name">{{ getDisplayName(mention.source.name) }}</span>
                         </span>
                         @if (mention.source.parentPath) {
@@ -909,6 +1104,20 @@
                 </div>
               }
             </div>
+
+            @if (isMarkdownFileSelected && !previewOnly) {
+              <section class="local-graph" aria-label="Local graph">
+                <app-vault-graph
+                  [compact]="true"
+                  [focusPath]="selectedFileRelativePath"
+                  [index]="propertyIndex"
+                  [indexVersion]="propertyIndexVersion"
+                  [colorGroups]="graphColorGroups"
+                  (openFile)="openGraphFile($event)"
+                  (expand)="openGraph('links')">
+                </app-vault-graph>
+              </section>
+            }
           </aside>
         }
         </div>

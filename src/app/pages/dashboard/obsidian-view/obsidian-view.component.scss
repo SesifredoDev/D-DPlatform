@@ -1848,3 +1848,133 @@
     padding: 12px;
   }
 }
+
+// ---------------------------------------------------------------- graph page
+
+.graph-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.graph-type {
+  display: inline-flex;
+  margin-right: 4px;
+  padding: 2px;
+  border-radius: var(--radius-s, 6px);
+  background: var(--vv-field-bg);
+
+  button {
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vv-text-3);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+
+    mat-icon {
+      width: 16px;
+      height: 16px;
+      font-size: 16px;
+    }
+
+    &:hover {
+      color: var(--vv-text);
+    }
+
+    &.is-active {
+      background: var(--vv-selected);
+      color: var(--vv-text);
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+      outline-offset: 1px;
+    }
+  }
+}
+
+// Local graph at the bottom of the backlinks panel.
+.local-graph {
+  flex: 0 0 220px;
+  min-height: 0;
+  border-top: 1px solid var(--vv-border);
+}
+
+@media (max-width: 600px) {
+  .graph-type .btn-label {
+    display: none;
+  }
+}
+
+// Graph page, Family tree type: the vault's tree files.
+.tree-list {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.tree-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-s, 6px);
+  background: transparent;
+  color: var(--vv-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  mat-icon {
+    color: var(--vv-accent);
+  }
+
+  &:hover {
+    background: var(--vv-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(var(--vv-accent-rgb), 0.7);
+    outline-offset: -2px;
+  }
+}
+
+.tree-list-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-list-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vv-text-3);
+  font-size: 12px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-list-new {
+  align-self: flex-start;
+  margin-top: 12px;
+}

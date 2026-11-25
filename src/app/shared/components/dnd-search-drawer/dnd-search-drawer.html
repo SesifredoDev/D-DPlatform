@@ -154,6 +154,17 @@
                   <span class="material-icons">broadcast_on_home</span>
                   {{ isBroadcasting() ? 'Preparing...' : 'Broadcast' }}
                 </button>
+                <button
+                  type="button"
+                  class="detail-action-button is-vault"
+                  [class.is-active]="!!addPanel()"
+                  (click)="addPanel() ? closeAddPanel() : openAddPanel()"
+                  [disabled]="isDetailLoading() || isPreparingAdd()"
+                  [attr.aria-expanded]="!!addPanel()"
+                >
+                  <span class="material-icons" [class.loading]="isPreparingAdd()">{{ isPreparingAdd() ? 'progress_activity' : 'library_add' }}</span>
+                  Add to vault
+                </button>
                 @if (selected.source === 'open5e') {
                   <a [href]="selectedExternalUrl()" target="_blank" rel="noreferrer">
                     API JSON
@@ -162,6 +173,122 @@
               </div>
             }
           </div>
+
+          @if (addMessage(); as message) {
+            <div class="add-message" role="status">
+              <span class="material-icons">check_circle</span>
+              <span>{{ message.text }}</span>
+              @if (message.path) {
+                <button type="button" class="add-link" (click)="openSaved(message)">Open</button>
+              }
+            </div>
+          }
+
+          @if (addPanel(); as panel) {
+            <section class="add-panel" aria-label="Add to vault">
+              <header class="add-panel-head">
+                <span class="add-kind">
+                  <span class="material-icons">{{ addKindIcon(panel) }}</span>
+                  {{ addKindLabel(panel) }}
+                </span>
+                <button type="button" class="icon-button add-close" (click)="closeAddPanel()" aria-label="Close Add to vault">
+                  <span class="material-icons">close</span>
+                </button>
+              </header>
+
+              @if (panel.existingPath) {
+                <div class="add-existing">
+                  <span class="material-icons">inventory_2</span>
+                  <span>Already in your vault: <strong>{{ panel.existingPath }}</strong></span>
+                  <button type="button" class="add-link" (click)="openExisting()">Open</button>
+                </div>
+              }
+
+              <div class="add-folder">
+                <label class="add-label" for="add-folder-filter">
+                  Folder
+                  @if (chosenFolder() !== null) {
+                    <span class="add-chosen">
+                      <span class="material-icons">folder</span>
+                      {{ folderLabel(chosenFolder()!) }}
+                    </span>
+                  } @else {
+                    <span class="add-hint">pick one to save a note</span>
+                  }
+                </label>
+                <input
+                  id="add-folder-filter"
+                  class="add-folder-filter"
+                  [ngModel]="folderQuery()"
+                  (ngModelChange)="folderQuery.set($event)"
+                  (keydown.enter)="newFolderCandidate() ? chooseNewFolder() : (filteredFolders().length === 1 && chooseFolder(filteredFolders()[0]))"
+                  placeholder="Filter folders, or type a new path"
+                  autocomplete="off"
+                  spellcheck="false">
+                <div class="add-folder-list" role="listbox" aria-label="Folders">
+                  @if (newFolderCandidate(); as candidate) {
+                    <button
+                      type="button"
+                      role="option"
+                      class="add-folder-option is-new"
+                      [class.is-selected]="chosenFolder() === candidate"
+                      [attr.aria-selected]="chosenFolder() === candidate"
+                      (click)="chooseNewFolder()">
+                      <span class="material-icons">create_new_folder</span>
+                      Create “{{ candidate }}”
+                    </button>
+                  }
+                  @for (folder of filteredFolders(); track folder) {
+                    <button
+                      type="button"
+                      role="option"
+                      class="add-folder-option"
+                      [class.is-selected]="chosenFolder() === folder"
+                      [attr.aria-selected]="chosenFolder() === folder"
+                      (click)="chooseFolder(folder)">
+                      <span class="material-icons">{{ folder ? 'folder' : 'home' }}</span>
+                      {{ folderLabel(folder) }}
+                    </button>
+                  }
+                </div>
+              </div>
+
+              @let target = activeNoteTitle(panel);
+              <div class="add-actions">
+                <button
+                  type="button"
+                  class="detail-action-button"
+                  (click)="saveAsNote()"
+                  [disabled]="isAdding() || chosenFolder() === null">
+                  <span class="material-icons">note_add</span>
+                  Save as note
+                </button>
+                @if (panel.block) {
+                  <button
+                    type="button"
+                    class="detail-action-button"
+                    (click)="saveAndEmbed()"
+                    [disabled]="isAdding() || !target || (!panel.existingPath && chosenFolder() === null)"
+                    [title]="target ? '' : 'Open a note in the vault to embed into it'">
+                    <span class="material-icons">picture_in_picture</span>
+                    {{ panel.existingPath ? 'Embed' : 'Save & embed' }} in {{ target ? '“' + target + '”' : 'note' }}
+                  </button>
+                }
+                <button
+                  type="button"
+                  class="detail-action-button"
+                  (click)="insertIntoNote()"
+                  [disabled]="isAdding() || !target"
+                  [title]="target ? '' : 'Open a note in the vault to insert into it'">
+                  <span class="material-icons">input</span>
+                  Insert into {{ target ? '“' + target + '”' : 'note' }}
+                </button>
+              </div>
+              @if (!target) {
+                <p class="add-hint">Open a note in the vault (not a preview tab) to embed or insert into it.</p>
+              }
+            </section>
+          }
 
           @if (isDetailLoading()) {
             <div class="detail-loading">
