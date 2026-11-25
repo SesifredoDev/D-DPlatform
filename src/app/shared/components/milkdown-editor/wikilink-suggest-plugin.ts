@@ -1,6 +1,6 @@
 import { prosePluginsCtx } from '@milkdown/core';
 import type { Ctx } from '@milkdown/ctx';
-import { Plugin, PluginKey, type EditorState } from '@milkdown/prose/state';
+import { Plugin, PluginKey, TextSelection, type EditorState } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
 import { fuzzyMatch, segmentsFromIndices } from '../../services/ObsidianVault/vault-search-utils';
 
@@ -14,6 +14,17 @@ export interface WikilinkCandidate {
   icon: string;
   /** What goes between the brackets, e.g. "Strahd" or "NPCs/Villains/Strahd" when the name is ambiguous. */
   linkText: string;
+  /** The file's type id (see vault-file-types.ts), e.g. "markdown" or "map". */
+  kind?: string;
+}
+
+/** Limits the list to one kind of file, for a `[[` opened from a menu ("Map" in the + menu). */
+interface SuggestFilter {
+  /** Where that `[[` starts; the filter ends once that `[[` is gone. */
+  from: number;
+  kind: string;
+  /** Shown when nothing of that kind exists. */
+  emptyText: string;
 }
 
 interface SuggestMatch {
@@ -27,7 +38,10 @@ interface SuggestState {
   match: SuggestMatch | null;
   /** Start position of a match the user dismissed with Esc; stays closed until a new `[[`. */
   dismissedFrom: number | null;
+  filter: SuggestFilter | null;
 }
+
+type SuggestMeta = { dismiss: number } | { filter: SuggestFilter };
 
 const MAX_ITEMS = 8;
 /** Text before the cursor that opens the list: `[[query` or `![[query`, no brackets/newlines inside. */
@@ -69,7 +83,12 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
 
     let tr = state.tr;
     const linkMark = state.schema.marks['link'];
-    if (match.embed || !linkMark) {
+    const image = state.schema.nodes['image'];
+    if (match.embed && image) {
+      // The same node `![[…]]` becomes when a note loads, so the embed (a map, a statblock card, an
+      // image) shows straight away instead of after reopening the note.
+      tr = tr.replaceWith(match.from, to, image.create({ src: `wikilink-blob:${linkText}`, alt: '' }));
+    } else if (match.embed || !linkMark) {
       tr = tr.insertText(`${match.embed ? '!' : ''}[[${linkText}]]`, match.from, to);
     } else {
       tr = tr.replaceWith(match.from, to, state.schema.text(linkText, [linkMark.create({ href: `wikilink:${linkText}` })]));
@@ -79,11 +98,13 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
     view.focus();
   };
 
-  const render = (view: EditorView, match: SuggestMatch) => {
-    if (renderedQuery !== match.query) {
-      renderedQuery = match.query;
+  const render = (view: EditorView, match: SuggestMatch, filter: SuggestFilter | null) => {
+    const queryKey = `${filter?.kind ?? ''}:${match.query}`;
+    if (renderedQuery !== queryKey) {
+      renderedQuery = queryKey;
       activeIndex = 0;
-      items = rank(getCandidates(), match.query);
+      const candidates = getCandidates();
+      items = rank(filter ? candidates.filter(candidate => candidate.kind === filter.kind) : candidates, match.query);
     }
 
     if (!popup) {
@@ -98,9 +119,11 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
     if (!items.length) {
       const empty = document.createElement('div');
       empty.className = 'wikilink-suggest-empty';
-      empty.textContent = match.query.trim()
-        ? `No notes match. Enter links to “${match.query.trim()}”.`
-        : 'No notes in this vault yet.';
+      empty.textContent = filter && !match.query.trim()
+        ? filter.emptyText
+        : match.query.trim()
+          ? `No ${filter ? 'maps' : 'notes'} match. Enter links to “${match.query.trim()}”.`
+          : 'No notes in this vault yet.';
       popup.appendChild(empty);
     }
 
@@ -137,7 +160,7 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
       option.addEventListener('mousemove', () => {
         if (activeIndex !== index) {
           activeIndex = index;
-          render(view, match);
+          render(view, match, key.getState(view.state)?.filter ?? null);
         }
       });
       popup!.appendChild(option);
@@ -150,12 +173,17 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
   return new Plugin<SuggestState>({
     key,
     state: {
-      init: () => ({ match: null, dismissedFrom: null }),
+      init: () => ({ match: null, dismissedFrom: null, filter: null }),
       apply(tr, previous, _old, newState) {
-        const dismiss = tr.getMeta(key) as { dismiss: number } | undefined;
+        const meta = tr.getMeta(key) as SuggestMeta | undefined;
+        const dismiss = meta && 'dismiss' in meta ? meta : undefined;
         const match = findMatch(newState);
         const dismissedFrom = dismiss ? dismiss.dismiss : match && match.from === previous.dismissedFrom ? previous.dismissedFrom : null;
-        return { match: match && match.from === dismissedFrom ? null : match, dismissedFrom };
+        const mapped = previous.filter ? { ...previous.filter, from: tr.mapping.map(previous.filter.from) } : null;
+        const candidate = meta && 'filter' in meta ? meta.filter : mapped;
+        // The filter lasts as long as the `[[` it was opened with.
+        const filter = candidate && match && match.from === candidate.from ? candidate : null;
+        return { match: match && match.from === dismissedFrom ? null : match, dismissedFrom, filter };
       },
     },
     props: {
@@ -168,7 +196,7 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
           case 'ArrowUp':
             if (!items.length) return false;
             activeIndex = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
-            render(view, match);
+            render(view, match, key.getState(view.state)?.filter ?? null);
             return true;
           case 'Enter':
           case 'Tab':
@@ -185,9 +213,10 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
     },
     view: () => ({
       update(view) {
-        const match = key.getState(view.state)?.match;
+        const state = key.getState(view.state);
+        const match = state?.match;
         if (match && view.editable && view.hasFocus()) {
-          render(view, match);
+          render(view, match, state?.filter ?? null);
         } else {
           close();
         }
@@ -195,6 +224,37 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
       destroy: close,
     }),
   });
+}
+
+/**
+ * Starts an embed picker limited to one kind of file (e.g. maps): puts `![[` on the current line
+ * (replacing it if it's empty or a `/` command) and opens the list for that kind.
+ */
+export function openEmbedPicker(view: EditorView, kind: string, emptyText: string): void {
+  const { state } = view;
+  const $from = state.selection.$from;
+  const line = $from.parent;
+  const depth = $from.depth;
+  const lineText = line.isTextblock ? line.textContent : '';
+  let tr = state.tr;
+  let from: number;
+
+  if (line.isTextblock && !line.type.spec.code && (lineText.trim() === '' || lineText.startsWith('/'))) {
+    // Reuse the empty line (or the "/map" the user typed).
+    const start = $from.start(depth);
+    tr = tr.insertText('![[', start, $from.end(depth));
+    from = start;
+  } else {
+    // Start a new paragraph after the current block.
+    const paragraph = state.schema.nodes['paragraph'];
+    const at = depth >= 1 ? $from.after(depth) : state.selection.to;
+    tr = tr.insert(at, paragraph.create(null, state.schema.text('![[')));
+    from = at + 1;
+  }
+  tr = tr.setSelection(TextSelection.create(tr.doc, from + 3));
+  tr = tr.setMeta(key, { filter: { from, kind, emptyText } } satisfies SuggestMeta).scrollIntoView();
+  view.dispatch(tr);
+  view.focus();
 }
 
 function findMatch(state: EditorState): SuggestMatch | null {

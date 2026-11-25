@@ -116,6 +116,78 @@
 }
 
 /* ------------------------------------------------------------------
+   Resizable ![[image]] embeds (statblock-node-views.ts)
+   ------------------------------------------------------------------ */
+.resizable-image {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  vertical-align: top;
+
+  img {
+    max-width: 100%;
+    -webkit-user-drag: none;
+  }
+
+  &.ProseMirror-selectednode img {
+    outline: 2px solid var(--primary, #7289da);
+    outline-offset: 2px;
+  }
+}
+
+.resizable-image-handle {
+  position: absolute;
+  right: -6px;
+  bottom: calc(1rem - 6px);
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 4px;
+  background: var(--primary, #7289da);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 120ms;
+
+  .resizable-image:hover &,
+  .resizable-image.is-resizing &,
+  .ProseMirror-selectednode &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+
+  @media (hover: none) {
+    opacity: 1;
+  }
+}
+
+.resizable-image-readout {
+  position: absolute;
+  right: 12px;
+  bottom: calc(1rem + 8px);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(14, 15, 20, 0.85);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+
+  .resizable-image.is-resizing & {
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------------------------
    "Pasted as a statblock" chip (appended to <body>; see statblock-paste-plugin.ts)
    ------------------------------------------------------------------ */
 .statblock-paste-chip {

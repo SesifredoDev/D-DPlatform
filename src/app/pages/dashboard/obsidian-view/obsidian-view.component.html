@@ -82,6 +82,10 @@
         <mat-icon>family_restroom</mat-icon>
         <span>New family tree</span>
       </button>
+      <button mat-menu-item (click)="startNewFile('map')">
+        <mat-icon>map</mat-icon>
+        <span>New map</span>
+      </button>
       <button mat-menu-item (click)="startNewFolder()">
         <mat-icon>create_new_folder</mat-icon>
         <span>New folder</span>
@@ -476,6 +480,10 @@
             <mat-icon>family_restroom</mat-icon>
             <span>New family tree here</span>
           </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'map')">
+            <mat-icon>map</mat-icon>
+            <span>New map here</span>
+          </button>
           <button mat-menu-item (click)="startNewFolderInFolder(entry)">
             <mat-icon>create_new_folder</mat-icon>
             <span>New folder here</span>
@@ -821,7 +829,7 @@
                 </span>
               }
 
-              @if (!isDatabaseFileSelected && !isFamilyTreeSelected) {
+              @if (!isDatabaseFileSelected && !isFamilyTreeSelected && !isMapSelected) {
                 <button
                   mat-stroked-button
                   class="btn-secondary btn-broadcast"
@@ -1000,6 +1008,18 @@
               (propertyChange)="onDatabasePropertyChange($event)"
               (createNote)="onDatabaseCreateNote($event)">
             </app-database-view>
+          } @else if (isMapSelected) {
+            <app-vault-map
+              [content]="selectedFileContent"
+              [path]="selectedFileRelativePath"
+              [serverId]="serverId"
+              [readonly]="previewOnly"
+              [focus]="mapFocusForSelected"
+              (contentChange)="onContentChange($event)"
+              (openFile)="onWikilinkClick($event)"
+              (linkHover)="onEditorLinkHover($event)"
+              (filesAdded)="loadVaultEntries(false)">
+            </app-vault-map>
           } @else if (isFamilyTreeSelected) {
             <app-family-tree
               [content]="selectedFileContent"
@@ -1182,6 +1202,11 @@
             [isPreview]="true"
             (onLinkClick)="openHoverLink($event)">
           </app-milkdown-editor>
+        } @else if (preview.imageUrl && preview.mapPin; as pin) {
+          <div class="hover-preview-map">
+            <img class="hover-preview-image" [src]="preview.imageUrl" [alt]="preview.title">
+            <span class="hover-preview-pin" [style.left.%]="pin.x * 100" [style.top.%]="pin.y * 100" [style.background]="pin.color" aria-hidden="true"></span>
+          </div>
         } @else if (preview.imageUrl) {
           <img class="hover-preview-image" [src]="preview.imageUrl" [alt]="preview.title">
         } @else {

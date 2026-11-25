@@ -18,12 +18,12 @@ import { wikilinkPlugin } from './wikilink-plugin';
 import { editorViewCtx, editorViewOptionsCtx, serializerCtx } from '@milkdown/core';
 import { Selection } from '@milkdown/prose/state';
 import { insert } from '@milkdown/utils';
-import { CALLOUT_MENU_ITEMS, SECRET_MENU_ICON, SECRET_TEMPLATE, calloutPlugin, insertCallout } from './callout-plugin';
+import { CALLOUT_MENU_ITEMS, MAP_MENU_ICON, SECRET_MENU_ICON, SECRET_TEMPLATE, calloutPlugin, insertCallout } from './callout-plugin';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
 import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
-import { WikilinkCandidate, wikilinkSuggestPlugin } from './wikilink-suggest-plugin';
+import { WikilinkCandidate, openEmbedPicker, wikilinkSuggestPlugin } from './wikilink-suggest-plugin';
 import { StatblockViewHost, statblockNodeViewsPlugin } from './statblock-node-views';
 import { createStatblockPaste } from './statblock-paste-plugin';
 import { DICE_CLASS, dicePlugin } from './dice-plugin';
@@ -108,6 +108,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       readonly: () => this.isPreview,
       openLink: link => this.onLinkClick.emit(link),
       filesAdded: () => this.filesAdded.emit(),
+      linkHover: event => this.linkHover.emit(event),
     };
   }
 
@@ -130,6 +131,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
         folder: file.parentPath,
         icon: getVaultFileType(file.name).icon,
         linkText: index.linkTextFor(file),
+        kind: getVaultFileType(file.name).id,
       }));
   };
 
@@ -209,6 +211,18 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
             if (quoteAt >= 0) {
               items.splice(quoteAt + 1, 0, items.pop()!);
             }
+
+            // Things from the vault, embedded as live cards.
+            const vault = builder.addGroup('vault', 'Vault');
+            vault.addItem('map', {
+              label: 'Map',
+              icon: MAP_MENU_ICON,
+              onRun: ctx => openEmbedPicker(
+                ctx.get(editorViewCtx),
+                'map',
+                'No maps in this vault yet. Create one with + → New map in the file list.'
+              ),
+            });
 
             const callouts = builder.addGroup('callouts', 'Callouts');
             for (const item of CALLOUT_MENU_ITEMS) {

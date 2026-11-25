@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { ObsidianVaultService, VaultEntry } from './obsidian-vault-service';
 import { isVaultFileType } from './vault-file-types';
 import { BlockKind, findStatblocks } from './statblock';
+import { mapLinksFromText } from './vault-map';
 import { PropertyType, PropertyValue, propertyTypeFromObsidian, readFrontmatterTags, readProperties, splitFrontmatter } from './frontmatter';
 
 const ZERO_WIDTH = /[​-‍﻿]/g;
@@ -171,6 +172,25 @@ export class VaultIndex {
   /** What the note's first statblock block is (creature, item or spell), or null when it has none. */
   getStatblockKind(path: string): BlockKind | null {
     return this.statblockNotes.get(normalizeKey(path)) ?? null;
+  }
+
+  /**
+   * Records the links of a map file (its pins and image), so notes pinned on a map list it in their
+   * backlinks. Call when a map is read or saved.
+   */
+  indexMapContent(path: string, content: string, modified?: number): void {
+    const key = normalizeKey(path);
+    if (modified !== undefined) this.modifiedByNote.set(key, modified);
+    const snippets = new Map<string, string[]>();
+    for (const link of mapLinksFromText(content)) {
+      const list = snippets.get(link.target) ?? [];
+      if (!list.includes(link.snippet)) list.push(link.snippet);
+      snippets.set(link.target, list);
+    }
+    this.outgoingLinks.set(key, Array.from(snippets.keys()));
+    this.linkSnippets.set(key, snippets);
+    this.backlinkCache = null;
+    this.version++;
   }
 
   isNoteIndexed(path: string): boolean {
@@ -411,6 +431,8 @@ export class VaultIndexService {
   indexNoteContent(serverId: string, path: string, content: string, modified?: number): void {
     if (isVaultFileType(path, 'markdown')) {
       this.indexes.get(serverId)?.indexNoteContent(path, content, modified);
+    } else if (isVaultFileType(path, 'map')) {
+      this.indexes.get(serverId)?.indexMapContent(path, content, modified);
     }
   }
 
@@ -424,8 +446,10 @@ export class VaultIndexService {
 
     const run = (async () => {
       const index = this.indexes.get(serverId) ?? await this.load(serverId);
+      // Notes, and maps (their pins are links too).
       const pending = index.files.filter(file =>
-        isVaultFileType(file.name, 'markdown') && (options.force || !index.isNoteIndexed(file.relativePath))
+        (isVaultFileType(file.name, 'markdown') || isVaultFileType(file.name, 'map')) &&
+        (options.force || !index.isNoteIndexed(file.relativePath))
       );
 
       const batchSize = 16;
@@ -433,7 +457,8 @@ export class VaultIndexService {
         await Promise.all(pending.slice(i, i + batchSize).map(async file => {
           try {
             const { content, lastModified } = await this.vaultService.readFileWithMeta(serverId, file.relativePath);
-            index.indexNoteContent(file.relativePath, content, lastModified);
+            if (isVaultFileType(file.name, 'map')) index.indexMapContent(file.relativePath, content, lastModified);
+            else index.indexNoteContent(file.relativePath, content, lastModified);
           } catch (error) {
             console.warn('[VaultIndex] Failed to index note', file.relativePath, error);
           }

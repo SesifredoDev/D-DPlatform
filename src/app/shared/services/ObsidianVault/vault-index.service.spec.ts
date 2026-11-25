@@ -278,3 +278,19 @@ describe('imported sources', () => {
     expect(index.findBySource('open5e/srd_goblin')).toBeNull();
   });
 });
+
+describe('map files', () => {
+  it('count pins as links, so pinned notes list the map in their backlinks', () => {
+    const index = new VaultIndex([
+      folder('Maps', [file('Maps/Coast.map'), file('Maps/coast.jpg')]),
+      file('Waterdeep.md'),
+    ]);
+    index.indexMapContent('Maps/Coast.map', JSON.stringify({
+      image: 'Maps/coast.jpg',
+      pins: [{ id: 'p', x: 0.4, y: 0.3, link: 'Waterdeep', label: 'City of Splendors' }],
+    }));
+    expect(index.getBacklinks('Waterdeep.md').map(entry => entry.relativePath)).toEqual(['Maps/Coast.map']);
+    expect(index.getBacklinks('Maps/coast.jpg').map(entry => entry.relativePath)).toEqual(['Maps/Coast.map']);
+    expect(index.getBacklinkMentions('Waterdeep.md')[0].snippets).toEqual(['📍 City of Splendors']);
+  });
+});

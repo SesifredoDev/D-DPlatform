@@ -1,21 +1,38 @@
-import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output } from '@angular/core';
+import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
 import { MatIconModule } from '@angular/material/icon';
 import { ObsidianVaultService, VaultEntry } from '../../services/ObsidianVault/obsidian-vault-service';
 import { StatblockBlock, findStatblocks } from '../../services/ObsidianVault/statblock';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 import { StatblockCardComponent } from './statblock-card.component';
+import { VaultMapComponent } from '../vault-map/vault-map.component';
+import type { EmbedSize } from '../milkdown-editor/embed-size';
 
 /**
- * `![[Note]]` in a note. A note with a statblock or item shows as a collapsible card; any other
+ * `![[Note]]` in a note. A map (`![[Coast.map#Pin]]`) shows as an interactive map; a note with a
+ * statblock, item or spell shows as a collapsible card; any other
  * note shows as a link card, and an image (`![[map]]` without its extension) as the image.
  */
 @Component({
   selector: 'app-note-embed',
   standalone: true,
-  imports: [MatIconModule, StatblockCardComponent],
+  imports: [MatIconModule, StatblockCardComponent, VaultMapComponent],
   template: `
-    @if (statblock && entry) {
+    @if (mapContent !== null && entry) {
+      <app-vault-map
+        mode="embed"
+        [content]="mapContent"
+        [path]="entry.relativePath"
+        [serverId]="serverId"
+        [readonly]="true"
+        [focus]="mapFocus"
+        [embedSize]="size"
+        [resizable]="resizable"
+        (embedResize)="resized.emit($event)"
+        (openFile)="openNote.emit($event)"
+        (linkHover)="linkHover.emit($event)">
+      </app-vault-map>
+    } @else if (statblock && entry) {
       <app-statblock-card
         mode="embed"
         [kind]="statblock.kind"
@@ -56,9 +73,21 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
   @Input() fromPath = '';
   @Input() serverId = '';
   @Output() openNote = new EventEmitter<string>();
+  /** The size saved in the embed (`|x420`), for maps. */
+  @Input() size: EmbedSize | null = null;
+  /** The note is editable, so the embed can be resized. */
+  @Input() resizable = false;
+  /** The embed was resized (null = default size); the editor writes it into `![[…|size]]`. */
+  @Output() resized = new EventEmitter<EmbedSize | null>();
+  /** A map pin is hovered: the editor shows its usual link preview. */
+  @Output() linkHover = new EventEmitter<{ target: string; rect: DOMRect } | null>();
 
   entry: VaultEntry | null = null;
   statblock: StatblockBlock | null = null;
+  /** The map file's text, for `![[X.map]]`. */
+  mapContent: string | null = null;
+  /** `![[X.map#Pin]]`: the pin to centre on. */
+  mapFocus: { anchor: string; token: number } | null = null;
   imageUrl = '';
   loading = true;
   private loadId = 0;
@@ -69,8 +98,9 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
     return this.entry ? getVaultDisplayName(this.entry.name) : this.link.split('#')[0];
   }
 
-  ngOnChanges(): void {
-    void this.load();
+  ngOnChanges(changes: SimpleChanges): void {
+    // Only a new target needs reloading; a new size is just passed on to the map.
+    if (changes['link'] || changes['fromPath'] || changes['serverId']) void this.load();
   }
 
   ngOnDestroy(): void {
@@ -93,6 +123,14 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
       if (type.viewer === 'image') {
         const blob = await this.vaultService.readFileAsBlob(this.serverId, this.entry.relativePath);
         if (id === this.loadId) this.imageUrl = URL.createObjectURL(blob);
+        return;
+      }
+      if (type.id === 'map') {
+        const content = await this.vaultService.readFile(this.serverId, this.entry.relativePath);
+        if (id !== this.loadId) return;
+        const anchor = this.link.split('|')[0].split('#').slice(1).join('#').trim();
+        this.mapFocus = anchor ? { anchor, token: Date.now() } : null;
+        this.mapContent = content;
         return;
       }
       if (type.id !== 'markdown') return;

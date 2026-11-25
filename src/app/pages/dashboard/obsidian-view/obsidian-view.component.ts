@@ -9,6 +9,8 @@ import { NEW_BASE_CONTENT, QUEST_TRACKER_CONTENT } from '../../../shared/service
 import { VaultGraphComponent } from './graph-view/graph-view.component';
 import { FamilyTreeComponent } from './family-tree/family-tree.component';
 import { emptyFamilyTree, isFamilyTreePath } from '../../../shared/services/ObsidianVault/family-tree';
+import { VaultMapComponent } from '../../../shared/components/vault-map/vault-map.component';
+import { emptyVaultMap, findPinByAnchor, parseVaultMap, rewriteMapLinks } from '../../../shared/services/ObsidianVault/vault-map';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
@@ -94,7 +96,7 @@ const NO_VIEW: ActiveView = { kind: 'none' };
 
 const STATBLOCK_SYSTEM_STORAGE_KEY = 'obsidian-view.statblock-system';
 
-type NewFileKind = 'note' | 'statblock' | 'item' | 'spell' | 'canvas' | 'database' | 'family';
+type NewFileKind = 'note' | 'statblock' | 'item' | 'spell' | 'canvas' | 'database' | 'family' | 'map';
 
 /** The block kind a "New …" file kind creates, if it's a statblock, item or spell. */
 const NEW_BLOCK_KINDS: Partial<Record<NewFileKind, BlockKind>> = { statblock: 'creature', item: 'item', spell: 'spell' };
@@ -106,6 +108,7 @@ const NEW_FILE_KINDS: Record<NewFileKind, { typeId: string; label: string; icon:
   canvas: { typeId: 'canvas', label: 'canvas', icon: 'account_tree', placeholder: 'e.g. Heist plan' },
   database: { typeId: 'base', label: 'database', icon: 'table_chart', placeholder: 'e.g. NPCs' },
   family: { typeId: 'family-tree', label: 'family tree', icon: 'family_restroom', placeholder: 'e.g. House Stark' },
+  map: { typeId: 'map', label: 'map', icon: 'map', placeholder: 'e.g. Sword Coast' },
 };
 const LINKS_PANEL_STORAGE_KEY = 'obsidian-view.links-panel-open';
 const GRAPH_TYPE_STORAGE_KEY = 'obsidian-view.graph-type';
@@ -149,6 +152,8 @@ interface HoverPreview {
   loading: boolean;
   markdown: string | null;
   imageUrl: string | null;
+  /** For maps: where the `#pin` sits on the image (0–1). */
+  mapPin: { x: number; y: number; color: string } | null;
 }
 
 const HOVER_OPEN_DELAY = 450;
@@ -181,7 +186,8 @@ interface ContentHit {
     NotePropertiesComponent,
     DatabaseViewComponent,
     VaultGraphComponent,
-    FamilyTreeComponent
+    FamilyTreeComponent,
+    VaultMapComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -292,6 +298,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   private backlinkCache: { index: VaultIndex; version: number; path: string; value: BacklinkMention[] } | null = null;
   private readonly compactSidebarWidth = 960;
   private readonly vaultEntryDragType = 'application/x-dd-vault-entry';
+  /** A pin to fly to when a map opens from a `#pin` link. */
+  private mapFocus: { path: string; anchor: string; token: number } | null = null;
 
   constructor(
     private obsidianVaultService: ObsidianVaultService,
@@ -358,6 +366,15 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   get isFamilyTreeSelected(): boolean {
     return this.selectedViewer === 'family-tree';
+  }
+
+  get isMapSelected(): boolean {
+    return this.selectedViewer === 'map';
+  }
+
+  /** The pin to fly to in the open map (from a `[[Map.map#Pin]]` link), if it's for that map. */
+  get mapFocusForSelected(): { anchor: string; token: number } | null {
+    return this.mapFocus && this.mapFocus.path === this.selectedFileRelativePath ? this.mapFocus : null;
   }
 
   /** Systems offered when creating a statblock or item. */
@@ -673,6 +690,10 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     if (this.previewOnly) {
       this.requestPreviewTab(entry.relativePath, entry.name);
       return;
+    }
+    // A map pinning this note: open it at that pin.
+    if (getVaultFileType(entry.name).id === 'map' && this.fileView) {
+      this.mapFocus = { path: entry.relativePath, anchor: getVaultDisplayName(this.fileView.name), token: Date.now() };
     }
     void this.selectFile(entry);
   }
@@ -1574,6 +1595,9 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     if (getVaultFileType(filePath).id === 'family-tree') {
       return emptyFamilyTree();
     }
+    if (getVaultFileType(filePath).id === 'map') {
+      return emptyVaultMap();
+    }
     if (getVaultFileType(filePath).id === 'canvas') {
       return this.obsidianVaultService.getObsidianCanvasTemplate();
     }
@@ -1701,13 +1725,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       } catch {
         continue;
       }
-      const result = rewriteMovedLinks(content, {
-        notePath: source,
-        newNotePath: path,
-        resolve: (target, from) => snapshot.index.resolveLink(target, from)?.relativePath ?? null,
-        moved,
-        wikilinkTextFor,
-      });
+      const resolve = (target: string, from: string) => snapshot.index.resolveLink(target, from)?.relativePath ?? null;
+      const result = getVaultFileType(path).id === 'map'
+        // Maps keep their links in pins (and the image path), not in [[…]] text.
+        ? rewriteMapLinks(content, { mapPath: source, resolve, moved, linkTextFor: wikilinkTextFor })
+        : rewriteMovedLinks(content, { notePath: source, newNotePath: path, resolve, moved, wikilinkTextFor });
       if (result.count > 0) {
         plans.push({ path, content: result.content, count: result.count, isOpen: !!openView });
       }
@@ -2302,9 +2324,10 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       top: above ? rect.top - host.top - 6 : rect.bottom - host.top + 6,
       left: Math.max(8, Math.min(rect.left - host.left, host.width - width - 8)),
       above,
-      loading: !!entry && entry.kind === 'file' && (fileType?.viewer === 'markdown' || fileType?.viewer === 'image'),
+      loading: !!entry && entry.kind === 'file' && (fileType?.viewer === 'markdown' || fileType?.viewer === 'image' || fileType?.viewer === 'map'),
       markdown: null,
       imageUrl: null,
+      mapPin: null,
     };
     if (!this.hoverPreview.loading || !entry) return;
 
@@ -2316,6 +2339,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
         if (heading) {
           this.scrollHoverCardToHeading(heading, token);
         }
+      } else if (fileType?.viewer === 'map') {
+        await this.loadMapHoverPreview(entry.relativePath, heading, token);
       } else {
         const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, entry.relativePath);
         if (token !== this.hoverToken || !this.hoverPreview) return;
@@ -2328,6 +2353,26 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
         this.hoverPreview = { ...this.hoverPreview, loading: false };
       }
     }
+  }
+
+  /** A map's hover card: its image, with the `#pin` (if any) marked. */
+  private async loadMapHoverPreview(path: string, anchor: string, token: number): Promise<void> {
+    const map = parseVaultMap(await this.obsidianVaultService.readFile(this.serverId, path));
+    const pin = anchor ? findPinByAnchor(map, anchor) : null;
+    let imageUrl: string | null = null;
+    if (map.image && /^https?:\/\//i.test(map.image)) {
+      imageUrl = map.image;
+    } else if (map.image) {
+      const image = this.vaultIndex?.resolveFile(map.image.replace(/^!?\[\[|\]\]$/g, ''), path);
+      if (image) {
+        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, image.relativePath);
+        if (token !== this.hoverToken) return;
+        this.hoverImageUrl = URL.createObjectURL(blob);
+        imageUrl = this.hoverImageUrl;
+      }
+    }
+    if (token !== this.hoverToken || !this.hoverPreview) return;
+    this.hoverPreview = { ...this.hoverPreview, loading: false, imageUrl, mapPin: pin ? { x: pin.x, y: pin.y, color: pin.color } : null };
   }
 
   /** For `[[Note#Heading]]`, scrolls the card to that heading once the preview has rendered. */
@@ -2355,6 +2400,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     } else if (entry.kind === 'directory') {
       void this.selectFolder(entry);
     } else {
+      const preview = this.hoverPreview;
+      const heading = preview?.heading;
+      if (heading && getVaultFileType(entry.name).id === 'map') {
+        this.mapFocus = { path: entry.relativePath, anchor: heading, token: Date.now() };
+      }
       void this.selectFile(entry);
     }
   }
@@ -2400,6 +2450,12 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   private async openInternalLink(linkPath: string): Promise<void> {
     const entry = this.vaultIndex?.resolveLink(linkPath, this.selectedFileRelativePath);
+
+    // `[[Sword Coast.map#Waterdeep]]`: open the map at that pin.
+    const anchor = linkPath.split('|')[0].split('#').slice(1).join('#').trim();
+    if (entry?.kind === 'file' && anchor && getVaultFileType(entry.name).id === 'map') {
+      this.mapFocus = { path: entry.relativePath, anchor, token: Date.now() };
+    }
 
     if (entry?.kind === 'file') {
       await this.selectFile(entry);

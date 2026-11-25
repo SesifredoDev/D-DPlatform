@@ -6,6 +6,7 @@ import { createTimer, type Ctx } from '@milkdown/ctx';
 import { Subscription } from 'rxjs';
 import { blockKindOf, blockLanguage, isStatblockLanguage } from '../../services/ObsidianVault/statblock';
 import { getFileExtension, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
+import { EmbedSize, formatEmbedSize, parseEmbedSize } from './embed-size';
 import { NoteEmbedComponent } from '../statblock-card/note-embed.component';
 import { StatblockCardComponent } from '../statblock-card/statblock-card.component';
 
@@ -18,6 +19,8 @@ export interface StatblockViewHost {
   readonly(): boolean;
   openLink(link: string): void;
   filesAdded(): void;
+  /** A link inside an embed (e.g. a map pin) is hovered: show the usual link preview. */
+  linkHover(event: { target: string; rect: DOMRect } | null): void;
 }
 
 type GetPos = () => number | undefined;
@@ -86,15 +89,16 @@ export function noteEmbedTarget(node: ProseMirrorNode): string | null {
   const path = target.split('#')[0].split('|')[0].trim();
   if (!path || /^[a-z]+:/i.test(path)) return null;
   // Images, PDFs and other known types keep the image view; notes (and names with dots, like
-  // "Mr. Smith") get the embed card.
+  // "Mr. Smith") and maps get the embed card.
   const extension = getFileExtension(path);
-  return !extension || extension === 'md' || getVaultFileType(path).id === 'file' ? target : null;
+  return !extension || extension === 'md' || extension === 'map' || getVaultFileType(path).id === 'file' ? target : null;
 }
 
 function embedView(host: StatblockViewHost, fallback?: NodeViewConstructor): NodeViewConstructor {
   return (node, view, getPos, decorations, innerDecorations) => {
     const target = noteEmbedTarget(node);
-    if (target !== null) return new NoteEmbedView(node, target, host);
+    if (target !== null) return new NoteEmbedView(node, view, getPos as GetPos, target, host);
+    if (node.type.name === 'image' && vaultImagePath(node)) return new ResizableImageView(node, view, getPos as GetPos, host);
     if (fallback) return fallback(node, view, getPos, decorations, innerDecorations);
     // No editor view registered for this node: render it the way its schema does.
     const spec = node.type.spec.toDOM?.(node);
@@ -116,7 +120,13 @@ abstract class AngularNodeView<T> implements NodeView {
     this.dom.classList.add('statblock-node');
     this.ref = createComponent(component, { environmentInjector: host.injector, hostElement: this.dom });
     host.appRef.attachView(this.ref.hostView);
+    // The editor marks embeds (image nodes) draggable, so a drag inside one (panning an embedded map,
+    // selecting text in a card) would pick up the whole embed instead. Moving a block is done with
+    // the editor's block handle, which doesn't use this.
+    this.dom.addEventListener('dragstart', this.cancelNativeDrag);
   }
+
+  private readonly cancelNativeDrag = (event: DragEvent) => event.preventDefault();
 
   selectNode(): void {
     this.dom.classList.add('ProseMirror-selectednode');
@@ -136,6 +146,7 @@ abstract class AngularNodeView<T> implements NodeView {
   }
 
   destroy(): void {
+    this.dom.removeEventListener('dragstart', this.cancelNativeDrag);
     this.subscriptions.unsubscribe();
     this.host.appRef.detachView(this.ref.hostView);
     this.ref.destroy();
@@ -185,26 +196,216 @@ class StatblockBlockView extends AngularNodeView<StatblockCardComponent> {
   }
 }
 
-/** `![[Note]]`: a statblock / item card for such notes, a link card for other notes. */
+/** `![[Note]]`: a statblock / item card for such notes, a map for maps, a link card for other notes. */
 class NoteEmbedView extends AngularNodeView<NoteEmbedComponent> {
-  constructor(private node: ProseMirrorNode, private target: string, host: StatblockViewHost) {
+  constructor(
+    private node: ProseMirrorNode,
+    private view: EditorView,
+    private getPos: GetPos,
+    private target: string,
+    host: StatblockViewHost
+  ) {
     super(host, NoteEmbedComponent, 'div');
     this.ref.setInput('serverId', host.serverId());
     this.ref.setInput('fromPath', host.filePath());
     this.ref.setInput('link', target);
+    this.ref.setInput('size', embedSizeOf(node));
+    this.ref.setInput('resizable', !host.readonly() && view.editable);
     this.subscriptions.add(this.ref.instance.openNote.subscribe(link => host.openLink(link)));
+    this.subscriptions.add(this.ref.instance.linkHover.subscribe(event => host.linkHover(event)));
+    this.subscriptions.add(this.ref.instance.resized.subscribe(size => setEmbedSize(this.view, this.getPos, size)));
   }
 
   update(node: ProseMirrorNode): boolean {
     if (node.type !== this.node.type) return false;
     const target = noteEmbedTarget(node);
     if (target === null) return false;
+    const sizeChanged = node.attrs['alt'] !== this.node.attrs['alt'];
     this.node = node;
     if (target !== this.target) {
       this.target = target;
       this.ref.setInput('link', target);
     }
+    if (sizeChanged) this.ref.setInput('size', embedSizeOf(node));
     return true;
+  }
+}
+
+/** The size kept in an embed's `|…` part (the image node's alt), if it is one. */
+function embedSizeOf(node: ProseMirrorNode): EmbedSize | null {
+  return parseEmbedSize(String(node.attrs['alt'] ?? ''));
+}
+
+/** Writes a size into the embed's `|…` part (saved as `![[x|300]]`); null removes it. */
+function setEmbedSize(view: EditorView, getPos: GetPos, size: EmbedSize | null): void {
+  const pos = getPos();
+  if (typeof pos !== 'number' || !view.editable) return;
+  view.dispatch(view.state.tr.setNodeAttribute(pos, 'alt', formatEmbedSize(size)));
+}
+
+/** The vault path of an `![[image]]` embed (or a local Markdown image); null for web images. */
+function vaultImagePath(node: ProseMirrorNode): string | null {
+  const src = String(node.attrs['src'] || '');
+  if (!src.startsWith(EMBED_PREFIX)) return null;
+  const path = src.slice(EMBED_PREFIX.length).split('#')[0].trim();
+  return path && getVaultFileType(path).viewer === 'image' ? path : null;
+}
+
+/**
+ * An `![[image]]` embed with a resize handle: drag the corner (aspect ratio kept), use the arrow
+ * keys on it, or double-click it to go back to the natural size. The width is saved Obsidian's
+ * way, as `![[map.png|300]]`. The milkdown editor fills in the image itself (see processEmbeds).
+ */
+class ResizableImageView implements NodeView {
+  dom: HTMLElement;
+  private img: HTMLImageElement;
+  private handle: HTMLElement;
+  private readout: HTMLElement;
+  private drag: { id: number; startX: number; width: number; max: number } | null = null;
+  private liveWidth: number | null = null;
+
+  constructor(private node: ProseMirrorNode, private view: EditorView, private getPos: GetPos, private host: StatblockViewHost) {
+    this.dom = document.createElement('span');
+    this.dom.className = 'resizable-image';
+    this.dom.contentEditable = 'false';
+
+    this.img = document.createElement('img');
+    this.img.className = 'wikilink-image';
+    this.img.alt = '';
+    this.img.draggable = false;
+    this.img.setAttribute('data-path', vaultImagePath(node) ?? '');
+    this.img.setAttribute('src', String(node.attrs['src']));
+
+    this.handle = document.createElement('span');
+    this.handle.className = 'resizable-image-handle';
+    this.handle.tabIndex = 0;
+    this.handle.setAttribute('role', 'separator');
+    this.handle.title = 'Drag to resize. Double-click for the original size.';
+
+    this.readout = document.createElement('span');
+    this.readout.className = 'resizable-image-readout';
+
+    this.dom.append(this.img);
+    if (!host.readonly() && view.editable) this.dom.append(this.handle, this.readout);
+
+    this.handle.addEventListener('pointerdown', this.onPointerDown);
+    this.handle.addEventListener('pointermove', this.onPointerMove);
+    this.handle.addEventListener('pointerup', this.onPointerUp);
+    this.handle.addEventListener('pointercancel', this.onPointerUp);
+    this.handle.addEventListener('dblclick', this.onReset);
+    this.handle.addEventListener('keydown', this.onKeydown);
+    this.dom.addEventListener('dragstart', this.cancelDrag);
+    this.applyWidth();
+  }
+
+  update(node: ProseMirrorNode): boolean {
+    if (node.type !== this.node.type || !vaultImagePath(node) || noteEmbedTarget(node) !== null) return false;
+    const srcChanged = node.attrs['src'] !== this.node.attrs['src'];
+    this.node = node;
+    if (srcChanged) {
+      // A different image: let the editor resolve it again.
+      this.img.removeAttribute('data-resolved');
+      this.img.setAttribute('data-path', vaultImagePath(node) ?? '');
+      this.img.setAttribute('src', String(node.attrs['src']));
+    }
+    this.liveWidth = null;
+    this.applyWidth();
+    return true;
+  }
+
+  selectNode(): void {
+    this.dom.classList.add('ProseMirror-selectednode');
+  }
+
+  deselectNode(): void {
+    this.dom.classList.remove('ProseMirror-selectednode');
+  }
+
+  /** The handle is ours; everything else (selecting, deleting the image) is the editor's. */
+  stopEvent(event: Event): boolean {
+    return event.target instanceof Node && this.handle.contains(event.target);
+  }
+
+  /** The editor swaps the image's src once it has loaded it from the vault. */
+  ignoreMutation(): boolean {
+    return true;
+  }
+
+  destroy(): void {
+    this.handle.removeEventListener('pointerdown', this.onPointerDown);
+    this.handle.removeEventListener('pointermove', this.onPointerMove);
+    this.handle.removeEventListener('pointerup', this.onPointerUp);
+    this.handle.removeEventListener('pointercancel', this.onPointerUp);
+    this.handle.removeEventListener('dblclick', this.onReset);
+    this.handle.removeEventListener('keydown', this.onKeydown);
+    this.dom.removeEventListener('dragstart', this.cancelDrag);
+  }
+
+  private get savedSize(): EmbedSize | null {
+    return embedSizeOf(this.node);
+  }
+
+  private applyWidth(): void {
+    const width = this.liveWidth ?? this.savedSize?.width ?? null;
+    const height = this.liveWidth === null ? this.savedSize?.height ?? null : null;
+    this.dom.style.width = width ? `${width}px` : '';
+    this.img.style.width = width ? '100%' : '';
+    this.img.style.height = height && width ? `${height}px` : '';
+    this.img.style.objectFit = height && width ? 'cover' : '';
+    this.dom.classList.toggle('is-sized', !!width);
+    this.readout.textContent = width ? `${Math.round(width)}px` : 'Original size';
+    this.handle.setAttribute('aria-label', `Image width ${width ? `${Math.round(width)}px` : 'original'}. Drag or use the arrow keys to resize; double-click for the original size.`);
+  }
+
+  private maxWidth(): number {
+    return this.dom.parentElement?.clientWidth || this.view.dom.clientWidth || 1200;
+  }
+
+  private onPointerDown = (event: PointerEvent): void => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.handle.setPointerCapture(event.pointerId);
+    this.drag = { id: event.pointerId, startX: event.clientX, width: this.img.getBoundingClientRect().width, max: this.maxWidth() };
+    this.dom.classList.add('is-resizing');
+  };
+
+  private onPointerMove = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || drag.id !== event.pointerId) return;
+    this.liveWidth = Math.round(Math.min(drag.max, Math.max(40, drag.width + event.clientX - drag.startX)));
+    this.applyWidth();
+  };
+
+  private onPointerUp = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || drag.id !== event.pointerId) return;
+    this.drag = null;
+    this.dom.classList.remove('is-resizing');
+    if (this.liveWidth !== null) this.save({ width: this.liveWidth, height: null });
+  };
+
+  private onReset = (event: MouseEvent): void => {
+    event.preventDefault();
+    this.liveWidth = null;
+    this.save(null);
+  };
+
+  private onKeydown = (event: KeyboardEvent): void => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const step = event.shiftKey ? 100 : 20;
+    const current = this.savedSize?.width ?? Math.round(this.img.getBoundingClientRect().width);
+    const width = Math.min(this.maxWidth(), Math.max(40, current + (event.key === 'ArrowRight' ? step : -step)));
+    this.save({ width, height: null });
+  };
+
+  private cancelDrag = (event: DragEvent): void => {
+    if (this.drag) event.preventDefault();
+  };
+
+  private save(size: EmbedSize | null): void {
+    setEmbedSize(this.view, this.getPos, size);
   }
 }
 

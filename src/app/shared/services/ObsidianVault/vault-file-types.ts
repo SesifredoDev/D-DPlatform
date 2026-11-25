@@ -3,7 +3,7 @@
  * To support a new file type, add an entry here (and a viewer branch in the view template
  * if it needs a new `viewer`).
  */
-export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'image' | 'pdf' | 'download';
+export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'map' | 'image' | 'pdf' | 'download';
 
 export interface VaultFileType {
   id: string;
@@ -45,6 +45,18 @@ export const VAULT_FILE_TYPES: readonly VaultFileType[] = [
     label: 'Tree',
     hideExtensionInTitle: true,
     defaultExtension: 'familytree',
+  },
+  {
+    // Maps: an image with pins linking to notes and other maps (see vault-map.ts).
+    id: 'map',
+    extensions: ['map'],
+    icon: 'map',
+    viewer: 'map',
+    readAs: 'text',
+    editable: true,
+    label: 'Map',
+    hideExtensionInTitle: true,
+    defaultExtension: 'map',
   },
   {
     id: 'canvas',

@@ -1,0 +1,518 @@
+<div
+  class="vmap"
+  [class.is-embed]="mode === 'embed'"
+  [class.is-editing]="editing"
+  [class.is-adding]="addingPin"
+  [class.is-resizing]="!!liveSize"
+  [style.height.px]="mode === 'embed' ? embedHeight : null"
+  [style.width.px]="mode === 'embed' ? embedWidth : null"
+  (dragstart)="$event.preventDefault()">
+  @if (mode === 'embed') {
+    <header class="embed-head">
+      <mat-icon class="embed-icon">map</mat-icon>
+      <span class="embed-title">{{ title }}</span>
+      @if (map.pins.length) {
+        <span class="embed-count">{{ map.pins.length === 1 ? '1 pin' : map.pins.length + ' pins' }}</span>
+      }
+      <button type="button" class="icon-btn" (click)="openFile.emit(path)" matTooltip="Open map" [attr.aria-label]="'Open ' + title">
+        <mat-icon>open_in_new</mat-icon>
+      </button>
+    </header>
+  } @else {
+    <div class="map-toolbar">
+      @if (breadcrumbs.length) {
+        <nav class="crumbs" aria-label="Parent maps">
+          @for (crumb of breadcrumbs; track crumb.path) {
+            <button type="button" (click)="openCrumb(crumb.path)" [title]="'Back to ' + crumb.title">{{ crumb.title }}</button>
+            <mat-icon>chevron_right</mat-icon>
+          }
+          <span class="crumb-current">{{ title }}</span>
+        </nav>
+      }
+      <span class="spacer"></span>
+
+      @if (canEdit && map.image) {
+        @if (editing) {
+          <button type="button" class="text-btn" [class.is-active]="addingPin" (click)="startAddingPin()" [attr.aria-pressed]="addingPin">
+            <mat-icon>add_location_alt</mat-icon>
+            {{ addingPin ? 'Click the map…' : 'Pin' }}
+          </button>
+        }
+        <button type="button" class="text-btn" [class.is-active]="editing" (click)="toggleEditing()" [attr.aria-pressed]="editing">
+          <mat-icon>{{ editing ? 'check' : 'edit' }}</mat-icon>
+          {{ editing ? 'Done' : 'Edit' }}
+        </button>
+      }
+      @if (map.image || map.pins.length) {
+        <button
+          type="button"
+          class="icon-btn"
+          [class.is-active]="panelOpen"
+          (click)="panelOpen = !panelOpen"
+          [attr.aria-pressed]="panelOpen"
+          [matTooltip]="panelOpen ? 'Hide pins list' : 'Show pins list'">
+          <mat-icon>view_sidebar</mat-icon>
+        </button>
+      }
+      @if (canEdit) {
+        <button type="button" class="icon-btn" [matMenuTriggerFor]="mapMenu" aria-label="Map options" matTooltip="More">
+          <mat-icon>more_horiz</mat-icon>
+        </button>
+        <mat-menu #mapMenu="matMenu" panelClass="custom-glass-menu" xPosition="before">
+          <button mat-menu-item (click)="openImagePicker('vault')">
+            <mat-icon>image</mat-icon>
+            <span>{{ map.image ? 'Change image' : 'Choose image' }}</span>
+          </button>
+          <button mat-menu-item (click)="fit()">
+            <mat-icon>fit_screen</mat-icon>
+            <span>Fit to view</span>
+          </button>
+        </mat-menu>
+      }
+    </div>
+  }
+
+  <div class="map-body">
+    <div
+      #viewport
+      class="viewport"
+      tabindex="0"
+      [attr.aria-label]="title + ' map. Drag to pan, + and − to zoom, 0 to fit. Tab to a pin and press Enter to open it.'"
+      (wheel)="onWheel($event)"
+      (pointerdown)="onPointerDown($event)"
+      (mousedown)="onMouseDown($event)"
+      (pointermove)="onPointerMove($event)"
+      (pointerup)="onPointerUp($event)"
+      (pointercancel)="onPointerUp($event)"
+      (dblclick)="onDoubleClick($event)"
+      (keydown)="onViewportKeydown($event)">
+      @if (parseError) {
+        <div class="state">
+          <mat-icon>error</mat-icon>
+          <strong>This map can’t be read</strong>
+          <span>{{ parseError }} The file is left unchanged.</span>
+        </div>
+      } @else if (!map.image) {
+        <div class="state">
+          <mat-icon>map</mat-icon>
+          @if (canEdit) {
+            <strong>Choose a map image</strong>
+            <span>Pins are placed on top of it and stay put if you swap it for a bigger copy later.</span>
+            <div class="state-actions">
+              <button type="button" class="primary-btn" (click)="openImagePicker('vault')">
+                <mat-icon>photo_library</mat-icon>From the vault
+              </button>
+              <button type="button" class="secondary-btn" (click)="openImagePicker('upload')">
+                <mat-icon>upload</mat-icon>Upload
+              </button>
+              <button type="button" class="secondary-btn" (click)="openImagePicker('vtt')">
+                <mat-icon>grid_on</mat-icon>From VTT maps
+              </button>
+            </div>
+          } @else {
+            <strong>No map image yet</strong>
+          }
+        </div>
+      } @else {
+        <div
+          class="map-layer"
+          [style.transform]="layerTransform"
+          [style.width.px]="natural?.width ?? 0"
+          [style.height.px]="natural?.height ?? 0">
+          @if (imageUrl) {
+            <img [src]="imageUrl" alt="" draggable="false" (load)="onImageLoad($event)" (error)="onImageError()">
+          }
+        </div>
+
+        @if (imageFailed) {
+          <div class="banner" role="alert">
+            <mat-icon>broken_image</mat-icon>
+            <span>Image not found: {{ map.image }}</span>
+            @if (canEdit) {
+              <button type="button" class="link-btn" (click)="openImagePicker('vault')">Change image</button>
+            }
+          </div>
+        }
+
+        @for (view of pins; track view.pin.id) {
+          <button
+            type="button"
+            class="pin"
+            [attr.data-pin]="view.pin.id"
+            [class.is-small]="view.pin.size === 'small'"
+            [class.is-large]="view.pin.size === 'large'"
+            [class.is-selected]="view.pin.id === selectedPinId || view.pin.id === card?.pinId"
+            [class.is-missing]="view.missing"
+            [class.is-gm]="view.pin.gmOnly"
+            [class.is-submap]="view.isSubmap"
+            [class.is-draggable]="editing"
+            [style.left.px]="view.left"
+            [style.top.px]="view.top"
+            [style.--pin-color]="view.pin.color"
+            (click)="onPinClick(view.pin.id, $event)"
+            (pointerenter)="onPinEnter(view, $any($event.currentTarget))"
+            (pointerleave)="onPinLeave()"
+            (keydown)="onPinKeydown(view, $event)"
+            [attr.aria-label]="view.title + (view.isSubmap ? ', map' : view.missing ? ', note not found' : view.entry ? ', note' : '')">
+            <span class="pin-dot"><mat-icon>{{ pinIcon(view) }}</mat-icon></span>
+            @if (view.showLabel || view.pin.id === hoveredPinId || view.pin.id === selectedPinId) {
+              <span class="pin-label">{{ view.title }}</span>
+            }
+          </button>
+        }
+
+        @if (card && cardPin; as view) {
+          @let position = cardPosition(view);
+          <div
+            class="pin-card"
+            [class.is-below]="position.below"
+            [style.left.px]="position.left"
+            [style.top.px]="position.top"
+            role="dialog"
+            [attr.aria-label]="view.title">
+            <div class="card-head">
+              <span class="card-icon" [style.--pin-color]="view.pin.color"><mat-icon>{{ pinIcon(view) }}</mat-icon></span>
+              <div class="card-titles">
+                <strong>{{ view.title }}</strong>
+                <span>{{ card.kindLabel }}@if (view.pin.layer) {, {{ layerName(view.pin.layer) }}}</span>
+              </div>
+              <button type="button" class="icon-btn is-small" (click)="closeCard()" aria-label="Close">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+            @if (card.loading) {
+              <p class="card-text is-muted">Loading…</p>
+            } @else if (view.missing) {
+              <p class="card-text is-muted">“{{ view.pin.link }}” doesn’t exist yet.@if (canEdit) { Edit the pin to create it or link another note.}</p>
+            } @else if (card.excerpt) {
+              <p class="card-text">{{ card.excerpt }}</p>
+            }
+            <div class="card-actions">
+              @if (view.entry) {
+                <button type="button" class="primary-btn" (click)="openPinTarget(view)">
+                  <mat-icon>{{ view.isSubmap ? 'layers' : 'description' }}</mat-icon>
+                  {{ view.isSubmap ? 'Open map' : 'Open note' }}
+                </button>
+              }
+              @if (canEdit) {
+                <button type="button" class="secondary-btn" (click)="editPinFromCard()">
+                  <mat-icon>edit</mat-icon>Edit pin
+                </button>
+              }
+            </div>
+          </div>
+        }
+
+        <div class="zoom-controls">
+          <button type="button" class="icon-btn" (click)="zoomBy(1.25)" matTooltip="Zoom in (+)" aria-label="Zoom in"><mat-icon>add</mat-icon></button>
+          <button type="button" class="icon-btn" (click)="zoomBy(0.8)" matTooltip="Zoom out (−)" aria-label="Zoom out"><mat-icon>remove</mat-icon></button>
+          <button type="button" class="icon-btn" (click)="fit()" matTooltip="Fit to view (0)" aria-label="Fit to view"><mat-icon>fit_screen</mat-icon></button>
+        </div>
+
+        @if (addingPin) {
+          <div class="hint" role="status">Click where the pin goes. Esc cancels.</div>
+        } @else if (showZoomHint) {
+          <div class="hint" role="status">Hold Ctrl and scroll to zoom</div>
+        }
+      }
+    </div>
+
+    @if (mode === 'file' && panelOpen && !parseError && (map.image || map.pins.length)) {
+      <aside class="map-panel" [attr.aria-label]="editing && selectedPin ? 'Pin settings' : 'Pins'">
+        @if (editing && selectedPin; as pin) {
+          <div class="panel-head">
+            <button type="button" class="icon-btn is-small" (click)="selectedPinId = null" aria-label="Back to all pins" matTooltip="All pins">
+              <mat-icon>arrow_back</mat-icon>
+            </button>
+            <strong>Pin</strong>
+            <span class="spacer"></span>
+            <button type="button" class="icon-btn is-small is-danger" (click)="deletePin(pin.id)" aria-label="Remove pin" matTooltip="Remove pin (Delete)">
+              <mat-icon>delete</mat-icon>
+            </button>
+          </div>
+
+          <label class="field">
+            <span>Links to</span>
+            <span class="link-input">
+              <input
+                #linkInput
+                [(ngModel)]="linkQuery"
+                (ngModelChange)="updateLinkSuggestions(); newNoteFolders = []"
+                (focus)="updateLinkSuggestions()"
+                (keydown.enter)="linkSuggestions.length && chooseLink(linkSuggestions[0])"
+                placeholder="Search notes and maps"
+                autocomplete="off"
+                spellcheck="false">
+              @if (pin.link) {
+                <button type="button" class="icon-btn is-small" (click)="clearLink()" aria-label="Unlink"><mat-icon>close</mat-icon></button>
+              }
+            </span>
+          </label>
+          @if (linkSuggestions.length && linkQuery !== pin.link) {
+            <div class="suggestions" role="listbox" aria-label="Notes and maps">
+              @for (suggestion of linkSuggestions; track suggestion.entry.relativePath) {
+                <button type="button" role="option" (click)="chooseLink(suggestion)">
+                  <mat-icon>{{ suggestion.icon }}</mat-icon>
+                  <span class="suggestion-title">{{ suggestion.title }}</span>
+                  @if (suggestion.folder) {
+                    <span class="suggestion-folder">{{ suggestion.folder }}</span>
+                  }
+                </button>
+              }
+            </div>
+          }
+          @if (canCreateLinkedNote && linkQuery !== pin.link) {
+            @if (!newNoteFolders.length) {
+              <button type="button" class="create-btn" (click)="prepareNewNote()">
+                <mat-icon>note_add</mat-icon>Create note “{{ linkQuery.trim() }}”
+              </button>
+            } @else {
+              <div class="create-note">
+                <label class="field">
+                  <span>Folder for “{{ linkQuery.trim() }}”</span>
+                  <select [ngModel]="newNoteFolder" (ngModelChange)="newNoteFolder = $event">
+                    <option [ngValue]="null" disabled>Choose a folder</option>
+                    @for (folder of newNoteFolders; track folder) {
+                      <option [ngValue]="folder">{{ folder || 'Vault root' }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="check">
+                  <input type="checkbox" [(ngModel)]="useLocationTemplate">
+                  Use the Location template
+                </label>
+                <button type="button" class="primary-btn" (click)="createLinkedNote()" [disabled]="newNoteFolder === null || creatingNote">
+                  <mat-icon>note_add</mat-icon>{{ creatingNote ? 'Creating…' : 'Create and link' }}
+                </button>
+              </div>
+            }
+          }
+
+          <label class="field">
+            <span>Label</span>
+            <input
+              [ngModel]="pin.label"
+              (change)="setPin({ label: $any($event.target).value.trim() })"
+              [placeholder]="linkName(pin.link) || 'Name shown on the map'">
+          </label>
+
+          <div class="field">
+            <span>Symbol</span>
+            <div class="icon-grid" role="radiogroup" aria-label="Symbol">
+              @for (choice of icons; track choice.icon) {
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="pin.icon === choice.icon"
+                  [class.is-active]="pin.icon === choice.icon"
+                  (click)="setPin({ icon: choice.icon })"
+                  [matTooltip]="choice.label"
+                  [attr.aria-label]="choice.label">
+                  <mat-icon>{{ choice.icon }}</mat-icon>
+                </button>
+              }
+              <button
+                type="button"
+                role="radio"
+                [attr.aria-checked]="pin.icon === 'layers'"
+                [class.is-active]="pin.icon === 'layers'"
+                (click)="setPin({ icon: 'layers' })"
+                matTooltip="Map"
+                aria-label="Map">
+                <mat-icon>layers</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <div class="field">
+            <span>Colour</span>
+            <div class="swatches" role="radiogroup" aria-label="Colour">
+              @for (color of colors; track color) {
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="pin.color === color"
+                  [class.is-active]="pin.color === color"
+                  [style.background]="color"
+                  (click)="setPin({ color })"
+                  [attr.aria-label]="'Colour ' + color"></button>
+              }
+            </div>
+          </div>
+
+          <div class="field">
+            <span>Size</span>
+            <div class="segmented" role="radiogroup" aria-label="Size">
+              @for (size of sizes; track size.value) {
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="pin.size === size.value"
+                  [class.is-active]="pin.size === size.value"
+                  (click)="setPin({ size: size.value })">{{ size.label }}</button>
+              }
+            </div>
+            <small class="field-hint">Large pins keep their label when zoomed out.</small>
+          </div>
+
+          <label class="field">
+            <span>Layer</span>
+            <select [ngModel]="pin.layer" (ngModelChange)="setPin({ layer: $event })">
+              <option [ngValue]="null">No layer</option>
+              @for (layer of map.layers; track layer.id) {
+                <option [ngValue]="layer.id">{{ layer.name }}</option>
+              }
+            </select>
+          </label>
+          <form class="inline-form" (submit)="$event.preventDefault(); createLayer()">
+            <input name="newLayer" [(ngModel)]="newLayerName" placeholder="New layer" aria-label="New layer name">
+            <button type="submit" class="secondary-btn" [disabled]="!newLayerName.trim()">Add</button>
+          </form>
+
+          <label class="check">
+            <input type="checkbox" [ngModel]="pin.gmOnly" (ngModelChange)="setPin({ gmOnly: $event })">
+            GM only
+            <small>Shown with a dashed outline.</small>
+          </label>
+        } @else {
+          <div class="panel-head">
+            <strong>Pins</strong>
+            <span class="count">{{ map.pins.length }}</span>
+          </div>
+          @if (map.pins.length > 6) {
+            <input class="panel-search" [(ngModel)]="pinQuery" placeholder="Find a pin" aria-label="Find a pin">
+          }
+          @if (map.pins.length) {
+            <ul class="pin-list">
+              @for (view of filteredPins; track view.pin.id) {
+                <li>
+                  <button type="button" (click)="showPin(view)" [class.is-missing]="view.missing">
+                    <span class="list-icon" [style.--pin-color]="view.pin.color"><mat-icon>{{ pinIcon(view) }}</mat-icon></span>
+                    <span class="list-title">{{ view.title }}</span>
+                    @if (view.missing) {
+                      <mat-icon class="list-warn" matTooltip="Note not found">link_off</mat-icon>
+                    } @else if (view.pin.layer) {
+                      <span class="list-meta">{{ layerName(view.pin.layer) }}</span>
+                    }
+                  </button>
+                </li>
+              } @empty {
+                <li class="list-empty">No pins match.</li>
+              }
+            </ul>
+          } @else {
+            <p class="panel-empty">
+              No pins yet.@if (canEdit) { Choose <strong>Edit</strong>, then <strong>Pin</strong>, and click the map. Double-clicking the map in Edit also adds one.}
+            </p>
+          }
+
+          @if (map.layers.length) {
+            <div class="panel-head is-sub"><strong>Layers</strong></div>
+            <ul class="layer-list">
+              @for (layer of map.layers; track layer.id) {
+                <li>
+                  <button type="button" (click)="toggleLayer(layer)" [attr.aria-pressed]="layer.visible">
+                    <mat-icon>{{ layer.visible ? 'visibility' : 'visibility_off' }}</mat-icon>
+                    <span>{{ layer.name }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+      </aside>
+    }
+  </div>
+
+  @if (pickingImage) {
+    <div class="picker-backdrop" (click)="closeImagePicker()"></div>
+    <section class="picker" role="dialog" aria-label="Choose a map image" (keydown.escape)="closeImagePicker()">
+      <header class="picker-head">
+        <strong>Map image</strong>
+        <nav class="segmented" role="tablist">
+          <button type="button" role="tab" [class.is-active]="imageSource === 'vault'" (click)="setImageSource('vault')">Vault</button>
+          <button type="button" role="tab" [class.is-active]="imageSource === 'upload'" (click)="setImageSource('upload')">Upload</button>
+          <button type="button" role="tab" [class.is-active]="imageSource === 'vtt'" (click)="setImageSource('vtt')">VTT maps</button>
+        </nav>
+        <button type="button" class="icon-btn is-small" (click)="closeImagePicker()" aria-label="Close"><mat-icon>close</mat-icon></button>
+      </header>
+
+      @if (imageSource === 'vault') {
+        <input class="panel-search" [(ngModel)]="pickerQuery" (ngModelChange)="updateImagePicker()" placeholder="Filter images" aria-label="Filter images">
+        @if (pickerImages.length) {
+          <div class="thumb-grid">
+            @for (image of pickerImages; track image.relativePath) {
+              <button type="button" (click)="pickVaultImage(image)" [title]="image.relativePath">
+                @if (thumbFor(image.relativePath); as url) {
+                  <img [src]="url" alt="" loading="lazy">
+                } @else {
+                  <mat-icon>image</mat-icon>
+                }
+                <span>{{ displayName(image) }}</span>
+              </button>
+            }
+          </div>
+          @if (pickerTotal > pickerImages.length) {
+            <p class="panel-empty">Showing {{ pickerImages.length }} of {{ pickerTotal }} images. Type to narrow them down.</p>
+          }
+        } @else {
+          <p class="panel-empty">No images {{ pickerQuery ? 'match' : 'in the vault yet. Upload one instead.' }}</p>
+        }
+      } @else if (imageSource === 'upload') {
+        <label class="upload-drop" [class.is-busy]="uploading">
+          <mat-icon>{{ uploading ? 'progress_activity' : 'upload' }}</mat-icon>
+          <strong>{{ uploading ? 'Saving…' : 'Choose an image from your computer' }}</strong>
+          <span>It’s saved next to this map, named “{{ title }}”.</span>
+          <input type="file" accept="image/*" (change)="uploadImage($event)" [disabled]="uploading" hidden>
+        </label>
+      } @else {
+        @if (vttMapsLoading) {
+          <p class="panel-empty">Loading VTT maps…</p>
+        } @else if (vttMaps.length) {
+          <div class="thumb-grid">
+            @for (entry of vttMaps; track entry.id) {
+              <button type="button" (click)="pickVttMap(entry)" [title]="entry.name">
+                <img [src]="entry.url" alt="" loading="lazy">
+                <span>{{ entry.name }}</span>
+              </button>
+            }
+          </div>
+        } @else {
+          <p class="panel-empty">No saved VTT maps with an image. Save a map in the VTT first.</p>
+        }
+      }
+    </section>
+  }
+  @if (mode === 'embed' && resizable) {
+    <div
+      class="resize-edge"
+      role="separator"
+      aria-orientation="horizontal"
+      tabindex="0"
+      [attr.aria-label]="'Map height ' + embedHeight + 'px. Drag or use the arrow keys to resize; double-click to reset.'"
+      title="Drag to resize. Double-click to reset."
+      (pointerdown)="onResizeStart($event, 'y')"
+      (pointermove)="onResizeMove($event)"
+      (pointerup)="onResizeEnd($event)"
+      (pointercancel)="onResizeEnd($event)"
+      (dblclick)="resetEmbedSize()"
+      (keydown)="onResizeKey($event, 'y')"></div>
+    <div
+      class="resize-corner"
+      role="separator"
+      tabindex="0"
+      [attr.aria-label]="'Map size ' + (embedWidth ? embedWidth + ' by ' : 'full width by ') + embedHeight + 'px. Drag or use the arrow keys to resize; double-click to reset.'"
+      title="Drag to resize. Double-click to reset."
+      (pointerdown)="onResizeStart($event, 'both')"
+      (pointermove)="onResizeMove($event)"
+      (pointerup)="onResizeEnd($event)"
+      (pointercancel)="onResizeEnd($event)"
+      (dblclick)="resetEmbedSize()"
+      (keydown)="onResizeKey($event, 'both')">
+      <mat-icon aria-hidden="true">south_east</mat-icon>
+    </div>
+    @if (liveSize) {
+      <span class="resize-readout" aria-hidden="true">{{ embedWidth ? embedWidth + ' × ' : 'Full width × ' }}{{ embedHeight }}</span>
+    }
+  }
+</div>
