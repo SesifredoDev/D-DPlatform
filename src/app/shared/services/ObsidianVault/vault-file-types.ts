@@ -3,7 +3,7 @@
  * To support a new file type, add an entry here (and a viewer branch in the view template
  * if it needs a new `viewer`).
  */
-export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'map' | 'image' | 'pdf' | 'download';
+export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'map' | 'calendar' | 'timeline' | 'image' | 'pdf' | 'download';
 
 export interface VaultFileType {
   id: string;
@@ -57,6 +57,30 @@ export const VAULT_FILE_TYPES: readonly VaultFileType[] = [
     label: 'Map',
     hideExtensionInTitle: true,
     defaultExtension: 'map',
+  },
+  {
+    // Calendars: months, weekdays, eras and holidays (see vault-calendar.ts).
+    id: 'calendar',
+    extensions: ['calendar'],
+    icon: 'calendar_month',
+    viewer: 'calendar',
+    readAs: 'text',
+    editable: true,
+    label: 'Calendar',
+    hideExtensionInTitle: true,
+    defaultExtension: 'calendar',
+  },
+  {
+    // Timelines: dated events in one calendar (see vault-timeline.ts).
+    id: 'timeline',
+    extensions: ['timeline'],
+    icon: 'timeline',
+    viewer: 'timeline',
+    readAs: 'text',
+    editable: true,
+    label: 'Timeline',
+    hideExtensionInTitle: true,
+    defaultExtension: 'timeline',
   },
   {
     id: 'canvas',

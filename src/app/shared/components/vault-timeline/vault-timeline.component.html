@@ -1,0 +1,264 @@
+<div class="vtl" [class.is-embed]="mode === 'embed'">
+  @if (parseError) {
+    <div class="state">
+      <mat-icon>error</mat-icon>
+      <strong>This timeline can’t be read</strong>
+      <span>{{ parseError }} The file is left unchanged.</span>
+    </div>
+  } @else if (timeline) {
+    <header class="tl-toolbar">
+      @if (mode === 'embed') {
+        <mat-icon class="embed-icon">timeline</mat-icon>
+        <span class="embed-title">{{ title }}</span>
+      }
+      @if (calendar) {
+        <span class="calendar-name" [matTooltip]="sourceSummary">
+          <mat-icon>calendar_month</mat-icon>{{ calendar.name }}
+        </span>
+      }
+      <span class="spacer"></span>
+      <div class="segmented" role="radiogroup" aria-label="View">
+        <button type="button" role="radio" [class.is-active]="view === 'list'" [attr.aria-checked]="view === 'list'" (click)="setView('list')">
+          <mat-icon>view_agenda</mat-icon>List
+        </button>
+        <button type="button" role="radio" [class.is-active]="view === 'axis'" [attr.aria-checked]="view === 'axis'" (click)="setView('axis')">
+          <mat-icon>linear_scale</mat-icon>Axis
+        </button>
+      </div>
+      @if (view === 'axis' && entries.length) {
+        <button type="button" class="icon-btn" (click)="zoom(0.6)" matTooltip="Zoom out" aria-label="Zoom out"><mat-icon>remove</mat-icon></button>
+        <button type="button" class="icon-btn" (click)="zoom(1.6)" matTooltip="Zoom in (Ctrl + scroll)" aria-label="Zoom in"><mat-icon>add</mat-icon></button>
+        <button type="button" class="icon-btn" (click)="fitAxis()" matTooltip="Fit" aria-label="Fit"><mat-icon>fit_screen</mat-icon></button>
+      }
+      @if (mode === 'embed') {
+        <button type="button" class="icon-btn" (click)="openFile.emit(path)" matTooltip="Open timeline" [attr.aria-label]="'Open ' + title"><mat-icon>open_in_new</mat-icon></button>
+      } @else if (canEdit && calendar) {
+        <button type="button" class="text-btn" [class.is-active]="panel === 'sources'" (click)="openSources()">
+          <mat-icon>filter_list</mat-icon>Sources
+        </button>
+        <button type="button" class="primary-btn" (click)="newEvent()"><mat-icon>add</mat-icon>Event</button>
+      }
+    </header>
+
+    <div class="tl-body">
+      <section class="tl-main">
+        @if (loadingCalendars) {
+          <p class="empty">Loading calendars…</p>
+        } @else if (!calendar) {
+          <div class="state">
+            <mat-icon>calendar_month</mat-icon>
+            <strong>No calendar yet</strong>
+            <span>Timelines place events on a calendar. Create one with <strong>+ → New calendar</strong> in the file list (Gregorian, Harptos, Golarion and more are ready to install).</span>
+          </div>
+        } @else if (!entries.length) {
+          <div class="state">
+            <mat-icon>timeline</mat-icon>
+            <strong>Nothing on this timeline yet</strong>
+            <span>It shows {{ sourceSummary }}. Give a note a <code>date:</code> property (e.g. <code>date: {{ calendar.engine.today() ? calendar.engine.format(calendar.engine.today()!) : 'a date' }}</code>)@if (canEdit) {, or add an event here}.</span>
+          </div>
+        } @else if (view === 'list') {
+          <ol class="list" #list>
+            @for (row of rows; track $index) {
+              @switch (row.type) {
+                @case ('year') {
+                  <li class="year-row"><h3>{{ row.label }}</h3></li>
+                }
+                @case ('month') {
+                  <li class="month-row">{{ row.label }}</li>
+                }
+                @case ('today') {
+                  <li class="today-row" aria-label="Today"><span>{{ row.label }}</span></li>
+                }
+                @default {
+                  @if (row.entry; as entry) {
+                    <li
+                      class="entry"
+                      [class.is-selected]="selected?.key === entry.key"
+                      [class.is-mention]="entry.kind === 'mention'"
+                      [style.--c]="entry.color || '#7fc8f8'">
+                      <button
+                        type="button"
+                        class="entry-main"
+                        (click)="select(entry)"
+                        (dblclick)="open(entry)"
+                        (pointerenter)="onEntryEnter(entry, $any($event.currentTarget))"
+                        (pointerleave)="onEntryLeave()"
+                        [attr.aria-expanded]="selected?.key === entry.key">
+                        <span class="entry-date">{{ shortDate(entry) }}</span>
+                        <span class="entry-dot" aria-hidden="true"></span>
+                        <span class="entry-text">
+                          <span class="entry-title">{{ entry.title }}</span>
+                          <span class="entry-meta">
+                            @if (entry.kind === 'holiday') { Holiday }
+                            @else if (entry.kind === 'mention') { Mentioned in this note }
+                            @else if (entry.kind === 'note') { Note }
+                            @else { {{ entry.lane }} }
+                            @if (entry.endDay !== null) { · {{ rangeText(entry) }} }
+                          </span>
+                        </span>
+                      </button>
+                      @if (selected?.key === entry.key) {
+                        <div class="entry-details">
+                          <p>{{ selectedLong(entry) }}@if (selectedRelative(entry); as rel) {<span class="muted">, {{ rel }}</span>}</p>
+                          <div class="actions">
+                            @if (entry.path) {
+                              <button type="button" class="primary-btn" (click)="open(entry)"><mat-icon>description</mat-icon>Open note</button>
+                            }
+                            @if (entry.event && canEdit) {
+                              <button type="button" class="secondary-btn" (click)="editEvent(entry.event)"><mat-icon>edit</mat-icon>Edit</button>
+                              <button type="button" class="secondary-btn is-danger" (click)="deleteEvent(entry.event)"><mat-icon>delete</mat-icon>Delete</button>
+                            }
+                          </div>
+                        </div>
+                      }
+                    </li>
+                  }
+                }
+              }
+            }
+          </ol>
+        } @else {
+          <div class="axis" #axis (wheel)="onAxisWheel($event)" tabindex="0" aria-label="Timeline axis. Ctrl and scroll to zoom.">
+            <div class="axis-inner" [style.width.px]="axisWidth + 160">
+              <div class="ticks">
+                @for (tick of ticks; track $index) {
+                  <span class="tick" [style.left.px]="tick.x + 140">{{ tick.label }}</span>
+                }
+              </div>
+              @for (lane of lanes; track lane) {
+                <div class="lane">
+                  <span class="lane-name">{{ lane }}</span>
+                  @for (entry of laneEntries(lane); track entry.key) {
+                    <button
+                      type="button"
+                      class="mark"
+                      [class.is-range]="entry.endDay !== null"
+                      [class.is-selected]="selected?.key === entry.key"
+                      [style.left.px]="x(entry.day) + 140"
+                      [style.width.px]="entry.endDay !== null ? barWidth(entry) : null"
+                      [style.--c]="entry.color || '#7fc8f8'"
+                      (click)="select(entry)"
+                      (dblclick)="open(entry)"
+                      (pointerenter)="onEntryEnter(entry, $any($event.currentTarget))"
+                      (pointerleave)="onEntryLeave()"
+                      [attr.aria-label]="entry.title + ', ' + entry.label">
+                      <span class="mark-label">{{ entry.title }}</span>
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+          @if (selected; as entry) {
+            <div class="axis-detail">
+              <div>
+                <strong>{{ entry.title }}</strong>
+                <span class="muted">{{ selectedLong(entry) }}@if (entry.endDay !== null) {, {{ rangeText(entry) }}}</span>
+              </div>
+              <div class="actions">
+                @if (entry.path) {
+                  <button type="button" class="primary-btn" (click)="open(entry)"><mat-icon>description</mat-icon>Open note</button>
+                }
+                @if (entry.event && canEdit) {
+                  <button type="button" class="secondary-btn" (click)="editEvent(entry.event)"><mat-icon>edit</mat-icon>Edit</button>
+                }
+                <button type="button" class="icon-btn" (click)="selected = null" aria-label="Close"><mat-icon>close</mat-icon></button>
+              </div>
+            </div>
+          }
+        }
+
+        @if (unreadable.length) {
+          <div class="unreadable" role="alert">
+            <mat-icon>warning</mat-icon>
+            <span>{{ unreadable.length === 1 ? '1 event has' : unreadable.length + ' events have' }} a date that isn’t in {{ calendar?.name }}:
+              @for (event of unreadable; track event.id; let last = $last) {
+                @if (canEdit) {<button type="button" class="link" (click)="editEvent(event)">{{ event.title || event.date }}</button>} @else {{{ event.title || event.date }}}@if (!last) {, }
+              }
+            </span>
+          </div>
+        }
+      </section>
+
+      @if (panel === 'event' && draft; as d) {
+        <aside class="panel" aria-label="Event">
+          <header class="panel-head">
+            <strong>{{ d.id ? 'Edit event' : 'New event' }}</strong>
+            <button type="button" class="icon-btn" (click)="closePanel()" aria-label="Close"><mat-icon>close</mat-icon></button>
+          </header>
+          <datalist id="timeline-note-names">
+            @for (name of noteNames; track name) {
+              <option [value]="name"></option>
+            }
+          </datalist>
+          <datalist id="timeline-lanes">
+            @for (lane of timeline.lanes; track lane) {
+              <option [value]="lane"></option>
+            }
+          </datalist>
+          <form class="form" (submit)="$event.preventDefault(); saveDraft()">
+            <label class="field"><span>Title</span>
+              <input name="title" [(ngModel)]="d.title" placeholder="e.g. Fall of Myth Drannor">
+            </label>
+            <label class="field"><span>Date</span>
+              <input name="date" [(ngModel)]="d.date" [placeholder]="calendar && calendar.engine.today() ? calendar.engine.format(calendar.engine.today()!) : '15 Mirtul 1492 DR'" required>
+              @if (dateHint(d.date); as hint) {
+                <small [class.ok]="hint.ok" [class.error]="!hint.ok">{{ hint.text }}</small>
+              }
+            </label>
+            <label class="field"><span>Ends (optional)</span>
+              <input name="end" [(ngModel)]="d.end" placeholder="For events that last a while">
+              @if (dateHint(d.end); as hint) {
+                <small [class.ok]="hint.ok" [class.error]="!hint.ok">{{ hint.text }}</small>
+              }
+            </label>
+            <label class="field"><span>Linked note</span>
+              <input name="link" list="timeline-note-names" [(ngModel)]="d.link" placeholder="Optional">
+            </label>
+            <div class="field-row">
+              <label class="field grow"><span>Lane</span>
+                <input name="lane" list="timeline-lanes" [(ngModel)]="d.lane" placeholder="e.g. Politics">
+              </label>
+              <label class="field"><span>Colour</span>
+                <input name="color" type="color" class="color" [(ngModel)]="d.color">
+              </label>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary-btn" [disabled]="!draftValid">{{ d.id ? 'Save' : 'Add event' }}</button>
+              <button type="button" class="secondary-btn" (click)="closePanel()">Cancel</button>
+            </div>
+          </form>
+        </aside>
+      } @else if (panel === 'sources') {
+        <aside class="panel" aria-label="Sources">
+          <header class="panel-head">
+            <strong>Sources</strong>
+            <button type="button" class="icon-btn" (click)="closePanel()" aria-label="Close"><mat-icon>close</mat-icon></button>
+          </header>
+          <label class="field"><span>Calendar</span>
+            <select [ngModel]="calendar?.path ?? null" (ngModelChange)="setCalendar($event)">
+              @for (item of calendars; track item.path) {
+                <option [ngValue]="item.path">{{ item.name }}@if (item.def.default) { (default)}</option>
+              }
+            </select>
+          </label>
+          <p class="muted">Besides its own events, the timeline lists notes with a <code>date:</code> property (and <code>end:</code> for ranges). Leave both boxes empty to include every dated note.</p>
+          <label class="field"><span>Notes tagged</span>
+            <input [(ngModel)]="tagsText" (change)="saveTags()" placeholder="e.g. event, session">
+          </label>
+          <label class="field"><span>Notes in folders</span>
+            <input [(ngModel)]="foldersText" (change)="saveFolders()" placeholder="e.g. Lore/History">
+          </label>
+          <label class="check">
+            <input type="checkbox" [ngModel]="timeline.sources.holidays" (ngModelChange)="setSources({ holidays: $event })">
+            Holidays from the calendar
+          </label>
+          <label class="check">
+            <input type="checkbox" [ngModel]="timeline.sources.inlineDates" (ngModelChange)="setSources({ inlineDates: $event })">
+            Dates mentioned in notes <code>[date:: …]</code>
+          </label>
+        </aside>
+      }
+    </div>
+  }
+</div>

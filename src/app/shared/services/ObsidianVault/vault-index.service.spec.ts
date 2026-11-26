@@ -294,3 +294,21 @@ describe('map files', () => {
     expect(index.getBacklinkMentions('Waterdeep.md')[0].snippets).toEqual(['📍 City of Splendors']);
   });
 });
+
+describe('calendars, timelines and inline dates', () => {
+  it('records inline dates and links from calendars and timelines', () => {
+    const index = new VaultIndex([file('Home.md'), file('Lore.md'), file('Harptos.calendar'), file('History.timeline')]);
+    index.indexNoteContent('Home.md', 'Left on [date:: 15 Mirtul 1492 DR], back [date:: 3 days later].');
+    expect(index.getInlineDates('Home.md')).toEqual(['15 Mirtul 1492 DR', '3 days later']);
+    expect(index.notesWithInlineDates().map(entry => entry.relativePath)).toEqual(['Home.md']);
+
+    index.indexCalendarContent('Harptos.calendar', JSON.stringify({
+      type: 'calendar', months: [{ name: 'Hammer', days: 30 }],
+      holidays: [{ id: 'h', name: 'Founding', date: { month: 'Hammer', day: 1 }, link: 'Lore' }],
+    }));
+    index.indexTimelineContent('History.timeline', JSON.stringify({
+      type: 'timeline', events: [{ id: 'e', date: '1 Hammer 1 DR', title: 'Founding', link: 'Lore' }],
+    }));
+    expect(index.getBacklinks('Lore.md').map(entry => entry.relativePath).sort()).toEqual(['Harptos.calendar', 'History.timeline']);
+  });
+});

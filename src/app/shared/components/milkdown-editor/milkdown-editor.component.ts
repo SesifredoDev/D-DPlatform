@@ -17,8 +17,9 @@ import { Crepe } from '@milkdown/crepe';
 import { wikilinkPlugin } from './wikilink-plugin';
 import { editorViewCtx, editorViewOptionsCtx, serializerCtx } from '@milkdown/core';
 import { Selection } from '@milkdown/prose/state';
+import type { EditorView } from '@milkdown/prose/view';
 import { insert } from '@milkdown/utils';
-import { CALLOUT_MENU_ITEMS, MAP_MENU_ICON, SECRET_MENU_ICON, SECRET_TEMPLATE, calloutPlugin, insertCallout } from './callout-plugin';
+import { CALENDAR_MENU_ICON, CALLOUT_MENU_ITEMS, DATE_MENU_ICON, MAP_MENU_ICON, SECRET_MENU_ICON, SECRET_TEMPLATE, TIMELINE_MENU_ICON, calloutPlugin, insertCallout } from './callout-plugin';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
 import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
@@ -27,6 +28,10 @@ import { WikilinkCandidate, openEmbedPicker, wikilinkSuggestPlugin } from './wik
 import { StatblockViewHost, statblockNodeViewsPlugin } from './statblock-node-views';
 import { createStatblockPaste } from './statblock-paste-plugin';
 import { DICE_CLASS, dicePlugin } from './dice-plugin';
+import { DateDisplay, DateHost, datePlugin, refreshDatesMeta } from './date-plugin';
+import { openDatePicker } from './date-picker';
+import { CalendarService, ResolvedDate } from '../../services/ObsidianVault/calendar.service';
+import { Subscription } from 'rxjs';
 import { DiceRollService } from '../../services/dice/dice-roll.service';
 
 @Component({
@@ -97,6 +102,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     private vaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
     private diceRolls: DiceRollService,
+    private calendarService: CalendarService,
     appRef: ApplicationRef,
     injector: EnvironmentInjector
   ) {
@@ -110,6 +116,28 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       filesAdded: () => this.filesAdded.emit(),
       linkHover: event => this.linkHover.emit(event),
     };
+  }
+
+  /** Dates in the note (`[date:: …]`), read with the vault's calendars. */
+  private readonly dateHost: DateHost = {
+    resolve: texts => {
+      const list = this.calendarService.cached(this.serverId);
+      if (!list) {
+        if (this.serverId) void this.calendarService.load(this.serverId);
+        return texts.map(() => undefined);
+      }
+      const index = this.vaultIndexService.get(this.serverId);
+      const preferred = this.calendarService.find(list, this.noteCalendar(), index, this.currentFilePath);
+      return this.calendarService.resolveSequence(list, texts, preferred).map(resolved => (resolved ? toDateDisplay(resolved) : null));
+    },
+    open: display => this.onLinkClick.emit(`${display.calendarPath}#${display.label}`),
+  };
+  private calendarsSub?: Subscription;
+
+  /** The calendar the note asks for in its frontmatter (`calendar:` or Calendarium's `fc-calendar:`). */
+  private noteCalendar(): string | null {
+    const match = this.frontmatter.match(/^(?:fc-)?calendar:\s*["']?(.+?)["']?\s*$/im);
+    return match ? match[1].replace(/^\[\[|\]\]$/g, '') : null;
   }
 
   /** Lets statblock cards and note embeds (Angular components inside the editor) reach this editor. */
@@ -214,6 +242,29 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
             // Things from the vault, embedded as live cards.
             const vault = builder.addGroup('vault', 'Vault');
+            vault.addItem('date', {
+              label: 'Date',
+              icon: DATE_MENU_ICON,
+              onRun: ctx => this.openDatePickerAt(ctx.get(editorViewCtx)),
+            });
+            vault.addItem('timeline', {
+              label: 'Timeline',
+              icon: TIMELINE_MENU_ICON,
+              onRun: ctx => openEmbedPicker(
+                ctx.get(editorViewCtx),
+                'timeline',
+                'No timelines in this vault yet. Create one with + → New timeline in the file list.'
+              ),
+            });
+            vault.addItem('calendar', {
+              label: 'Calendar',
+              icon: CALENDAR_MENU_ICON,
+              onRun: ctx => openEmbedPicker(
+                ctx.get(editorViewCtx),
+                'calendar',
+                'No calendars in this vault yet. Create one with + → New calendar in the file list.'
+              ),
+            });
             vault.addItem('map', {
               label: 'Map',
               icon: MAP_MENU_ICON,
@@ -248,6 +299,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       })
       .use(statblockPaste.plugin)
       .use(dicePlugin)
+      .use(datePlugin(this.dateHost))
       .use(statblockNodeViewsPlugin(this.statblockHost))
       .use(wikilinkPlugin)
       .use(wikilinkSuggestPlugin(this.wikilinkCandidates))
@@ -269,6 +321,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     try {
       await localCrepe.create();
       this.crepe = localCrepe;
+      this.watchCalendars();
       this.lastMarkdown = this.markdown;
 
       requestAnimationFrame(() => {
@@ -506,6 +559,13 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     return true;
   }
 
+  /** + → Date: a calendar picker at the cursor that inserts `[date:: …]`. */
+  private async openDatePickerAt(view: EditorView): Promise<void> {
+    const list = this.calendarService.cached(this.serverId) ?? (this.serverId ? await this.calendarService.load(this.serverId) : []);
+    const index = this.vaultIndexService.get(this.serverId);
+    openDatePicker(view, list, this.calendarService.find(list, this.noteCalendar(), index, this.currentFilePath));
+  }
+
   /** The open note's name, used to label dice rolled from it. */
   private noteTitle(): string | undefined {
     const name = this.currentFilePath.split('/').pop();
@@ -543,10 +603,37 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     });
   }
 
+  /** Re-reads dates when the vault's calendars change. */
+  private watchCalendars(): void {
+    this.calendarsSub?.unsubscribe();
+    this.calendarsSub = this.calendarService.changed$.subscribe(serverId => {
+      if (serverId !== this.serverId || !this.crepe) return;
+      this.crepe.editor.action(ctx => {
+        const view = ctx.get(editorViewCtx);
+        view.dispatch(view.state.tr.setMeta(refreshDatesMeta.key, refreshDatesMeta.value));
+      });
+    });
+  }
+
   ngOnDestroy() {
+    this.calendarsSub?.unsubscribe();
     this.clearRetries();
     this.observer?.disconnect();
     this.revokeObjectUrls();
     this.crepe?.destroy();
   }
+}
+
+/** How a resolved date shows in the editor (chip, hover card). */
+function toDateDisplay(resolved: ResolvedDate): DateDisplay {
+  const { engine, name, path } = resolved.calendar;
+  const { date, precision } = resolved.parsed;
+  return {
+    label: resolved.label,
+    long: precision === 'day' ? engine.formatLong(date) : resolved.label,
+    calendarName: name,
+    calendarPath: path,
+    relative: precision === 'day' ? engine.relativeToToday(date) : null,
+    holidays: precision === 'day' ? engine.holidaysOn(date).map(holiday => holiday.name) : [],
+  };
 }

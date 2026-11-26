@@ -3,6 +3,9 @@ import { ObsidianVaultService, VaultEntry } from './obsidian-vault-service';
 import { isVaultFileType } from './vault-file-types';
 import { BlockKind, findStatblocks } from './statblock';
 import { mapLinksFromText } from './vault-map';
+import { calendarLinksFromText } from './vault-calendar';
+import { timelineLinksFromText } from './vault-timeline';
+import { extractInlineDates } from './inline-dates';
 import { PropertyType, PropertyValue, propertyTypeFromObsidian, readFrontmatterTags, readProperties, splitFrontmatter } from './frontmatter';
 
 const ZERO_WIDTH = /[​-‍﻿]/g;
@@ -30,6 +33,8 @@ export class VaultIndex {
   private readonly modifiedByNote = new Map<string, number>();
   /** Notes containing a ```statblock or ```item block, with the kind of their first one. */
   private readonly statblockNotes = new Map<string, BlockKind>();
+  /** `[date:: …]` texts written in each note, in order. */
+  private readonly datesByNote = new Map<string, string[]>();
   /** `source:` keys of each note's statblock blocks (e.g. `open5e/srd_goblin`), lower-cased. */
   private readonly sourcesByNote = new Map<string, string[]>();
   private backlinkCache: Map<string, Set<string>> | null = null;
@@ -144,6 +149,9 @@ export class VaultIndex {
     const blocks = content.includes('```') || content.includes('~~~') ? findStatblocks(content) : [];
     if (blocks.length) this.statblockNotes.set(key, blocks[0].kind);
     else this.statblockNotes.delete(key);
+    const dates = content.includes('[date::') ? extractInlineDates(content) : [];
+    if (dates.length) this.datesByNote.set(key, dates);
+    else this.datesByNote.delete(key);
     const sources = blocks.map(block => blockSourceKey(block.source)).filter((source): source is string => !!source);
     if (sources.length) this.sourcesByNote.set(key, sources);
     else this.sourcesByNote.delete(key);
@@ -179,10 +187,34 @@ export class VaultIndex {
    * backlinks. Call when a map is read or saved.
    */
   indexMapContent(path: string, content: string, modified?: number): void {
+    this.indexFileLinks(path, mapLinksFromText(content), modified);
+  }
+
+  /** Calendars (holidays → notes) and timelines (events → notes) link to notes too. */
+  indexCalendarContent(path: string, content: string, modified?: number): void {
+    this.indexFileLinks(path, calendarLinksFromText(content), modified);
+  }
+
+  indexTimelineContent(path: string, content: string, modified?: number): void {
+    this.indexFileLinks(path, timelineLinksFromText(content), modified);
+  }
+
+  /** The `[date:: …]` texts written in a note, in order. */
+  getInlineDates(path: string): readonly string[] {
+    return this.datesByNote.get(normalizeKey(path)) ?? [];
+  }
+
+  /** Notes with `[date:: …]` texts. */
+  notesWithInlineDates(): VaultEntry[] {
+    return uniqueEntries(Array.from(this.datesByNote.keys(), key => this.byPath.get(key) ?? null));
+  }
+
+  /** Records the links of a JSON-based file (map, calendar, timeline) with their backlink snippets. */
+  private indexFileLinks(path: string, links: { target: string; snippet: string }[], modified?: number): void {
     const key = normalizeKey(path);
     if (modified !== undefined) this.modifiedByNote.set(key, modified);
     const snippets = new Map<string, string[]>();
-    for (const link of mapLinksFromText(content)) {
+    for (const link of links) {
       const list = snippets.get(link.target) ?? [];
       if (!list.includes(link.snippet)) list.push(link.snippet);
       snippets.set(link.target, list);
@@ -348,6 +380,9 @@ export class VaultIndex {
     for (const [key, sources] of this.sourcesByNote) {
       if (next.byPath.has(key)) next.sourcesByNote.set(key, sources);
     }
+    for (const [key, dates] of this.datesByNote) {
+      if (next.byPath.has(key)) next.datesByNote.set(key, dates);
+    }
   }
 
   private addEntries(entries: VaultEntry[]): void {
@@ -433,6 +468,10 @@ export class VaultIndexService {
       this.indexes.get(serverId)?.indexNoteContent(path, content, modified);
     } else if (isVaultFileType(path, 'map')) {
       this.indexes.get(serverId)?.indexMapContent(path, content, modified);
+    } else if (isVaultFileType(path, 'calendar')) {
+      this.indexes.get(serverId)?.indexCalendarContent(path, content, modified);
+    } else if (isVaultFileType(path, 'timeline')) {
+      this.indexes.get(serverId)?.indexTimelineContent(path, content, modified);
     }
   }
 
@@ -448,7 +487,7 @@ export class VaultIndexService {
       const index = this.indexes.get(serverId) ?? await this.load(serverId);
       // Notes, and maps (their pins are links too).
       const pending = index.files.filter(file =>
-        (isVaultFileType(file.name, 'markdown') || isVaultFileType(file.name, 'map')) &&
+        LINKING_TYPES.some(type => isVaultFileType(file.name, type)) &&
         (options.force || !index.isNoteIndexed(file.relativePath))
       );
 
@@ -458,6 +497,8 @@ export class VaultIndexService {
           try {
             const { content, lastModified } = await this.vaultService.readFileWithMeta(serverId, file.relativePath);
             if (isVaultFileType(file.name, 'map')) index.indexMapContent(file.relativePath, content, lastModified);
+            else if (isVaultFileType(file.name, 'calendar')) index.indexCalendarContent(file.relativePath, content, lastModified);
+            else if (isVaultFileType(file.name, 'timeline')) index.indexTimelineContent(file.relativePath, content, lastModified);
             else index.indexNoteContent(file.relativePath, content, lastModified);
           } catch (error) {
             console.warn('[VaultIndex] Failed to index note', file.relativePath, error);
@@ -476,6 +517,9 @@ function blockSourceKey(source: string): string | null {
   const match = source.match(/^source:[ \t]*["']?([^"'\n#]+?)["']?[ \t]*$/m);
   return match ? match[1].trim().toLowerCase() : null;
 }
+
+/** File types whose content links to other files (read when the vault is indexed). */
+const LINKING_TYPES = ['markdown', 'map', 'calendar', 'timeline'];
 
 function normalizeKey(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();

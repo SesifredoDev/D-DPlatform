@@ -406,18 +406,73 @@
             </p>
           }
 
-          @if (map.layers.length) {
-            <div class="panel-head is-sub"><strong>Layers</strong></div>
-            <ul class="layer-list">
-              @for (layer of map.layers; track layer.id) {
-                <li>
-                  <button type="button" (click)="toggleLayer(layer)" [attr.aria-pressed]="layer.visible">
-                    <mat-icon>{{ layer.visible ? 'visibility' : 'visibility_off' }}</mat-icon>
-                    <span>{{ layer.name }}</span>
-                  </button>
-                </li>
+          @if (map.layers.length || editing) {
+            <div class="panel-head is-sub">
+              <strong>Layers</strong>
+              @if (map.layers.length) {
+                <span class="count">{{ map.layers.length }}</span>
               }
-            </ul>
+            </div>
+            @if (map.layers.length) {
+              <ul class="layer-rows">
+                @for (layer of map.layers; track layer.id) {
+                  <li [class.is-hidden]="!layer.visible">
+                    <button
+                      type="button"
+                      class="icon-btn is-small"
+                      (click)="toggleLayer(layer)"
+                      [attr.aria-pressed]="layer.visible"
+                      [attr.aria-label]="(layer.visible ? 'Hide ' : 'Show ') + layer.name"
+                      [matTooltip]="layer.visible ? 'Hide layer' : 'Show layer'">
+                      <mat-icon>{{ layer.visible ? 'visibility' : 'visibility_off' }}</mat-icon>
+                    </button>
+                    @if (renamingLayerId === layer.id) {
+                      <input
+                        #layerNameInput
+                        class="layer-name-input"
+                        [(ngModel)]="layerNameDraft"
+                        (keydown.enter)="saveLayerName()"
+                        (keydown.escape)="cancelRenamingLayer(); $event.stopPropagation()"
+                        (blur)="saveLayerName()"
+                        [attr.aria-label]="'Rename layer ' + layer.name"
+                        spellcheck="false">
+                    } @else {
+                      <span
+                        class="layer-name"
+                        (dblclick)="startRenamingLayer(layer)"
+                        [title]="canEdit ? 'Double-click to rename' : ''">{{ layer.name }}</span>
+                      <span class="layer-count" [attr.aria-label]="layerPinCount(layer.id) + ' pins'">{{ layerPinCount(layer.id) }}</span>
+                      @if (editing) {
+                        <button
+                          type="button"
+                          class="icon-btn is-small"
+                          (click)="startRenamingLayer(layer)"
+                          [attr.aria-label]="'Rename ' + layer.name"
+                          matTooltip="Rename">
+                          <mat-icon>edit</mat-icon>
+                        </button>
+                        <button
+                          type="button"
+                          class="icon-btn is-small is-danger"
+                          (click)="deleteLayer(layer)"
+                          [attr.aria-label]="'Delete ' + layer.name"
+                          matTooltip="Delete layer (pins are kept)">
+                          <mat-icon>delete</mat-icon>
+                        </button>
+                      }
+                    }
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="panel-empty">Layers group pins so you can show or hide them together, like cities or dungeons.</p>
+            }
+            @if (editing) {
+              <form class="inline-form is-list" (submit)="$event.preventDefault(); createLayer()">
+                <input name="newLayerList" [(ngModel)]="newLayerName" placeholder="New layer" aria-label="New layer name">
+                <button type="submit" class="secondary-btn" [disabled]="!newLayerName.trim()">Add</button>
+              </form>
+            }
           }
         }
       </aside>

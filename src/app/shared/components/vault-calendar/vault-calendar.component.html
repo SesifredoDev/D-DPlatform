@@ -1,0 +1,385 @@
+<div class="vcal" [class.is-embed]="mode === 'embed'">
+  @if (parseError) {
+    <div class="state">
+      <mat-icon>error</mat-icon>
+      <strong>This calendar can’t be read</strong>
+      <span>{{ parseError }} The file is left unchanged.</span>
+    </div>
+  } @else if (def && engine) {
+    <header class="cal-toolbar">
+      @if (mode === 'embed') {
+        <mat-icon class="embed-icon">calendar_month</mat-icon>
+        <span class="embed-title">{{ title }}</span>
+      }
+      <div class="month-nav">
+        <button type="button" class="icon-btn" (click)="shiftYear(-1)" matTooltip="Previous year" aria-label="Previous year"><mat-icon>keyboard_double_arrow_left</mat-icon></button>
+        <button type="button" class="icon-btn" (click)="shiftMonth(-1)" matTooltip="Previous month (Page Up)" aria-label="Previous month"><mat-icon>chevron_left</mat-icon></button>
+        <h2 class="month-label" aria-live="polite">{{ monthLabel }}</h2>
+        <button type="button" class="icon-btn" (click)="shiftMonth(1)" matTooltip="Next month (Page Down)" aria-label="Next month"><mat-icon>chevron_right</mat-icon></button>
+        <button type="button" class="icon-btn" (click)="shiftYear(1)" matTooltip="Next year" aria-label="Next year"><mat-icon>keyboard_double_arrow_right</mat-icon></button>
+      </div>
+      <span class="spacer"></span>
+      @if (mode === 'file') {
+        <form class="jump" (submit)="$event.preventDefault(); jump()">
+          <input
+            name="jump"
+            [(ngModel)]="jumpText"
+            (ngModelChange)="jumpError = ''"
+            [placeholder]="'Go to… e.g. ' + (engine.today() ? engine.format(engine.today()!, 'year') : 'a year')"
+            aria-label="Go to a date, month or year">
+        </form>
+      }
+      @if (engine.today()) {
+        <button type="button" class="text-btn" (click)="goToToday()">Today</button>
+      }
+      @if (mode === 'embed') {
+        <button type="button" class="icon-btn" (click)="openFile.emit(path)" matTooltip="Open calendar" [attr.aria-label]="'Open ' + title"><mat-icon>open_in_new</mat-icon></button>
+      } @else if (canEdit) {
+        <button type="button" class="text-btn" [class.is-active]="settingsOpen" (click)="toggleSettings()" [attr.aria-pressed]="settingsOpen">
+          <mat-icon>tune</mat-icon>Settings
+        </button>
+      }
+    </header>
+    @if (jumpError) {
+      <p class="jump-error" role="alert">{{ jumpError }}</p>
+    }
+
+    <div class="cal-body">
+      <section class="month" tabindex="0" (keydown)="onGridKeydown($event)" [attr.aria-label]="monthLabel">
+        @if (monthMissing) {
+          <p class="empty">{{ engine.monthName(month) }} doesn’t happen in {{ engine.formatYear(year) }}.</p>
+        } @else if (festival.length) {
+          <div class="festival">
+            <p class="festival-note">Outside the week</p>
+            <div class="festival-days">
+              @for (cell of festival; track cell.dayNumber) {
+                <button
+                  type="button"
+                  class="day is-festival"
+                  [class.is-today]="cell.isToday"
+                  [class.is-selected]="cell.isSelected"
+                  (click)="selectDay(cell.date)"
+                  [attr.aria-label]="engine.formatLong(cell.date)">
+                  <span class="day-number">{{ festival.length === 1 ? engine.monthName(month) : cell.date.day }}</span>
+                  @for (holiday of cell.holidays; track holiday.id) {
+                    <span class="day-holiday" [style.--h]="holiday.color || '#8fe0ad'">{{ holiday.name }}</span>
+                  }
+                  @if (cell.items.length) {
+                    <span class="day-dots">@for (item of cell.items.slice(0, 4); track $index) {<i></i>}</span>
+                  }
+                </button>
+              }
+            </div>
+          </div>
+        } @else {
+          <div class="grid" role="grid" [style.--cols]="weekdayHeaders.length || 7">
+            @for (name of weekdayHeaders; track $index) {
+              <div class="weekday" role="columnheader" [title]="name">{{ name }}</div>
+            }
+            @for (week of weeks; track $index) {
+              @for (cell of week; track $index) {
+                @if (cell) {
+                  <button
+                    type="button"
+                    class="day"
+                    role="gridcell"
+                    [class.is-today]="cell.isToday"
+                    [class.is-selected]="cell.isSelected"
+                    [class.has-holiday]="cell.holidays.length"
+                    (click)="selectDay(cell.date)"
+                    [attr.aria-label]="engine.formatLong(cell.date) + (cell.holidays.length ? ', ' + cell.holidays.length + ' holiday' : '') + (cell.items.length ? ', ' + cell.items.length + ' dated' : '')"
+                    [attr.aria-selected]="cell.isSelected">
+                    <span class="day-number">{{ cell.date.day }}</span>
+                    @for (holiday of cell.holidays.slice(0, 2); track holiday.id) {
+                      <span class="day-holiday" [style.--h]="holiday.color || '#8fe0ad'">{{ holiday.name }}</span>
+                    }
+                    @if (cell.items.length) {
+                      <span class="day-items">
+                        @for (item of cell.items.slice(0, mode === 'embed' ? 1 : 2); track $index) {
+                          <span class="day-item" [class.is-mention]="item.kind === 'mention'">{{ item.title }}</span>
+                        }
+                        @if (cell.items.length > (mode === 'embed' ? 1 : 2)) {
+                          <span class="day-more">+{{ cell.items.length - (mode === 'embed' ? 1 : 2) }}</span>
+                        }
+                      </span>
+                    }
+                  </button>
+                } @else {
+                  <div class="day is-blank" aria-hidden="true"></div>
+                }
+              }
+            }
+          </div>
+        }
+      </section>
+
+      @if (selected) {
+        <aside class="day-card" [attr.aria-label]="selectedLabel">
+          <header class="day-card-head">
+            <div>
+              <strong>{{ selectedLabel }}</strong>
+              @if (selectedRelative) {
+                <span class="muted">{{ selectedRelative === 'today' ? 'Today in the campaign' : selectedRelative }}</span>
+              }
+            </div>
+            <button type="button" class="icon-btn is-small" (click)="selected = null; refreshItems()" aria-label="Close"><mat-icon>close</mat-icon></button>
+          </header>
+
+          @if (selectedHolidays.length) {
+            <ul class="day-list">
+              @for (holiday of selectedHolidays; track holiday.id) {
+                <li>
+                  <span class="swatch" [style.background]="holiday.color || '#8fe0ad'"></span>
+                  @if (holiday.link) {
+                    <button type="button" class="link" (click)="openHoliday(holiday)">{{ holiday.name }}</button>
+                  } @else {
+                    <span>{{ holiday.name }}</span>
+                  }
+                  <span class="muted">Holiday</span>
+                </li>
+              }
+            </ul>
+          }
+
+          @if (selectedItems.length) {
+            <ul class="day-list">
+              @for (item of selectedItems; track $index) {
+                <li>
+                  <mat-icon class="item-icon">{{ item.kind === 'mention' ? 'format_quote' : 'event_note' }}</mat-icon>
+                  <button
+                    type="button"
+                    class="link"
+                    (click)="openItem(item)"
+                    (pointerenter)="onItemEnter(item, $any($event.currentTarget))"
+                    (pointerleave)="onItemLeave()">{{ item.title }}</button>
+                  <span class="muted">{{ item.kind === 'mention' ? 'mentioned' : item.endDay ? 'until ' + engine.format(engine.fromDayNumber(item.endDay)) : 'dated' }}</span>
+                </li>
+              }
+            </ul>
+          } @else if (!selectedHolidays.length) {
+            <p class="muted">Nothing on this day yet.</p>
+          }
+
+          <div class="day-actions">
+            <button type="button" class="secondary-btn" (click)="copyDate()" matTooltip="Copies [date:: …] to paste into a note">
+              <mat-icon>content_copy</mat-icon>Copy date
+            </button>
+            @if (canEdit) {
+              @if (!isToday(selected)) {
+                <button type="button" class="secondary-btn" (click)="setToday()"><mat-icon>today</mat-icon>Set as today</button>
+              }
+              <button type="button" class="secondary-btn" (click)="prepareNewNote()"><mat-icon>note_add</mat-icon>New note on this day</button>
+            }
+          </div>
+          @if (newNoteFolders.length) {
+            <form class="new-note" (submit)="$event.preventDefault(); createNoteOnDay()">
+              <input name="title" [(ngModel)]="newNoteTitle" placeholder="Note name, e.g. Siege of Phlan" aria-label="Note name">
+              <select name="folder" [ngModel]="newNoteFolder" (ngModelChange)="newNoteFolder = $event" aria-label="Folder">
+                <option [ngValue]="null" disabled>Choose a folder</option>
+                @for (folder of newNoteFolders; track folder) {
+                  <option [ngValue]="folder">{{ folder || 'Vault root' }}</option>
+                }
+              </select>
+              <button type="submit" class="primary-btn" [disabled]="!newNoteTitle.trim() || newNoteFolder === null">Create</button>
+            </form>
+          }
+        </aside>
+      }
+
+      @if (settingsOpen && canEdit) {
+        <aside class="settings" aria-label="Calendar settings">
+          <nav class="tabs" role="tablist">
+            @for (item of [['general', 'General'], ['months', 'Months'], ['weekdays', 'Weekdays'], ['eras', 'Eras'], ['holidays', 'Holidays']]; track item[0]) {
+              <button type="button" role="tab" [class.is-active]="tab === item[0]" [attr.aria-selected]="tab === item[0]" (click)="tab = $any(item[0])">{{ item[1] }}</button>
+            }
+          </nav>
+
+          @switch (tab) {
+            @case ('general') {
+              <label class="field"><span>Name</span>
+                <input [ngModel]="def.name" (change)="update({ name: $any($event.target).value.trim() || def.name })">
+              </label>
+              <label class="field"><span>Today in the campaign</span>
+                <input [ngModel]="def.today ?? ''" (change)="update({ today: $any($event.target).value.trim() || null })" placeholder="e.g. 15 Mirtul 1492 DR">
+                @if (def.today && !engine.today()) {
+                  <small class="error">“{{ def.today }}” isn’t a date in this calendar.</small>
+                } @else if (engine.today()) {
+                  <small class="muted">{{ engine.formatLong(engine.today()!) }}</small>
+                }
+              </label>
+              <label class="field"><span>Year 1 starts on</span>
+                <select [ngModel]="def.firstWeekday" (ngModelChange)="update({ firstWeekday: +$event })" [disabled]="!def.weekdays.length">
+                  @for (day of def.weekdays; track $index) {
+                    <option [ngValue]="$index">{{ day }}</option>
+                  }
+                </select>
+                <small class="muted">The weekday of the first day of the first month of year 1. Use it to line up a known date.</small>
+              </label>
+              <label class="check">
+                <input type="checkbox" [ngModel]="!!def.default" (ngModelChange)="setDefault($event)">
+                Default calendar
+                <small>Dates in notes use it unless they name a calendar or the note sets <code>calendar:</code>.</small>
+              </label>
+            }
+
+            @case ('months') {
+              <p class="muted">Festival days (outside the week) have no weekday. “Only in leap years” makes a month appear only then, like Shieldmeet.</p>
+              <ul class="rows">
+                @for (month of def.months; track trackIndex($index); let i = $index) {
+                  <li class="row">
+                    <input class="grow" [ngModel]="month.name" (change)="updateMonth(i, { name: $any($event.target).value.trim() || month.name })" aria-label="Month name">
+                    <input class="num" type="number" min="0" [ngModel]="month.days" (change)="updateMonth(i, { days: +$any($event.target).value || 0 })" aria-label="Days">
+                    <label class="mini-check" matTooltip="Festival days: outside the week">
+                      <input type="checkbox" [ngModel]="!!month.intercalary" (ngModelChange)="updateMonth(i, { intercalary: $event })">Festival
+                    </label>
+                    <input class="leap" [ngModel]="month.leap ?? ''" (change)="updateMonth(i, { leap: $any($event.target).value.trim() || null })" placeholder="Leap only, e.g. 4" aria-label="Only in leap years (interval)">
+                    <span class="row-actions">
+                      <button type="button" class="icon-btn is-small" (click)="moveMonth(i, -1)" [disabled]="i === 0" aria-label="Move up"><mat-icon>arrow_upward</mat-icon></button>
+                      <button type="button" class="icon-btn is-small" (click)="moveMonth(i, 1)" [disabled]="i === def.months.length - 1" aria-label="Move down"><mat-icon>arrow_downward</mat-icon></button>
+                      <button type="button" class="icon-btn is-small is-danger" (click)="removeMonth(i)" [disabled]="def.months.length <= 1" aria-label="Remove month"><mat-icon>delete</mat-icon></button>
+                    </span>
+                  </li>
+                }
+              </ul>
+              <button type="button" class="add-btn" (click)="addMonth()"><mat-icon>add</mat-icon>Add month</button>
+
+              <h3>Leap days</h3>
+              <p class="muted">Adds a day to a month in some years. Interval “4” = every 4 years; “400,!100,4” = every 4, except every 100, but every 400.</p>
+              <ul class="rows">
+                @for (leap of def.leapDays; track trackIndex($index); let i = $index) {
+                  <li class="row">
+                    <select class="grow" [ngModel]="leap.month" (ngModelChange)="updateLeap(i, { month: $event })" aria-label="Month">
+                      @for (month of def.months; track $index) {
+                        <option [ngValue]="month.name">{{ month.name }}</option>
+                      }
+                    </select>
+                    <input class="leap" [ngModel]="leap.interval" (change)="updateLeap(i, { interval: $any($event.target).value.trim() || '4' })" aria-label="Interval">
+                    <input class="num" type="number" [ngModel]="leap.offset ?? 0" (change)="updateLeap(i, { offset: +$any($event.target).value || 0 })" aria-label="Offset (years)" matTooltip="Offset in years">
+                    <button type="button" class="icon-btn is-small is-danger" (click)="removeLeap(i)" aria-label="Remove leap day"><mat-icon>delete</mat-icon></button>
+                  </li>
+                }
+              </ul>
+              <button type="button" class="add-btn" (click)="addLeap()"><mat-icon>add</mat-icon>Add leap day</button>
+            }
+
+            @case ('weekdays') {
+              @if (!def.weekdays.length) {
+                <p class="muted">No weekdays: the month view shows plain numbered days.</p>
+              }
+              <ul class="rows">
+                @for (day of def.weekdays; track trackIndex($index); let i = $index) {
+                  <li class="row">
+                    <input class="grow" [ngModel]="day" (change)="updateWeekday(i, $any($event.target).value)" aria-label="Weekday name">
+                    <span class="row-actions">
+                      <button type="button" class="icon-btn is-small" (click)="moveWeekday(i, -1)" [disabled]="i === 0" aria-label="Move up"><mat-icon>arrow_upward</mat-icon></button>
+                      <button type="button" class="icon-btn is-small" (click)="moveWeekday(i, 1)" [disabled]="i === def.weekdays.length - 1" aria-label="Move down"><mat-icon>arrow_downward</mat-icon></button>
+                      <button type="button" class="icon-btn is-small is-danger" (click)="removeWeekday(i)" aria-label="Remove weekday"><mat-icon>delete</mat-icon></button>
+                    </span>
+                  </li>
+                }
+              </ul>
+              <button type="button" class="add-btn" (click)="addWeekday()"><mat-icon>add</mat-icon>Add weekday</button>
+            }
+
+            @case ('eras') {
+              <p class="muted">Years are counted on one continuous line. An era that counts <strong>up</strong> starts at a year (like AD); one that counts <strong>down</strong> ends at a year (like BC, ending at year 0 so there’s no year zero).</p>
+              <ul class="rows">
+                @for (era of def.eras; track trackIndex($index); let i = $index) {
+                  <li class="row is-era">
+                    <input class="grow" [ngModel]="era.name" (change)="updateEra(i, { name: $any($event.target).value.trim() || era.name })" aria-label="Era name">
+                    <input class="abbr" [ngModel]="era.abbr" (change)="updateEra(i, { abbr: $any($event.target).value.trim() })" aria-label="Abbreviation" placeholder="DR">
+                    <select [ngModel]="era.count" (ngModelChange)="updateEra(i, { count: $event })" aria-label="Counting">
+                      <option value="up">Counts up from</option>
+                      <option value="down">Counts down to</option>
+                    </select>
+                    @if (era.count === 'up') {
+                      <input class="num" type="number" [ngModel]="era.startYear ?? 1" (change)="updateEra(i, { startYear: +$any($event.target).value })" aria-label="Starts at year">
+                    } @else {
+                      <input class="num" type="number" [ngModel]="era.endYear ?? 0" (change)="updateEra(i, { endYear: +$any($event.target).value })" aria-label="Ends at year">
+                    }
+                    <label class="mini-check" matTooltip="Write the era before the year (AR 4723)">
+                      <input type="checkbox" [ngModel]="!!era.prefix" (ngModelChange)="updateEra(i, { prefix: $event })">Before
+                    </label>
+                    <button type="button" class="icon-btn is-small is-danger" (click)="removeEra(i)" aria-label="Remove era"><mat-icon>delete</mat-icon></button>
+                  </li>
+                }
+              </ul>
+              <button type="button" class="add-btn" (click)="addEra()"><mat-icon>add</mat-icon>Add era</button>
+              @if (eraPreview) {
+                <p class="preview"><mat-icon>visibility</mat-icon>{{ eraPreview }}</p>
+              }
+            }
+
+            @case ('holidays') {
+              @if (!def.holidays.length) {
+                <p class="muted">No holidays yet. They show on the month view and in timelines, and can link to a note.</p>
+              }
+              <datalist id="calendar-note-names">
+                @for (name of noteNames; track name) {
+                  <option [value]="name"></option>
+                }
+              </datalist>
+              <ul class="holidays">
+                @for (holiday of def.holidays; track holiday.id) {
+                  <li class="holiday">
+                    <div class="row">
+                      <input type="color" class="color" [ngModel]="holiday.color || '#8fe0ad'" (change)="updateHoliday(holiday.id, { color: $any($event.target).value })" aria-label="Colour">
+                      <input class="grow" [ngModel]="holiday.name" (change)="updateHoliday(holiday.id, { name: $any($event.target).value.trim() || holiday.name })" aria-label="Holiday name">
+                      <button type="button" class="icon-btn is-small is-danger" (click)="removeHoliday(holiday)" aria-label="Remove holiday"><mat-icon>delete</mat-icon></button>
+                    </div>
+                    <div class="row">
+                      <select [ngModel]="holiday.date.weekday != null && holiday.date.nth != null ? 'nth' : 'day'" (ngModelChange)="setHolidayRule(holiday, $event)" aria-label="Date rule">
+                        <option value="day">On day</option>
+                        <option value="nth" [disabled]="!def.weekdays.length">On the</option>
+                      </select>
+                      @if (holiday.date.weekday != null && holiday.date.nth != null) {
+                        <select [ngModel]="holiday.date.nth" (ngModelChange)="updateHolidayDate(holiday, { nth: +$event })" aria-label="Which">
+                          @for (n of [1, 2, 3, 4, 5, -1]; track n) {
+                            <option [ngValue]="n">{{ nthLabel(n) }}</option>
+                          }
+                        </select>
+                        <select [ngModel]="holiday.date.weekday" (ngModelChange)="updateHolidayDate(holiday, { weekday: +$event })" aria-label="Weekday">
+                          @for (day of def.weekdays; track $index) {
+                            <option [ngValue]="$index">{{ day }}</option>
+                          }
+                        </select>
+                        <span class="muted">of</span>
+                      } @else {
+                        <input class="num" type="number" min="1" [ngModel]="holiday.date.day ?? 1" (change)="updateHolidayDate(holiday, { day: +$any($event.target).value || 1 })" aria-label="Day">
+                      }
+                      <select class="grow" [ngModel]="holiday.date.month" (ngModelChange)="updateHolidayDate(holiday, { month: $event })" aria-label="Month">
+                        @for (month of def.months; track $index) {
+                          <option [ngValue]="month.name">{{ month.name }}</option>
+                        }
+                      </select>
+                    </div>
+                    <div class="row">
+                      <select [ngModel]="holiday.repeat" (ngModelChange)="updateHoliday(holiday.id, { repeat: $event })" aria-label="Repeats">
+                        <option value="yearly">Every year</option>
+                        <option value="once">Once, in</option>
+                      </select>
+                      @if (holiday.repeat === 'once') {
+                        <input class="year" [ngModel]="yearText(holiday.year)" (change)="setHolidayYear(holiday, 'year', $any($event.target).value)" placeholder="Year" aria-label="Year">
+                      } @else {
+                        <input class="year" [ngModel]="yearText(holiday.since)" (change)="setHolidayYear(holiday, 'since', $any($event.target).value)" placeholder="Since (optional)" aria-label="Observed since">
+                        <input class="year" [ngModel]="yearText(holiday.until)" (change)="setHolidayYear(holiday, 'until', $any($event.target).value)" placeholder="Until (optional)" aria-label="Observed until">
+                      }
+                    </div>
+                    <div class="row">
+                      <mat-icon class="row-icon">link</mat-icon>
+                      <input class="grow" list="calendar-note-names" [ngModel]="holiday.link ?? ''" (change)="updateHoliday(holiday.id, { link: $any($event.target).value.trim() || null })" placeholder="Linked note (optional)" aria-label="Linked note">
+                      @if (holiday.link) {
+                        <button type="button" class="icon-btn is-small" (click)="openHoliday(holiday)" aria-label="Open linked note" matTooltip="Open note"><mat-icon>open_in_new</mat-icon></button>
+                      }
+                    </div>
+                  </li>
+                }
+              </ul>
+              <button type="button" class="add-btn" (click)="addHoliday()"><mat-icon>add</mat-icon>Add holiday</button>
+            }
+          }
+        </aside>
+      }
+    </div>
+  }
+</div>

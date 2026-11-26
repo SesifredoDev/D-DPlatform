@@ -39,6 +39,7 @@ import {
   parseVaultMap,
   removePin,
   serializeVaultMap,
+  removeLayer,
   updateLayer,
   updatePin,
   visiblePins,
@@ -130,6 +131,10 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
   private resizeDrag: { id: number; axis: 'y' | 'both'; startX: number; startY: number; width: number; height: number; full: number } | null = null;
 
   @ViewChild('viewport') private viewportRef?: ElementRef<HTMLElement>;
+  /** Focuses (and selects) a layer's name when renaming starts. */
+  @ViewChild('layerNameInput') private set layerNameInput(ref: ElementRef<HTMLInputElement> | undefined) {
+    if (ref) setTimeout(() => ref.nativeElement.select());
+  }
   @ViewChild('linkInput') private set linkInput(ref: ElementRef<HTMLInputElement> | undefined) {
     if (ref && this.focusLinkInput) {
       this.focusLinkInput = false;
@@ -171,6 +176,9 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
   useLocationTemplate = true;
   creatingNote = false;
   newLayerName = '';
+  /** The layer being renamed, and its name as typed. */
+  renamingLayerId: string | null = null;
+  layerNameDraft = '';
 
   /** Image picker (empty state and ⋯ → Change image). */
   pickingImage = false;
@@ -1054,6 +1062,45 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     this.newLayerName = '';
     const pin = this.selectedPin;
     this.commit(pin ? updatePin(map, pin.id, { layer: layer.id }) : map);
+  }
+
+  /** Pins on a layer (shown next to its name). */
+  layerPinCount(id: string): number {
+    return this.map.pins.filter(pin => pin.layer === id).length;
+  }
+
+  startRenamingLayer(layer: MapLayer): void {
+    if (!this.canEdit) return;
+    this.renamingLayerId = layer.id;
+    this.layerNameDraft = layer.name;
+  }
+
+  /** Enter or leaving the field saves; an empty name keeps the old one. */
+  saveLayerName(): void {
+    const id = this.renamingLayerId;
+    if (!id) return;
+    this.renamingLayerId = null;
+    const name = this.layerNameDraft.trim();
+    const layer = this.map.layers.find(item => item.id === id);
+    if (layer && name && name !== layer.name) this.commit(updateLayer(this.map, id, { name }));
+  }
+
+  cancelRenamingLayer(): void {
+    this.renamingLayerId = null;
+  }
+
+  /** Removes a layer (its pins stay, without a layer), with Undo. */
+  deleteLayer(layer: MapLayer): void {
+    if (!this.canEdit) return;
+    const count = this.layerPinCount(layer.id);
+    this.commit(removeLayer(this.map, layer.id), { undoable: true });
+    if (this.renamingLayerId === layer.id) this.renamingLayerId = null;
+    const kept = count ? ` Its ${count === 1 ? 'pin is' : `${count} pins are`} kept, without a layer.` : '';
+    const ref = this.snackBar.open(`Deleted layer “${layer.name}”.${kept}`, 'Undo', { duration: 6000 });
+    ref.onAction().subscribe(() => {
+      if (this.undo) this.commit(this.undo);
+      this.undo = null;
+    });
   }
 
   toggleLayer(layer: MapLayer): void {

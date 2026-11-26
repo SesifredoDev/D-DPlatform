@@ -10,6 +10,12 @@ import { VaultGraphComponent } from './graph-view/graph-view.component';
 import { FamilyTreeComponent } from './family-tree/family-tree.component';
 import { emptyFamilyTree, isFamilyTreePath } from '../../../shared/services/ObsidianVault/family-tree';
 import { VaultMapComponent } from '../../../shared/components/vault-map/vault-map.component';
+import { VaultCalendarComponent } from '../../../shared/components/vault-calendar/vault-calendar.component';
+import { VaultTimelineComponent } from '../../../shared/components/vault-timeline/vault-timeline.component';
+import { CalendarService } from '../../../shared/services/ObsidianVault/calendar.service';
+import { CALENDAR_PRESETS, serializeCalendar } from '../../../shared/services/ObsidianVault/vault-calendar';
+import { emptyTimeline } from '../../../shared/services/ObsidianVault/vault-timeline';
+import { rewriteCalendarLinks, rewriteTimelineLinks } from '../../../shared/services/ObsidianVault/file-link-rewrite';
 import { emptyVaultMap, findPinByAnchor, parseVaultMap, rewriteMapLinks } from '../../../shared/services/ObsidianVault/vault-map';
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -94,9 +100,11 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
 const NO_VIEW: ActiveView = { kind: 'none' };
 
 
+/** File types that open at a `#…` anchor: a map pin, a calendar or timeline date. */
+const FOCUSABLE_TYPES = ['map', 'calendar', 'timeline'];
 const STATBLOCK_SYSTEM_STORAGE_KEY = 'obsidian-view.statblock-system';
 
-type NewFileKind = 'note' | 'statblock' | 'item' | 'spell' | 'canvas' | 'database' | 'family' | 'map';
+type NewFileKind = 'note' | 'statblock' | 'item' | 'spell' | 'canvas' | 'database' | 'family' | 'map' | 'calendar' | 'timeline';
 
 /** The block kind a "New …" file kind creates, if it's a statblock, item or spell. */
 const NEW_BLOCK_KINDS: Partial<Record<NewFileKind, BlockKind>> = { statblock: 'creature', item: 'item', spell: 'spell' };
@@ -109,6 +117,8 @@ const NEW_FILE_KINDS: Record<NewFileKind, { typeId: string; label: string; icon:
   database: { typeId: 'base', label: 'database', icon: 'table_chart', placeholder: 'e.g. NPCs' },
   family: { typeId: 'family-tree', label: 'family tree', icon: 'family_restroom', placeholder: 'e.g. House Stark' },
   map: { typeId: 'map', label: 'map', icon: 'map', placeholder: 'e.g. Sword Coast' },
+  calendar: { typeId: 'calendar', label: 'calendar', icon: 'calendar_month', placeholder: 'e.g. Harptos' },
+  timeline: { typeId: 'timeline', label: 'timeline', icon: 'timeline', placeholder: 'e.g. Realm History' },
 };
 const LINKS_PANEL_STORAGE_KEY = 'obsidian-view.links-panel-open';
 const GRAPH_TYPE_STORAGE_KEY = 'obsidian-view.graph-type';
@@ -187,7 +197,9 @@ interface ContentHit {
     DatabaseViewComponent,
     VaultGraphComponent,
     FamilyTreeComponent,
-    VaultMapComponent
+    VaultMapComponent,
+    VaultCalendarComponent,
+    VaultTimelineComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -300,6 +312,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   private readonly vaultEntryDragType = 'application/x-dd-vault-entry';
   /** A pin to fly to when a map opens from a `#pin` link. */
   private mapFocus: { path: string; anchor: string; token: number } | null = null;
+  /** Calendar presets offered by New calendar, and the one picked (none until the user picks). */
+  readonly calendarPresets = CALENDAR_PRESETS;
+  newCalendarPresetId: string | null = null;
+  /** The calendar a new timeline uses (path); defaults to the vault's default calendar. */
+  newTimelineCalendar: string | null = null;
 
   constructor(
     private obsidianVaultService: ObsidianVaultService,
@@ -307,6 +324,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     private broadcastService: ObsidianBroadcastService,
     private statblockVtt: StatblockVttService,
     private noteInsert: NoteInsertService,
+    private calendarService: CalendarService,
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
     private cdr: ChangeDetectorRef,
@@ -373,6 +391,19 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   }
 
   /** The pin to fly to in the open map (from a `[[Map.map#Pin]]` link), if it's for that map. */
+  get isCalendarSelected(): boolean {
+    return this.selectedViewer === 'calendar';
+  }
+
+  get isTimelineSelected(): boolean {
+    return this.selectedViewer === 'timeline';
+  }
+
+  /** The vault's calendars, for New timeline. */
+  get vaultCalendars() {
+    return this.calendarService.cached(this.serverId) ?? [];
+  }
+
   get mapFocusForSelected(): { anchor: string; token: number } | null {
     return this.mapFocus && this.mapFocus.path === this.selectedFileRelativePath ? this.mapFocus : null;
   }
@@ -1074,6 +1105,9 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     try {
       this.vaultIndex = await this.vaultIndexService.load(this.serverId, useCache);
       this.vaultEntries = this.vaultIndex.entries;
+      // Calendars may have been added, removed or renamed.
+      if (!useCache) this.calendarService.invalidate(this.serverId);
+      else void this.calendarService.load(this.serverId);
       void this.indexVaultContent(!!options.reindexContent);
       this.loadPropertyTypeHints(!useCache);
       this.loadGraphColorGroups(!useCache);
@@ -1345,6 +1379,11 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   startNewFile(kind: NewFileKind = 'note'): void {
     if (!this.permissionGranted) return;
+    this.newCalendarPresetId = null;
+    this.newTimelineCalendar = this.calendarService.defaultCalendar(this.vaultCalendars)?.path ?? null;
+    if (kind === 'timeline') void this.calendarService.load(this.serverId).then(list => {
+      this.newTimelineCalendar ??= this.calendarService.defaultCalendar(list)?.path ?? null;
+    });
 
     this.isCreatingFile = true;
     this.isCreatingFolder = false;
@@ -1547,6 +1586,10 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       this.createFileError = 'A file with that name already exists.';
       return;
     }
+    if (attemptedKind === 'calendar' && !this.newCalendarPresetId) {
+      this.createFileError = 'Choose a calendar to install.';
+      return;
+    }
 
     try {
       const initialContent = await this.loadInitialContent(fullFileName);
@@ -1597,6 +1640,19 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     }
     if (getVaultFileType(filePath).id === 'map') {
       return emptyVaultMap();
+    }
+    if (getVaultFileType(filePath).id === 'calendar') {
+      const preset = CALENDAR_PRESETS.find(item => item.id === this.newCalendarPresetId) ?? CALENDAR_PRESETS[0];
+      const def = preset.build();
+      // Named after the file; the first calendar in a vault becomes its default.
+      def.name = getVaultDisplayName(filePath.split('/').pop() || filePath);
+      def.default = !this.vaultCalendars.length;
+      return serializeCalendar(def);
+    }
+    if (getVaultFileType(filePath).id === 'timeline') {
+      const calendar = this.vaultCalendars.find(item => item.path === this.newTimelineCalendar);
+      const entry = calendar ? this.vaultIndex?.getByPath(calendar.path) : null;
+      return emptyTimeline(entry && this.vaultIndex ? this.vaultIndex.linkTextFor(entry) : null);
     }
     if (getVaultFileType(filePath).id === 'canvas') {
       return this.obsidianVaultService.getObsidianCanvasTemplate();
@@ -1726,10 +1782,13 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
         continue;
       }
       const resolve = (target: string, from: string) => snapshot.index.resolveLink(target, from)?.relativePath ?? null;
-      const result = getVaultFileType(path).id === 'map'
-        // Maps keep their links in pins (and the image path), not in [[…]] text.
-        ? rewriteMapLinks(content, { mapPath: source, resolve, moved, linkTextFor: wikilinkTextFor })
-        : rewriteMovedLinks(content, { notePath: source, newNotePath: path, resolve, moved, wikilinkTextFor });
+      const fileType = getVaultFileType(path).id;
+      const fileCtx = { filePath: source, resolve, moved, linkTextFor: wikilinkTextFor };
+      // Maps, calendars and timelines keep their links in JSON fields, not in [[…]] text.
+      const result = fileType === 'map' ? rewriteMapLinks(content, { mapPath: source, resolve, moved, linkTextFor: wikilinkTextFor })
+        : fileType === 'calendar' ? rewriteCalendarLinks(content, fileCtx)
+          : fileType === 'timeline' ? rewriteTimelineLinks(content, fileCtx)
+            : rewriteMovedLinks(content, { notePath: source, newNotePath: path, resolve, moved, wikilinkTextFor });
       if (result.count > 0) {
         plans.push({ path, content: result.content, count: result.count, isOpen: !!openView });
       }
@@ -2402,7 +2461,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     } else {
       const preview = this.hoverPreview;
       const heading = preview?.heading;
-      if (heading && getVaultFileType(entry.name).id === 'map') {
+      if (heading && FOCUSABLE_TYPES.includes(getVaultFileType(entry.name).id)) {
         this.mapFocus = { path: entry.relativePath, anchor: heading, token: Date.now() };
       }
       void this.selectFile(entry);
@@ -2453,7 +2512,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
     // `[[Sword Coast.map#Waterdeep]]`: open the map at that pin.
     const anchor = linkPath.split('|')[0].split('#').slice(1).join('#').trim();
-    if (entry?.kind === 'file' && anchor && getVaultFileType(entry.name).id === 'map') {
+    if (entry?.kind === 'file' && anchor && FOCUSABLE_TYPES.includes(getVaultFileType(entry.name).id)) {
       this.mapFocus = { path: entry.relativePath, anchor, token: Date.now() };
     }
 

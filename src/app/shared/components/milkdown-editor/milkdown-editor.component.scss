@@ -116,6 +116,216 @@
 }
 
 /* ------------------------------------------------------------------
+   Inline dates: [date:: 15 Mirtul 1492 DR] (date-plugin.ts)
+   ------------------------------------------------------------------ */
+.inline-date {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(242, 193, 78, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(242, 193, 78, 0.35);
+  color: #f6d98c;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: text;
+
+  &.is-invalid {
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+    text-decoration: underline wavy rgba(255, 138, 138, 0.8);
+    text-underline-offset: 3px;
+  }
+
+  // The cursor is inside: the raw syntax shows, lightly marked.
+  &.is-editing {
+    padding: 0;
+    background: rgba(242, 193, 78, 0.08);
+    box-shadow: none;
+    color: inherit;
+    white-space: normal;
+  }
+}
+
+.inline-date-syntax {
+  display: none;
+}
+
+.inline-date-resolved {
+  margin-left: 4px;
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.6));
+  font-size: 0.85em;
+  font-style: italic;
+
+  &::before {
+    content: '(';
+  }
+
+  &::after {
+    content: ')';
+  }
+}
+
+.inline-date-card,
+.date-picker {
+  position: fixed;
+  z-index: 1000;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: var(--surface, #1e1f22);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+  color: var(--on-background, #eef0f6);
+  font-family: var(--font-family-main, inherit);
+  font-size: 13px;
+}
+
+.inline-date-card {
+  display: grid;
+  gap: 4px;
+  max-width: 320px;
+  padding: 10px 12px;
+
+  strong {
+    font-size: 14px;
+  }
+
+  button {
+    justify-self: start;
+    margin-top: 4px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
+
+.inline-date-card-meta {
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.6));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.inline-date-card-holidays {
+  color: #8fe0ad;
+  font-size: 12px;
+}
+
+.date-picker {
+  width: 280px;
+  padding: 10px;
+  outline: 0;
+
+  &.is-notice {
+    width: auto;
+    max-width: 320px;
+  }
+
+  button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+}
+
+.date-picker-calendar {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 8px;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  color-scheme: dark;
+}
+
+.date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+
+  button {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 18px;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
+
+.date-picker-label {
+  font-weight: 700;
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 7), minmax(0, 1fr));
+  gap: 2px;
+}
+
+.date-picker-weekday {
+  padding: 2px 0;
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.5));
+  font-size: 11px;
+  text-align: center;
+}
+
+.date-picker-day {
+  height: 30px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  &.is-today {
+    box-shadow: inset 0 0 0 1px rgba(242, 193, 78, 0.7);
+  }
+
+  &.has-holiday {
+    text-decoration: underline;
+    text-decoration-color: #8fe0ad;
+    text-underline-offset: 3px;
+  }
+
+  &.is-selected {
+    background: var(--primary, #7289da);
+    color: #fff;
+  }
+}
+
+.date-picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--on-surface-variant, rgba(255, 255, 255, 0.6));
+  font-size: 12px;
+
+  button {
+    padding: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    color: var(--on-background, #eef0f6);
+  }
+}
+
+/* ------------------------------------------------------------------
    Resizable ![[image]] embeds (statblock-node-views.ts)
    ------------------------------------------------------------------ */
 .resizable-image {

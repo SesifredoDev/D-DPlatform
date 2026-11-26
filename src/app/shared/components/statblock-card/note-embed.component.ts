@@ -6,6 +6,8 @@ import { VaultIndexService } from '../../services/ObsidianVault/vault-index.serv
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 import { StatblockCardComponent } from './statblock-card.component';
 import { VaultMapComponent } from '../vault-map/vault-map.component';
+import { VaultCalendarComponent } from '../vault-calendar/vault-calendar.component';
+import { VaultTimelineComponent } from '../vault-timeline/vault-timeline.component';
 import type { EmbedSize } from '../milkdown-editor/embed-size';
 
 /**
@@ -16,9 +18,31 @@ import type { EmbedSize } from '../milkdown-editor/embed-size';
 @Component({
   selector: 'app-note-embed',
   standalone: true,
-  imports: [MatIconModule, StatblockCardComponent, VaultMapComponent],
+  imports: [MatIconModule, StatblockCardComponent, VaultMapComponent, VaultCalendarComponent, VaultTimelineComponent],
   template: `
-    @if (mapContent !== null && entry) {
+    @if (calendarContent !== null && entry) {
+      <app-vault-calendar
+        mode="embed"
+        [content]="calendarContent"
+        [path]="entry.relativePath"
+        [serverId]="serverId"
+        [readonly]="true"
+        [focus]="mapFocus"
+        (openFile)="openNote.emit($event)"
+        (linkHover)="linkHover.emit($event)">
+      </app-vault-calendar>
+    } @else if (timelineContent !== null && entry) {
+      <app-vault-timeline
+        mode="embed"
+        [content]="timelineContent"
+        [path]="entry.relativePath"
+        [serverId]="serverId"
+        [readonly]="true"
+        [focus]="mapFocus"
+        (openFile)="openNote.emit($event)"
+        (linkHover)="linkHover.emit($event)">
+      </app-vault-timeline>
+    } @else if (mapContent !== null && entry) {
       <app-vault-map
         mode="embed"
         [content]="mapContent"
@@ -86,6 +110,9 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
   statblock: StatblockBlock | null = null;
   /** The map file's text, for `![[X.map]]`. */
   mapContent: string | null = null;
+  /** Calendar and timeline files' text, for `![[X.calendar]]` / `![[X.timeline]]`. */
+  calendarContent: string | null = null;
+  timelineContent: string | null = null;
   /** `![[X.map#Pin]]`: the pin to centre on. */
   mapFocus: { anchor: string; token: number } | null = null;
   imageUrl = '';
@@ -125,12 +152,15 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
         if (id === this.loadId) this.imageUrl = URL.createObjectURL(blob);
         return;
       }
-      if (type.id === 'map') {
+      if (type.id === 'map' || type.id === 'calendar' || type.id === 'timeline') {
         const content = await this.vaultService.readFile(this.serverId, this.entry.relativePath);
         if (id !== this.loadId) return;
+        // `#Waterdeep` (a pin) or `#15 Mirtul 1492 DR` (a date) to open at.
         const anchor = this.link.split('|')[0].split('#').slice(1).join('#').trim();
         this.mapFocus = anchor ? { anchor, token: Date.now() } : null;
-        this.mapContent = content;
+        if (type.id === 'map') this.mapContent = content;
+        else if (type.id === 'calendar') this.calendarContent = content;
+        else this.timelineContent = content;
         return;
       }
       if (type.id !== 'markdown') return;

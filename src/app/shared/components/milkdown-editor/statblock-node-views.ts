@@ -91,7 +91,7 @@ export function noteEmbedTarget(node: ProseMirrorNode): string | null {
   // Images, PDFs and other known types keep the image view; notes (and names with dots, like
   // "Mr. Smith") and maps get the embed card.
   const extension = getFileExtension(path);
-  return !extension || extension === 'md' || extension === 'map' || getVaultFileType(path).id === 'file' ? target : null;
+  return !extension || ['md', 'map', 'calendar', 'timeline'].includes(extension) || getVaultFileType(path).id === 'file' ? target : null;
 }
 
 function embedView(host: StatblockViewHost, fallback?: NodeViewConstructor): NodeViewConstructor {

@@ -86,6 +86,14 @@
         <mat-icon>map</mat-icon>
         <span>New map</span>
       </button>
+      <button mat-menu-item (click)="startNewFile('calendar')">
+        <mat-icon>calendar_month</mat-icon>
+        <span>New calendar</span>
+      </button>
+      <button mat-menu-item (click)="startNewFile('timeline')">
+        <mat-icon>timeline</mat-icon>
+        <span>New timeline</span>
+      </button>
       <button mat-menu-item (click)="startNewFolder()">
         <mat-icon>create_new_folder</mat-icon>
         <span>New folder</span>
@@ -171,6 +179,34 @@
               <option [value]="template.fileName">{{ template.label }}</option>
             }
           </select>
+        } @else if (newFileKind === 'calendar') {
+          <select
+            name="newCalendarPreset"
+            [(ngModel)]="newCalendarPresetId"
+            aria-label="Calendar to install">
+            <option [ngValue]="null" disabled>Choose a calendar</option>
+            @for (preset of calendarPresets; track preset.id) {
+              <option [ngValue]="preset.id">{{ preset.name }}</option>
+            }
+          </select>
+          @for (preset of calendarPresets; track preset.id) {
+            @if (preset.id === newCalendarPresetId) {
+              <span class="create-form-hint">{{ preset.description }}</span>
+            }
+          }
+        } @else if (newFileKind === 'timeline') {
+          @if (vaultCalendars.length) {
+            <select
+              name="newTimelineCalendar"
+              [(ngModel)]="newTimelineCalendar"
+              aria-label="Calendar">
+              @for (calendar of vaultCalendars; track calendar.path) {
+                <option [ngValue]="calendar.path">{{ calendar.name }}@if (calendar.def.default) { (default)}</option>
+              }
+            </select>
+          } @else {
+            <span class="create-form-hint">No calendar yet: the timeline will use the first one you create.</span>
+          }
         } @else if (isNewBlockFile) {
           <select
             name="newStatblockSystem"
@@ -483,6 +519,14 @@
           <button mat-menu-item (click)="startNewFileInFolder(entry, 'map')">
             <mat-icon>map</mat-icon>
             <span>New map here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'calendar')">
+            <mat-icon>calendar_month</mat-icon>
+            <span>New calendar here</span>
+          </button>
+          <button mat-menu-item (click)="startNewFileInFolder(entry, 'timeline')">
+            <mat-icon>timeline</mat-icon>
+            <span>New timeline here</span>
           </button>
           <button mat-menu-item (click)="startNewFolderInFolder(entry)">
             <mat-icon>create_new_folder</mat-icon>
@@ -829,7 +873,7 @@
                 </span>
               }
 
-              @if (!isDatabaseFileSelected && !isFamilyTreeSelected && !isMapSelected) {
+              @if (!isDatabaseFileSelected && !isFamilyTreeSelected && !isMapSelected && !isCalendarSelected && !isTimelineSelected) {
                 <button
                   mat-stroked-button
                   class="btn-secondary btn-broadcast"
@@ -1008,6 +1052,28 @@
               (propertyChange)="onDatabasePropertyChange($event)"
               (createNote)="onDatabaseCreateNote($event)">
             </app-database-view>
+          } @else if (isCalendarSelected) {
+            <app-vault-calendar
+              [content]="selectedFileContent"
+              [path]="selectedFileRelativePath"
+              [serverId]="serverId"
+              [readonly]="previewOnly"
+              [focus]="mapFocusForSelected"
+              (contentChange)="onContentChange($event)"
+              (openFile)="onWikilinkClick($event)"
+              (linkHover)="onEditorLinkHover($event)">
+            </app-vault-calendar>
+          } @else if (isTimelineSelected) {
+            <app-vault-timeline
+              [content]="selectedFileContent"
+              [path]="selectedFileRelativePath"
+              [serverId]="serverId"
+              [readonly]="previewOnly"
+              [focus]="mapFocusForSelected"
+              (contentChange)="onContentChange($event)"
+              (openFile)="onWikilinkClick($event)"
+              (linkHover)="onEditorLinkHover($event)">
+            </app-vault-timeline>
           } @else if (isMapSelected) {
             <app-vault-map
               [content]="selectedFileContent"
