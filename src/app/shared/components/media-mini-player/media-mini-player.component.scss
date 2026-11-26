@@ -1,0 +1,144 @@
+// Background player: bottom-left (the dice overlay owns bottom-right).
+
+:host {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 4250;
+}
+
+.mini {
+  --mini-text: var(--on-background, #eef0f6);
+  --mini-muted: rgba(255, 255, 255, 0.58);
+  --mini-accent: var(--primary, #7289da);
+
+  display: grid;
+  gap: 6px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(20, 22, 28, 0.92);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--mini-text);
+  font-family: var(--font-family-main, inherit);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: arrive 180ms ease-out;
+
+  &.is-video {
+    width: min(360px, calc(100vw - 32px));
+  }
+}
+
+.screen {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  background: #000;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.glyph {
+  flex: none;
+  color: var(--mini-accent);
+}
+
+.label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.where {
+  color: var(--mini-muted);
+  font-size: 0.75rem;
+
+  &.is-error {
+    color: #ff8a8a;
+  }
+}
+
+.icon-btn {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mini-muted);
+  cursor: pointer;
+
+  mat-icon {
+    width: 20px;
+    height: 20px;
+    font-size: 20px;
+  }
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--mini-text);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--mini-accent);
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+audio {
+  width: 100%;
+  height: 34px;
+  color-scheme: dark;
+}
+
+.progress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+
+  span {
+    display: block;
+    height: 100%;
+    background: var(--mini-accent);
+    transition: width 200ms linear;
+  }
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini {
+    animation: none;
+  }
+}

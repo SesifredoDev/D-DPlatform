@@ -5,6 +5,7 @@ import {
   OnDestroy,
   ViewChild,
   ElementRef,
+  inject,
   OnChanges,SimpleChanges,
   HostListener,
   ViewChildren,
@@ -13,7 +14,12 @@ import {
   EventEmitter,
   ChangeDetectorRef,
 } from '@angular/core';
-import { Video } from '../../../shared/services/video/video';
+import { OverlayVideoState, Video } from '../../../shared/services/video/video';
+import { CallVideoOverlayComponent } from './call-video-overlay/call-video-overlay.component';
+import { BroadcastScale } from './call-broadcast-scale';
+import { BroadcastResizeHandleComponent, BroadcastScaleControlsComponent } from './call-broadcast-scale.component';
+import { VaultIndexService } from '../../../shared/services/ObsidianVault/vault-index.service';
+import { getVaultDisplayName } from '../../../shared/services/ObsidianVault/vault-file-types';
 import type {
   CallParticipantMetadata,
   CallRecordingParticipant,
@@ -258,7 +264,7 @@ interface CallSessionNoteUpdatedEventDetail {
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent, MilkdownEditorComponent]
+  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent, MilkdownEditorComponent, CallVideoOverlayComponent, BroadcastScaleControlsComponent, BroadcastResizeHandleComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -376,6 +382,14 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Broadcast state
   activeOverlayImage: string | null = null;
   activeOverlayText: string | null = null;
+  /** A video shown to the call (from the vault or a broadcast). */
+  activeOverlayVideo: OverlayVideoState | null = null;
+  /** How big broadcast images show (remembered on this device). */
+  readonly broadcastImageScale = new BroadcastScale('image');
+  private readonly hostElement = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly vaultIndexService = inject(VaultIndexService);
+  /** The video this user hid (it keeps playing for everyone else). */
+  private hiddenOverlayVideoUrl: string | null = null;
   activeTemporaryAtmosphereBackground: string | null = null;
   broadcastOverlayNoteSaving: 'current' | 'new' | null = null;
   broadcastOverlayNoteStatus = '';
@@ -1076,8 +1090,29 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.lastBroadcastOverlayActivatedAt = Date.now();
         this.broadcastOverlayNoteStatus = '';
         this.activeOverlayText = null;
+        this.hideOverlayVideo();
       }
       this.recordCallEnvironmentEvent('overlay-image', { url });
+      this.cdr.detectChanges();
+    }));
+
+    this.subscriptions.add(this.videoService.overlayVideo$.subscribe(video => {
+      if (this.isCallPlaybackMode && !this.isApplyingCallPlaybackEnvironment) {
+        return;
+      }
+      if (!video) {
+        this.hiddenOverlayVideoUrl = null;
+      } else if (video.url === this.hiddenOverlayVideoUrl && video.from !== this.videoService.localIdentity) {
+        // Hidden by this user: stays hidden while the same video keeps playing.
+        return;
+      }
+      const isNewVideo = !!video && video.url !== this.activeOverlayVideo?.url;
+      this.activeOverlayVideo = video;
+      if (isNewVideo) {
+        this.lastBroadcastOverlayActivatedAt = Date.now();
+        this.activeOverlayImage = null;
+        this.activeOverlayText = null;
+      }
       this.cdr.detectChanges();
     }));
 
@@ -1104,6 +1139,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
         this.lastBroadcastOverlayActivatedAt = Date.now();
         this.broadcastOverlayNoteStatus = '';
         this.activeOverlayImage = null;
+        this.hideOverlayVideo();
       }
       this.recordCallEnvironmentEvent('overlay-text', { text });
       this.cdr.detectChanges();
@@ -4681,7 +4717,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.closeClickOffOverlays();
+    this.closeClickOffOverlays(this.isClickInsideCallView(event));
   }
 
   @HostListener('document:contextmenu', ['$event'])
@@ -4694,7 +4730,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.closeClickOffOverlays();
+    this.closeClickOffOverlays(this.isClickInsideCallView(event));
   }
 
   @HostListener('document:keydown.escape')
@@ -4728,6 +4764,15 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   handleWindowResize() {
     this.updateSceneMainLayoutSpaceFromElement();
     this.closeRemoteContextMenu();
+  }
+
+  /**
+   * Broadcasts (images, text, video) are only dismissed by clicking in the call itself, not by
+   * clicks elsewhere in the app, such as the tab bar: clicking the call tab to switch to it
+   * activates the tab before this click reaches the document, and would otherwise close them.
+   */
+  private isClickInsideCallView(event: MouseEvent): boolean {
+    return event.target instanceof Node && this.hostElement.nativeElement.contains(event.target);
   }
 
   private isClickInsideOverlayFeature(event: MouseEvent): boolean {
@@ -4777,7 +4822,7 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   }
 
   private isBroadcastOverlayInDismissGracePeriod(): boolean {
-    return !!(this.activeOverlayImage || this.activeOverlayText) &&
+    return !!(this.activeOverlayImage || this.activeOverlayText || this.activeOverlayVideo) &&
       Date.now() - this.lastBroadcastOverlayActivatedAt < this.broadcastOverlayDismissGraceMs;
   }
 
@@ -5058,7 +5103,24 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   dismissOverlay() {
     this.activeOverlayImage = null;
     this.activeOverlayText = null;
+    this.hideOverlayVideo();
     this.broadcastOverlayNoteStatus = '';
+  }
+
+  get isOverlayVideoController(): boolean {
+    return !!this.activeOverlayVideo && this.activeOverlayVideo.from === this.videoService.localIdentity;
+  }
+
+  /** Hides the call video just for this user (it keeps playing for everyone else). */
+  hideOverlayVideo() {
+    if (!this.activeOverlayVideo) return;
+    this.hiddenOverlayVideoUrl = this.activeOverlayVideo.url;
+    this.activeOverlayVideo = null;
+  }
+
+  /** Whoever started the video stops it for everyone. */
+  stopOverlayVideoForEveryone() {
+    this.videoService.broadcastOverlayVideo(null);
   }
 
   get hasCurrentSessionNoteForBroadcast(): boolean {
@@ -5567,6 +5629,39 @@ export class Call implements OnInit, OnDestroy, OnChanges {
 
     await this.ensureSessionNotesReady(true);
     return this.sessionNotesPermissionGranted;
+  }
+
+  /**
+   * A link clicked in the session note (a `[[note]]`, an embed card, "Open in calendar"…): web
+   * links open in a new browser tab; vault files open in a notes preview tab beside the call.
+   */
+  async openSessionNoteLink(link: string) {
+    const target = (link || '').trim();
+    if (!target) return;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+      window.open(target, '_blank', 'noopener');
+      return;
+    }
+
+    const serverId = this.getSessionNotesServerId();
+    if (!serverId) return;
+    try {
+      const index = this.vaultIndexService.get(serverId) ?? await this.vaultIndexService.load(serverId);
+      const entry = index.resolveLink(target, this.selectedSessionNotePath);
+      if (!entry || entry.kind !== 'file') {
+        this.snackBar.open(`“${target.split('|')[0]}” isn’t in the vault yet.`, 'Dismiss', { duration: 4000 });
+        return;
+      }
+      this.tabService.openObsidianPreviewTab({
+        serverId,
+        path: entry.relativePath,
+        title: getVaultDisplayName(entry.name),
+        pane: 'right',
+      });
+    } catch (error) {
+      console.warn('[Call] Could not open session note link', target, error);
+      this.snackBar.open('Couldn’t open that link. Check the vault folder is connected.', 'Dismiss', { duration: 4000 });
+    }
   }
 
   getSessionNotesServerId(): string {

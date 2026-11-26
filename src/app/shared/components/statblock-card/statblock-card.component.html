@@ -415,7 +415,7 @@
                 <input
                   class="sb-picker-search"
                   [(ngModel)]="pickerQuery"
-                  (ngModelChange)="updatePicker()"
+                  (ngModelChange)="onPickerQueryChange()"
                   (keydown.escape)="closePicker()"
                   placeholder="Filter images"
                   aria-label="Filter images">
@@ -423,8 +423,8 @@
                   <div class="sb-picker-grid">
                     @for (image of pickerImages; track image.relativePath) {
                       <button type="button" (click)="pickImage(image)" [title]="image.relativePath">
-                        @if (imageUrlFor(image.relativePath); as url) {
-                          <img [src]="url" alt="" loading="lazy">
+                        @if (thumbUrls[image.relativePath]; as url) {
+                          <img [src]="url" alt="" loading="lazy" decoding="async">
                         } @else {
                           <mat-icon>image</mat-icon>
                         }

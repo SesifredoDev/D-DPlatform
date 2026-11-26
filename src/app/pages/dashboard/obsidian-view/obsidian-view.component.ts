@@ -12,6 +12,9 @@ import { emptyFamilyTree, isFamilyTreePath } from '../../../shared/services/Obsi
 import { VaultMapComponent } from '../../../shared/components/vault-map/vault-map.component';
 import { VaultCalendarComponent } from '../../../shared/components/vault-calendar/vault-calendar.component';
 import { VaultTimelineComponent } from '../../../shared/components/vault-timeline/vault-timeline.component';
+import { VaultMediaPlayerComponent } from '../../../shared/components/vault-media-player/vault-media-player.component';
+import { MediaPlaybackService } from '../../../shared/services/media/media-playback.service';
+import { VaultImageService } from '../../../shared/services/ObsidianVault/vault-image.service';
 import { CalendarService } from '../../../shared/services/ObsidianVault/calendar.service';
 import { CALENDAR_PRESETS, serializeCalendar } from '../../../shared/services/ObsidianVault/vault-calendar';
 import { emptyTimeline } from '../../../shared/services/ObsidianVault/vault-timeline';
@@ -199,7 +202,8 @@ interface ContentHit {
     FamilyTreeComponent,
     VaultMapComponent,
     VaultCalendarComponent,
-    VaultTimelineComponent
+    VaultTimelineComponent,
+    VaultMediaPlayerComponent
   ],
   templateUrl: './obsidian-view.component.html',
   styleUrl: './obsidian-view.component.scss'
@@ -325,6 +329,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     private statblockVtt: StatblockVttService,
     private noteInsert: NoteInsertService,
     private calendarService: CalendarService,
+    private mediaPlayback: MediaPlaybackService,
+    private vaultImages: VaultImageService,
     private route: ActivatedRoute,
     private sanitizer: DomSanitizer,
     private cdr: ChangeDetectorRef,
@@ -432,6 +438,10 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   get isPdf(): boolean {
     return this.selectedViewer === 'pdf';
+  }
+
+  get isMedia(): boolean {
+    return this.selectedViewer === 'media';
   }
 
   get isEditableFileSelected(): boolean {
@@ -1208,35 +1218,26 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     const token = ++this.selectionToken;
     await this.flushPendingSave();
 
-    const sourceEntry = this.vaultIndex?.getByPath(entry.relativePath) || entry;
-    const objectUrls: string[] = [];
+    if (token !== this.selectionToken) return;
 
-    const images = await Promise.all(this.collectFolderImages(sourceEntry).map(async imageEntry => {
-      try {
-        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, imageEntry.relativePath);
-        const url = URL.createObjectURL(blob);
-        objectUrls.push(url);
-        return { name: imageEntry.name, relativePath: imageEntry.relativePath, url };
-      } catch (error) {
-        console.warn('[ObsidianView] Failed to load gallery image', imageEntry.relativePath, error);
-        return null;
-      }
+    const sourceEntry = this.vaultIndex?.getByPath(entry.relativePath) || entry;
+    // Show the folder straight away; thumbnails fill in as they're made (small, cached and a few
+    // at a time), instead of waiting for every full-size image in the folder.
+    const images: FolderGalleryImage[] = this.collectFolderImages(sourceEntry).map(imageEntry => ({
+      name: imageEntry.name,
+      relativePath: imageEntry.relativePath,
+      url: this.vaultImages.cachedThumbnail(this.serverId, imageEntry.relativePath) ?? '',
     }));
 
-    if (token !== this.selectionToken) {
-      objectUrls.forEach(url => URL.revokeObjectURL(url));
-      return;
-    }
-
     this.revokeObjectUrls();
-    this.objectUrls.push(...objectUrls);
     this.graphPage = null;
     this.activeView = {
       kind: 'folder',
       name: sourceEntry.name,
       relativePath: sourceEntry.relativePath,
-      images: images.filter((image): image is FolderGalleryImage => !!image),
+      images,
     };
+    this.loadGalleryThumbnails(token, images);
     this.selectedFileDisplayName = '';
     this.expandAncestors(sourceEntry.relativePath);
     this.expandedFolders.add(sourceEntry.relativePath);
@@ -1245,6 +1246,22 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   cancelEdit(): void {
     void this.closeView();
+  }
+
+  private loadGalleryThumbnails(token: number, images: FolderGalleryImage[]): void {
+    const serverId = this.serverId;
+    for (const image of images) {
+      if (image.url) continue;
+      void this.vaultImages.thumbnail(serverId, image.relativePath).then(url => {
+        const view = this.activeView;
+        if (!url || token !== this.selectionToken || view.kind !== 'folder') return;
+        this.activeView = {
+          ...view,
+          images: view.images.map(item => (item.relativePath === image.relativePath ? { ...item, url } : item)),
+        };
+        this.cdr.markForCheck();
+      });
+    }
   }
 
   cancelFolderView(): void {
@@ -2311,7 +2328,6 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   private hoverOpenTimer?: ReturnType<typeof setTimeout>;
   private hoverCloseTimer?: ReturnType<typeof setTimeout>;
   private hoverToken = 0;
-  private hoverImageUrl: string | null = null;
 
   /** From the editor: the pointer entered a link (after a short delay, show its card) or left it. */
   onEditorLinkHover(event: { target: string; rect: DOMRect } | null): void {
@@ -2345,10 +2361,6 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     clearTimeout(this.hoverCloseTimer);
     this.hoverToken++;
     this.hoverPreview = null;
-    if (this.hoverImageUrl) {
-      URL.revokeObjectURL(this.hoverImageUrl);
-      this.hoverImageUrl = null;
-    }
   }
 
   private onViewScroll = (event: Event) => {
@@ -2401,10 +2413,10 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
       } else if (fileType?.viewer === 'map') {
         await this.loadMapHoverPreview(entry.relativePath, heading, token);
       } else {
-        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, entry.relativePath);
+        // Cached: hovering the same image again is instant (and the URL isn't ours to revoke).
+        const imageUrl = await this.vaultImages.url(this.serverId, entry.relativePath);
         if (token !== this.hoverToken || !this.hoverPreview) return;
-        this.hoverImageUrl = URL.createObjectURL(blob);
-        this.hoverPreview = { ...this.hoverPreview, loading: false, imageUrl: this.hoverImageUrl };
+        this.hoverPreview = { ...this.hoverPreview, loading: false, imageUrl };
       }
     } catch (err) {
       console.warn('Hover preview failed:', err);
@@ -2424,10 +2436,8 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     } else if (map.image) {
       const image = this.vaultIndex?.resolveFile(map.image.replace(/^!?\[\[|\]\]$/g, ''), path);
       if (image) {
-        const blob = await this.obsidianVaultService.readFileAsBlob(this.serverId, image.relativePath);
+        imageUrl = await this.vaultImages.url(this.serverId, image.relativePath);
         if (token !== this.hoverToken) return;
-        this.hoverImageUrl = URL.createObjectURL(blob);
-        imageUrl = this.hoverImageUrl;
       }
     }
     if (token !== this.hoverToken || !this.hoverPreview) return;
@@ -2597,6 +2607,45 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     this.contextMenuPosition.x = `${event.clientX}px`;
     this.contextMenuPosition.y = `${event.clientY}px`;
     trigger.openMenu();
+  }
+
+  /** In a call, images can be shown to everyone in one click. */
+  get callConnected(): boolean {
+    return this.mediaPlayback.isCallConnected();
+  }
+
+  /** An image is being sent to the call. */
+  showingImageOnCall = false;
+
+  /** Right-click → Show on call. */
+  async showContextImageOnCall(): Promise<void> {
+    const image = this.pendingImageBroadcast;
+    this.pendingImageBroadcast = null;
+    if (!image) return;
+    const fullUrl = image.path ? await this.vaultImages.url(this.serverId, image.path) : null;
+    await this.showImageOnCall(fullUrl ?? image.src, image.path || image.alt);
+  }
+
+  /** The open image file → Show on call. */
+  async showOpenImageOnCall(): Promise<void> {
+    const src = this.hostRef.nativeElement.querySelector<HTMLImageElement>('.viewer-image')?.src;
+    if (src) await this.showImageOnCall(src, this.selectedFileName);
+  }
+
+  private async showImageOnCall(src: string, name: string): Promise<void> {
+    if (this.showingImageOnCall) return;
+    this.showingImageOnCall = true;
+    try {
+      const blob = await (await fetch(src)).blob();
+      await this.mediaPlayback.showImageOnCall(blob, name.split('/').pop() || 'image');
+      this.snackBar.open('Showing on the call', undefined, { duration: 2500 });
+    } catch (error) {
+      console.warn('[ObsidianView] Show on call failed', error);
+      this.snackBar.open(error instanceof Error && error.message ? error.message : 'Couldn’t show this image on the call.', 'Dismiss', { duration: 5000 });
+    } finally {
+      this.showingImageOnCall = false;
+      this.cdr.markForCheck();
+    }
   }
 
   async broadcastContextImage(): Promise<void> {

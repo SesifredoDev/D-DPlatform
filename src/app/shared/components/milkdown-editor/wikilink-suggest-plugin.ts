@@ -104,7 +104,7 @@ function createPlugin(getCandidates: () => WikilinkCandidate[]): Plugin<SuggestS
       renderedQuery = queryKey;
       activeIndex = 0;
       const candidates = getCandidates();
-      items = rank(filter ? candidates.filter(candidate => candidate.kind === filter.kind) : candidates, match.query);
+      items = rank(filter ? candidates.filter(candidate => filter.kind.split(',').includes(candidate.kind ?? '')) : candidates, match.query);
     }
 
     if (!popup) {

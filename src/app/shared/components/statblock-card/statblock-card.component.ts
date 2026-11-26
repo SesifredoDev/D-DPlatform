@@ -33,6 +33,7 @@ import { findDiceExpressions } from '../../services/dice/dice';
 import { DiceRollService } from '../../services/dice/dice-roll.service';
 import { VaultIndex, VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getFileExtension, getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
+import { VaultImageService } from '../../services/ObsidianVault/vault-image.service';
 
 interface FieldView {
   key: string;
@@ -116,6 +117,9 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
   isPicking = false;
   pickerQuery = '';
   pickerImages: VaultEntry[] = [];
+  /** Small previews for the picker grid. */
+  thumbUrls: Record<string, string> = {};
+  private pickerQueryTimer?: ReturnType<typeof setTimeout>;
   pickerTotal = 0;
   isUploading = false;
 
@@ -135,7 +139,8 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
     private vaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
     private statblockVtt: StatblockVttService,
-    private diceRolls: DiceRollService
+    private diceRolls: DiceRollService,
+    private vaultImages: VaultImageService
   ) {}
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -160,6 +165,7 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     Object.values(this.imageUrls).forEach(url => url.startsWith('blob:') && URL.revokeObjectURL(url));
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
   }
 
   /** Systems offered for this kind of block. */
@@ -557,8 +563,27 @@ export class StatblockCardComponent implements OnChanges, OnDestroy {
         Number(b.parentPath === folder) - Number(a.parentPath === folder) || a.relativePath.localeCompare(b.relativePath));
     this.pickerTotal = images.length;
     this.pickerImages = images.slice(0, PICKER_LIMIT);
-    this.pickerImages.forEach(image => this.loadImage(image.relativePath));
+    this.pickerImages.forEach(image => this.loadThumb(image.relativePath));
   }
+
+  /** Picker thumbnails: small cached previews, not the full images (see VaultImageService). */
+  private loadThumb(path: string): void {
+    if (this.thumbUrls[path] !== undefined || !this.serverId) return;
+    const serverId = this.serverId;
+    void this.vaultImages.thumbnail(serverId, path).then(url => {
+      if (serverId === this.serverId) this.thumbUrls = { ...this.thumbUrls, [path]: url ?? '' };
+    });
+  }
+
+  /** The filter waits for a pause in typing, so each letter doesn't rebuild the grid. */
+  onPickerQueryChange(): void {
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
+    this.pickerQueryTimer = setTimeout(() => {
+      this.pickerQueryTimer = undefined;
+      this.updatePicker();
+    }, 150);
+  }
+
 
   pickImage(image: VaultEntry): void {
     const index = this.index;

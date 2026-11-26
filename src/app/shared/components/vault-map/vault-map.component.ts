@@ -46,6 +46,7 @@ import {
 } from '../../services/ObsidianVault/vault-map';
 import { VttSync } from '../../services/vttsync/vttsync';
 import type { EmbedSize } from '../milkdown-editor/embed-size';
+import { VaultImageService } from '../../services/ObsidianVault/vault-image.service';
 
 /** A pin as drawn: where it is on screen and what it links to. */
 interface PinView {
@@ -206,7 +207,7 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
   private needsFit = true;
   private pendingFocus: string | null = null;
   private imageObjectUrl = '';
-  private loadingThumbs = new Set<string>();
+  private pickerQueryTimer?: ReturnType<typeof setTimeout>;
   private resizeObserver?: ResizeObserver;
   private zoomHintTimer?: ReturnType<typeof setTimeout>;
   private focusLinkInput = false;
@@ -218,7 +219,8 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     private vaultService: ObsidianVaultService,
     private vaultIndexService: VaultIndexService,
     private noteInsert: NoteInsertService,
-    private vttSync: VttSync
+    private vttSync: VttSync,
+    private vaultImages: VaultImageService
   ) {}
 
   // ---- Lifecycle ----
@@ -270,7 +272,8 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.resizeObserver?.disconnect();
     this.revokeImage();
-    Object.values(this.thumbUrls).forEach(url => url.startsWith('blob:') && URL.revokeObjectURL(url));
+    // Thumbnails are shared and cached by VaultImageService: not ours to revoke.
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
     if (this.zoomHintTimer) clearTimeout(this.zoomHintTimer);
     this.linkHover.emit(null);
   }
@@ -1141,13 +1144,23 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     this.pickerImages.forEach(image => this.loadThumb(image.relativePath));
   }
 
+
+  /** Picker thumbnails: small cached previews, not the full images (see VaultImageService). */
   private loadThumb(path: string): void {
-    if (path in this.thumbUrls || this.loadingThumbs.has(path) || !this.serverId) return;
-    this.loadingThumbs.add(path);
-    void this.vaultService.readFileAsBlob(this.serverId, path)
-      .then(blob => (this.thumbUrls = { ...this.thumbUrls, [path]: URL.createObjectURL(blob) }))
-      .catch(() => (this.thumbUrls = { ...this.thumbUrls, [path]: '' }))
-      .finally(() => this.loadingThumbs.delete(path));
+    if (this.thumbUrls[path] !== undefined || !this.serverId) return;
+    const serverId = this.serverId;
+    void this.vaultImages.thumbnail(serverId, path).then(url => {
+      if (serverId === this.serverId) this.thumbUrls = { ...this.thumbUrls, [path]: url ?? '' };
+    });
+  }
+
+  /** The filter waits for a pause in typing, so each letter doesn't rebuild the grid. */
+  onPickerQueryChange(): void {
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
+    this.pickerQueryTimer = setTimeout(() => {
+      this.pickerQueryTimer = undefined;
+      this.updateImagePicker();
+    }, 150);
   }
 
   private async loadVttMaps(): Promise<void> {

@@ -26,6 +26,22 @@ import { SharedWindowStateService } from '../window-state/shared-window-state.se
 import type { CallDeviceRole, MobileCallJoinMode, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant, LiveKitConnectionInfo } from '../../models/video/video.model';
 export type { CallDeviceRole, MobileCallJoinMode, CompanionSourceId, RemoteVideoQualityPreference, ParticipantVolumeMap, SceneMainCharacterState, CallParticipantMetadata, CompanionDeviceOption, MediaTrackDiagnostics, ParticipantMediaDiagnostics, CallRecordingParticipant } from '../../models/video/video.model';
 
+/**
+ * A video shown to everyone on the call (from a vault file or a broadcast). Whoever started it
+ * controls it: play, pause and seeking are sent to everyone else.
+ */
+export interface OverlayVideoState {
+  url: string;
+  name: string;
+  playing: boolean;
+  /** Seconds into the video when this state was sent. */
+  time: number;
+  /** The participant who started it (they control it). */
+  from: string;
+  /** When this state arrived, on this device's clock (so playing videos stay in step). */
+  receivedAt: number;
+}
+
 export interface VideoCallInitOptions {
   mobileJoinMode?: MobileCallJoinMode;
 }
@@ -144,6 +160,7 @@ export class Video {
   public vttSession$ = new BehaviorSubject<{ active: boolean, roomId: string | null, hostId: string | null }>({ active: false, roomId: null, hostId: null });
   public overlayImage$ = new BehaviorSubject<string | null>(null);
   public overlayText$ = new BehaviorSubject<string | null>(null);
+  public overlayVideo$ = new BehaviorSubject<OverlayVideoState | null>(null);
   public temporaryAtmosphereBackground$ = new BehaviorSubject<string | null>(null);
   public callKicked$ = new Subject<string>();
   public readonly deviceInfo$;
@@ -330,6 +347,7 @@ export class Video {
         if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
           this.sendVttCommand('start', this.vttSession$.value.roomId!);
         }
+        this.resendOverlayVideo();
       })
       .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
         this.participantStreams.delete(participant.identity);
@@ -400,6 +418,8 @@ export class Video {
       this.overlayImage$.next(data.url);
     } else if (data.type === 'overlay-text') {
       this.overlayText$.next(data.text);
+    } else if (data.type === 'overlay-video') {
+      this.receiveOverlayVideo(data.video, participant);
     } else if (data.type === 'temporary-atmosphere-background') {
       this.temporaryAtmosphereBackground$.next(data.url);
     } else if (data.type === 'scene-main-characters') {
@@ -918,6 +938,58 @@ export class Video {
     return true;
   }
 
+  /** The local participant's call identity ('' when not in a call). */
+  get localIdentity(): string {
+    return this.room.localParticipant?.identity || this.currentParticipantIdentity || '';
+  }
+
+  /**
+   * Shows a video to everyone on the call, or updates it (play, pause, seek), or stops it (null).
+   * Only whoever started the video should update it.
+   */
+  broadcastOverlayVideo(video: { url: string; name: string; playing: boolean; time: number } | null) {
+    if (this.room.state !== 'connected') return;
+    const state: OverlayVideoState | null = video
+      ? { ...video, time: Math.max(0, video.time || 0), from: this.localIdentity, receivedAt: Date.now() }
+      : null;
+    this.publishOverlayVideo(state);
+    this.overlayVideo$.next(state);
+  }
+
+  private publishOverlayVideo(state: OverlayVideoState | null) {
+    const video = state ? { url: state.url, name: state.name, playing: state.playing, time: state.time } : null;
+    const payload = new TextEncoder().encode(JSON.stringify({ type: 'overlay-video', video }));
+    void this.room.localParticipant.publishData(payload, { reliable: true });
+  }
+
+  /** Someone joined: catch them up on the video this participant is showing. */
+  private resendOverlayVideo() {
+    const state = this.overlayVideo$.value;
+    if (!state || state.from !== this.localIdentity) return;
+    const elapsed = state.playing ? (Date.now() - state.receivedAt) / 1000 : 0;
+    this.publishOverlayVideo({ ...state, time: state.time + elapsed });
+  }
+
+  private receiveOverlayVideo(video: unknown, participant?: RemoteParticipant) {
+    const from = participant?.identity || '';
+    if (!this.isRecord(video)) {
+      // Stopped: only by whoever is showing it.
+      const current = this.overlayVideo$.value;
+      if (current && (!current.from || current.from === from)) this.overlayVideo$.next(null);
+      return;
+    }
+    const url = this.getStringValue(video['url']);
+    if (!url) return;
+    this.overlayVideo$.next({
+      url,
+      name: this.getStringValue(video['name']) || 'Video',
+      playing: video['playing'] === true,
+      time: Number(video['time']) || 0,
+      from,
+      receivedAt: Date.now(),
+    });
+  }
+
   broadcastTemporaryAtmosphereBackground(url: string | null) {
     if (this.room.state !== 'connected') return;
     const payload = new TextEncoder().encode(JSON.stringify({ type: 'temporary-atmosphere-background', url }));
@@ -1202,6 +1274,8 @@ export class Video {
     if (this.vttSession$.value.active && this.vttSession$.value.hostId === this.room.localParticipant.identity) {
       this.sendVttCommand('stop', this.vttSession$.value.roomId!);
     }
+    if (this.overlayVideo$.value?.from === this.localIdentity) this.broadcastOverlayVideo(null);
+    this.overlayVideo$.next(null);
     if (this.localStream) this.localStream.getTracks().forEach(t => t.stop());
     await this.disconnectRoomWithoutReset();
     this.resetCallState();

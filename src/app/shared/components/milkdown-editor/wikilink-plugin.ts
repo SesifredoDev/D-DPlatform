@@ -70,6 +70,9 @@ export function remarkWikilinks(this: any) {
             // (like C:/) triggers "Not allowed to load local resource" in many browsers.
             url: `${EMBED_PREFIX}${path}`,
             alt: alias,
+            // An embed on its own line becomes Crepe's image block, which drops the alt (it reads
+            // it as a ratio) but keeps the title as its caption: so the `|…` part goes there too.
+            title: alias !== path ? alias : null,
             data: {
               hProperties: {
                 class: 'wikilink-image',
@@ -132,8 +135,8 @@ const wikilinkToMarkdown: ToMarkdownOptions = {
         return defaultHandlers.image({ ...node, url: path }, parent, state, info);
       }
 
-      const alias = embedAlias((node.alt || '').trim(), path);
-      return alias ? `![[${path}|${alias}]]` : `![[${path}]]`;
+      const alias = embedAlias((node.alt || '').trim(), path) || (node.title || '').trim();
+      return alias && alias !== path ? `![[${path}|${alias}]]` : `![[${path}]]`;
     },
 
     text(node, parent, state, info) {

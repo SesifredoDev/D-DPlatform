@@ -19,7 +19,7 @@ import { editorViewCtx, editorViewOptionsCtx, serializerCtx } from '@milkdown/co
 import { Selection } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
 import { insert } from '@milkdown/utils';
-import { CALENDAR_MENU_ICON, CALLOUT_MENU_ITEMS, DATE_MENU_ICON, MAP_MENU_ICON, SECRET_MENU_ICON, SECRET_TEMPLATE, TIMELINE_MENU_ICON, calloutPlugin, insertCallout } from './callout-plugin';
+import { CALENDAR_MENU_ICON, CALLOUT_MENU_ITEMS, DATE_MENU_ICON, MAP_MENU_ICON, MEDIA_MENU_ICON, SECRET_MENU_ICON, SECRET_TEMPLATE, TIMELINE_MENU_ICON, calloutPlugin, insertCallout } from './callout-plugin';
 import { ObsidianVaultService } from '../../services/ObsidianVault/obsidian-vault-service';
 import { splitFrontmatter } from '../../services/ObsidianVault/frontmatter';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
@@ -32,6 +32,8 @@ import { DateDisplay, DateHost, datePlugin, refreshDatesMeta } from './date-plug
 import { openDatePicker } from './date-picker';
 import { CalendarService, ResolvedDate } from '../../services/ObsidianVault/calendar.service';
 import { Subscription } from 'rxjs';
+import { MediaPlaybackService } from '../../services/media/media-playback.service';
+import { VaultImageService } from '../../services/ObsidianVault/vault-image.service';
 import { DiceRollService } from '../../services/dice/dice-roll.service';
 
 @Component({
@@ -91,7 +93,8 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   // Common image extensions to try when a wikilink doesn't provide one
   // This helps differentiate between a folder and a file with the same name.
-  private readonly imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+  private embedsScheduled = false;
+  private embedsPending = false;
 
   // Prevents concurrent createEditor() calls from stomping each other.
   // The editorView-not-found error happens when a second create() starts
@@ -103,6 +106,8 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     private vaultIndexService: VaultIndexService,
     private diceRolls: DiceRollService,
     private calendarService: CalendarService,
+    private mediaPlayback: MediaPlaybackService,
+    private vaultImages: VaultImageService,
     appRef: ApplicationRef,
     injector: EnvironmentInjector
   ) {
@@ -115,6 +120,11 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       openLink: link => this.onLinkClick.emit(link),
       filesAdded: () => this.filesAdded.emit(),
       linkHover: event => this.linkHover.emit(event),
+      callConnected: () => this.mediaPlayback.isCallConnected(),
+      showImageOnCall: async (src, path) => {
+        const blob = await (await fetch(src)).blob();
+        await this.mediaPlayback.showImageOnCall(blob, path.split('/').pop() || 'image');
+      },
     };
   }
 
@@ -204,6 +214,11 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     // the latest this.markdown / this.isPreview values when it finishes.
     if (this.creationLock) return;
     this.creationLock = true;
+    // Load the vault's file list up front (the session-notes panel opens before the vault view
+    // has), so `[[` and + → Image, audio or video list files the first time.
+    if (this.serverId && !this.vaultIndexService.get(this.serverId)) {
+      void this.vaultIndexService.load(this.serverId).catch(() => undefined);
+    }
 
     this.revokeObjectUrls();
     this.observer?.disconnect();
@@ -274,6 +289,15 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
                 'No maps in this vault yet. Create one with + → New map in the file list.'
               ),
             });
+            vault.addItem('media', {
+              label: 'Image, audio or video',
+              icon: MEDIA_MENU_ICON,
+              onRun: ctx => openEmbedPicker(
+                ctx.get(editorViewCtx),
+                'image,audio,video',
+                'No images, music or video in this vault yet. Add them to the vault folder.'
+              ),
+            });
 
             const callouts = builder.addGroup('callouts', 'Callouts');
             for (const item of CALLOUT_MENU_ITEMS) {
@@ -325,7 +349,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
       this.lastMarkdown = this.markdown;
 
       requestAnimationFrame(() => {
-        this.processEmbeds();
+        void this.processEmbeds();
         this.setupObserver();
       });
     } catch (e) { /* Create failed */ } finally {
@@ -380,9 +404,7 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
 
   private setupObserver() {
     this.observer = new MutationObserver(() => {
-      if (!this.processingEmbeds && !this.suppressObserver) {
-        this.processEmbeds();
-      }
+      if (!this.suppressObserver) this.scheduleEmbeds();
     });
     this.observer.observe(this.editorRef.nativeElement, {
       childList: true,
@@ -392,151 +414,71 @@ export class MilkdownEditorComponent implements AfterViewInit, OnChanges, OnDest
     });
   }
 
-  private async processEmbeds() {
-    // Find all images that need resolution.
-    // We check for our custom class, our custom protocol, or raw local paths that browsers block.
-    const allImgs = Array.from(this.editorRef.nativeElement.querySelectorAll('img:not([data-resolved])')) as HTMLImageElement[];
-    const embeds = allImgs.filter(img => {
-      const src = img.getAttribute('src') || '';
-      return (
-        img.classList.contains('wikilink-image') ||
-        src.startsWith('wikilink-blob:') ||
-        src.startsWith('file:///') ||
-        /^[a-zA-Z]:[\\/]/.test(src)
-      );
+  /** Coalesces editor changes into one image pass per frame. */
+  private scheduleEmbeds() {
+    if (this.embedsScheduled) return;
+    this.embedsScheduled = true;
+    requestAnimationFrame(() => {
+      this.embedsScheduled = false;
+      void this.processEmbeds();
     });
-
-    if (embeds.length === 0) {
-      // Only log this occasionally to avoid spam; use a counter if needed
-      return;
-    }
-
-    this.processingEmbeds = true;
-
-    try {
-      for (const img of Array.from(embeds)) {
-        let path = img.getAttribute('data-path') || '';
-        const src = img.getAttribute('src') || '';
-
-        // Extract path from various formats if data-path is missing or stripped
-        if (!path) {
-          if (src.startsWith('wikilink-blob:')) {
-            path = decodeURIComponent(src.replace('wikilink-blob:', ''));
-          } else if (src.startsWith('file:///')) {
-            path = decodeURIComponent(src.replace('file:///', ''));
-          } else if (/^[a-zA-Z]:[\\/]/.test(src)) {
-            path = src;
-          }
-        }
-
-        if (!path || path.startsWith('blob:') || path.startsWith('http')) {
-          continue;
-        }
-
-        const blob = await this.resolveBlob(path);
-
-        if (blob) {
-          if (blob.type.startsWith('image/')) {
-            const url = URL.createObjectURL(blob);
-            this.objectUrls.push(url);
-            this.suppressObserver = true;
-            img.src = url;
-            img.setAttribute('data-resolved', 'true');
-            img.style.maxWidth = '100%';
-            img.style.display = 'block';
-            img.style.margin = '1rem 0';
-            img.style.borderRadius = '4px';
-            await Promise.resolve(); // flush microtasks before re-enabling observer
-            this.suppressObserver = false;
-            this.retryTimeouts.delete(path);
-          } else {
-            img.setAttribute('data-resolved', 'not-an-image');
-          }
-        } else {
-          if (!this.retryTimeouts.has(path)) {
-            const timeout = setTimeout(() => {
-              this.retryTimeouts.delete(path);
-              this.processEmbeds();
-            }, 3000);
-            this.retryTimeouts.set(path, timeout);
-          }
-        }
-      }
-    } finally {
-      this.processingEmbeds = false;
-    }
   }
 
-  private async resolveBlob(path: string): Promise<Blob | null> {
-    if (!this.serverId) return null;
+  /**
+   * Gives `![[image]]` embeds (and local Markdown images) their picture. Lookups go through the
+   * vault index and are remembered, including misses, so this is cheap to run after every edit:
+   * a missing image is re-checked instantly, and found again once the vault is re-scanned.
+   */
+  private async processEmbeds() {
+    if (this.processingEmbeds) {
+      this.embedsPending = true;
+      return;
+    }
+    const embeds = (Array.from(this.editorRef.nativeElement.querySelectorAll('img:not([data-resolved])')) as HTMLImageElement[])
+      .filter(img => {
+        const src = img.getAttribute('src') || '';
+        return (
+          img.classList.contains('wikilink-image') ||
+          src.startsWith('wikilink-blob:') ||
+          src.startsWith('file:///') ||
+          /^[a-zA-Z]:[\\/]/.test(src)
+        );
+      });
+    if (embeds.length === 0 || !this.serverId) return;
 
-    // Normalize the path: remove hidden characters and fix slashes
-    const cleanPath = path.trim()
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .replace(/\\/g, '/');
+    this.processingEmbeds = true;
+    try {
+      const serverId = this.serverId;
+      const index = this.vaultIndexService.get(serverId) ?? await this.vaultIndexService.load(serverId).catch(() => null);
+      if (!index) return;
 
-    // Extract just the filename for the recursive search
-    const filename = cleanPath.includes('/') ? cleanPath.split('/').pop()! : cleanPath;
+      for (const img of embeds) {
+        const link = img.getAttribute('data-path') || img.getAttribute('src') || '';
+        if (!link || /^(blob:|https?:|data:)/i.test(link)) continue;
 
-    // Generate a list of candidate filenames to check.
-    // If the path doesn't have an extension, we try the raw name first, then append common image extensions.
-    const hasExtension = filename.includes('.');
-    const candidates = hasExtension
-      ? [filename]
-      : [filename, ...this.imageExtensions.map(ext => `${filename}.${ext}`)];
+        const path = this.vaultImages.resolveIn(index, link, this.currentFilePath);
+        if (!path) continue;
+        const url = await this.vaultImages.url(serverId, path);
+        if (!url || !img.isConnected || serverId !== this.serverId) continue;
 
-    console.log(`[Milkdown] Resolving embed path: "${path}". Candidates:`, candidates);
-
-    for (const candidate of candidates) {
-      // Step 1: Search through every possible directory chain (Recursive Search)
-      const absoluteVaultPath = await this.vaultService.findFileByFilename(this.serverId, candidate);
-
-      if (absoluteVaultPath) {
-        console.log(`[Milkdown] Match found via filename search: ${absoluteVaultPath}`);
-        try {
-          // Ensure we are reading a file. If the path points to a directory,
-          // readFileAsBlob should ideally return null or throw.
-          const blob = await this.vaultService.readFileAsBlob(this.serverId, absoluteVaultPath);
-          if (blob) {
-            console.log(`[Milkdown] ✓ Candidate resolved as FILE: ${absoluteVaultPath}`);
-            return blob;
-          }
-        } catch (e) {
-          console.log(`[Milkdown] ⚠ Path exists but is not a file (likely a FOLDER): ${absoluteVaultPath}`);
-        }
+        this.suppressObserver = true;
+        img.src = url;
+        img.setAttribute('data-resolved', 'true');
+        img.style.maxWidth = '100%';
+        img.style.display = 'block';
+        img.style.margin = '1rem 0';
+        img.style.borderRadius = '4px';
+        await Promise.resolve(); // flush the observer's records before listening again
+        this.suppressObserver = false;
       }
-
-      // Step 2: root-level direct path
-      // We also check the candidate at the root level in case the recursive search missed it or order matters.
-      const rootPath = hasExtension ? cleanPath : (cleanPath.endsWith('/') ? cleanPath.slice(0, -1) : cleanPath) + (candidate.includes('.') ? candidate.substring(candidate.lastIndexOf('.')) : '');
-
-      try {
-        const blob = await this.vaultService.readFileAsBlob(this.serverId, rootPath);
-        if (blob) {
-          console.log(`[Milkdown] ✓ Resolved as FILE via root path: ${rootPath}`);
-          return blob;
-        }
-      } catch (e) {
-        // Non-fatal, continue to next candidate or step
-      }
-
-      // Step 3: relative to current file
-      if (this.currentFilePath) {
-        const dir = this.currentFilePath.split('/').slice(0, -1).join('/');
-        const relativePath = this.vaultService.resolveRelativePath(dir, candidate);
-        try {
-          const blob = await this.vaultService.readFileAsBlob(this.serverId, relativePath);
-          if (blob) {
-            console.log(`[Milkdown] ✓ Resolved as FILE via relative path: ${relativePath}`);
-            return blob;
-          }
-        } catch (e) {
-          // Non-fatal
-        }
+    } finally {
+      this.suppressObserver = false;
+      this.processingEmbeds = false;
+      if (this.embedsPending) {
+        this.embedsPending = false;
+        this.scheduleEmbeds();
       }
     }
-    console.log(`[Milkdown] ✗ Could not resolve path to a file: ${cleanPath}`);
-    return null;
   }
 
   private clearRetries() {

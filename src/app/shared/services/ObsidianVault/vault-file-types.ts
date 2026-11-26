@@ -3,7 +3,7 @@
  * To support a new file type, add an entry here (and a viewer branch in the view template
  * if it needs a new `viewer`).
  */
-export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'map' | 'calendar' | 'timeline' | 'image' | 'pdf' | 'download';
+export type VaultFileViewer = 'markdown' | 'canvas' | 'database' | 'family-tree' | 'map' | 'calendar' | 'timeline' | 'image' | 'pdf' | 'media' | 'download';
 
 export interface VaultFileType {
   id: string;
@@ -123,17 +123,17 @@ export const VAULT_FILE_TYPES: readonly VaultFileType[] = [
   },
   {
     id: 'audio',
-    extensions: ['mp3', 'wav', 'ogg', 'flac', 'm4a'],
+    extensions: ['mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac', 'weba'],
     icon: 'graphic_eq',
-    viewer: 'download',
+    viewer: 'media',
     readAs: 'blob',
     editable: false,
   },
   {
     id: 'video',
-    extensions: ['mp4', 'webm', 'mov', 'avi'],
+    extensions: ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv', 'avi'],
     icon: 'movie',
-    viewer: 'download',
+    viewer: 'media',
     readAs: 'blob',
     editable: false,
   },

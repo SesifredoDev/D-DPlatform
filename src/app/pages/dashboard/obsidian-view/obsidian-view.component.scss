@@ -1543,6 +1543,58 @@
   box-shadow: var(--shadow-2);
 }
 
+.viewer-image-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+}
+
+.viewer-image-cast {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(20, 22, 28, 0.82);
+  color: #eef0f6;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+
+  &:hover:not(:disabled) {
+    background: rgba(var(--primary-rgb, 114, 137, 218), 0.85);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary, #7289da);
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.85;
+  }
+}
+
+.viewer-media {
+  width: min(960px, 100%);
+}
+
 .viewer-pdf {
   width: 100%;
   height: 100%;
@@ -1593,6 +1645,14 @@
     display: block;
     object-fit: cover;
     transition: transform 180ms ease;
+  }
+
+  .gallery-placeholder {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    color: var(--vv-text-3);
   }
 
   figcaption {

@@ -2438,7 +2438,7 @@
 }
 
 .broadcast-image-container {
-  max-width: 100%;
+  max-width: calc(100% * var(--broadcast-scale, 1));
   max-height: 100%;
   position: relative;
   display: grid;
@@ -2451,9 +2451,14 @@
 
   img {
     max-width: 100%;
-    max-height: calc(85vh - 56px);
+    max-height: calc((85vh - 56px) * var(--broadcast-scale, 1));
     display: block;
+    margin: 0 auto;
     object-fit: contain;
+  }
+
+  &.is-resizing {
+    user-select: none;
   }
 }
 

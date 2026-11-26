@@ -1,0 +1,61 @@
+<figure class="player" [class.is-video]="kind === 'video'" [class.is-embed]="mode === 'embed'" [class.is-page]="mode === 'page'">
+  @if (kind === 'video') {
+    <div class="screen">
+      @if (url && !error) {
+        <video
+          #media
+          [src]="url"
+          controls
+          playsinline
+          preload="metadata"
+          (play)="onPlay()"
+          (error)="onMediaError()"></video>
+      } @else {
+        <div class="screen-empty">
+          <mat-icon>{{ error ? 'error_outline' : 'movie' }}</mat-icon>
+          <span>{{ error || 'Loading…' }}</span>
+        </div>
+      }
+    </div>
+  }
+
+  <figcaption class="bar">
+    <span class="glyph" aria-hidden="true">
+      <mat-icon>{{ kind === 'video' ? 'movie' : 'graphic_eq' }}</mat-icon>
+    </span>
+    <span class="title" [title]="title">{{ title }}</span>
+
+    @if (kind === 'audio') {
+      @if (url && !error) {
+        <audio
+          #media
+          [src]="url"
+          controls
+          preload="metadata"
+          (play)="onPlay()"
+          (error)="onMediaError()"></audio>
+      } @else {
+        <span class="note" [class.is-error]="!!error">{{ error || 'Loading…' }}</span>
+      }
+    }
+
+    <span class="actions">
+      @if (status) {
+        <span class="note" role="status" [class.is-error]="statusIsError">{{ status }}</span>
+      }
+      <button
+        type="button"
+        class="cast"
+        [disabled]="!callConnected || !url || !!error || sendingToCall"
+        [title]="callHint"
+        (click)="playOnCall()">
+        <mat-icon>{{ sendingToCall ? 'cloud_upload' : 'cast' }}</mat-icon>
+        <span>{{ uploadProgress !== null ? 'Sending ' + uploadProgress + '%' : callLabel }}</span>
+      </button>
+    </span>
+  </figcaption>
+
+  @if (mode === 'page') {
+    <p class="hint">Keeps playing in the corner if you open another note.</p>
+  }
+</figure>

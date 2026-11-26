@@ -302,7 +302,7 @@
           #pickerSearch
           class="field"
           [(ngModel)]="pickerQuery"
-          (ngModelChange)="updatePickerImages()"
+          (ngModelChange)="onPickerQueryChange()"
           (keydown.enter)="pickerImages.length && pickPortrait(pickerImages[0])"
           placeholder="Filter images by name or folder"
           aria-label="Filter images"
@@ -323,8 +323,8 @@
             [class.is-current]="card.portrait === image.relativePath"
             [title]="image.relativePath"
             (click)="pickPortrait(image)">
-            @if (imageUrls[image.relativePath]) {
-              <img [src]="imageUrls[image.relativePath]" alt="" loading="lazy">
+            @if (thumbUrls[image.relativePath]) {
+              <img [src]="thumbUrls[image.relativePath]" alt="" loading="lazy" decoding="async">
             } @else {
               <span class="portrait-option-placeholder"><mat-icon>image</mat-icon></span>
             }

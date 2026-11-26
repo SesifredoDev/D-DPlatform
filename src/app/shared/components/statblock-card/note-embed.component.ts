@@ -3,11 +3,13 @@ import { MatIconModule } from '@angular/material/icon';
 import { ObsidianVaultService, VaultEntry } from '../../services/ObsidianVault/obsidian-vault-service';
 import { StatblockBlock, findStatblocks } from '../../services/ObsidianVault/statblock';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
+import { VaultImageService } from '../../services/ObsidianVault/vault-image.service';
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 import { StatblockCardComponent } from './statblock-card.component';
 import { VaultMapComponent } from '../vault-map/vault-map.component';
 import { VaultCalendarComponent } from '../vault-calendar/vault-calendar.component';
 import { VaultTimelineComponent } from '../vault-timeline/vault-timeline.component';
+import { VaultMediaPlayerComponent } from '../vault-media-player/vault-media-player.component';
 import type { EmbedSize } from '../milkdown-editor/embed-size';
 
 /**
@@ -18,9 +20,11 @@ import type { EmbedSize } from '../milkdown-editor/embed-size';
 @Component({
   selector: 'app-note-embed',
   standalone: true,
-  imports: [MatIconModule, StatblockCardComponent, VaultMapComponent, VaultCalendarComponent, VaultTimelineComponent],
+  imports: [MatIconModule, StatblockCardComponent, VaultMapComponent, VaultCalendarComponent, VaultTimelineComponent, VaultMediaPlayerComponent],
   template: `
-    @if (calendarContent !== null && entry) {
+    @if (isMedia && entry) {
+      <app-vault-media-player mode="embed" [serverId]="serverId" [path]="entry.relativePath" [name]="entry.name" />
+    } @else if (calendarContent !== null && entry) {
       <app-vault-calendar
         mode="embed"
         [content]="calendarContent"
@@ -116,10 +120,16 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
   /** `![[X.map#Pin]]`: the pin to centre on. */
   mapFocus: { anchor: string; token: number } | null = null;
   imageUrl = '';
+  /** `![[Theme.mp3]]` / `![[Intro.mp4]]`: a player. */
+  isMedia = false;
   loading = true;
   private loadId = 0;
 
-  constructor(private vaultService: ObsidianVaultService, private vaultIndexService: VaultIndexService) {}
+  constructor(
+    private vaultService: ObsidianVaultService,
+    private vaultIndexService: VaultIndexService,
+    private vaultImages: VaultImageService
+  ) {}
 
   get title(): string {
     return this.entry ? getVaultDisplayName(this.entry.name) : this.link.split('#')[0];
@@ -132,7 +142,6 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.loadId++;
-    if (this.imageUrl.startsWith('blob:')) URL.revokeObjectURL(this.imageUrl);
   }
 
   private async load(): Promise<void> {
@@ -147,9 +156,11 @@ export class NoteEmbedComponent implements OnChanges, OnDestroy {
       if (!this.entry) return;
 
       const type = getVaultFileType(this.entry.name);
+      this.isMedia = type.viewer === 'media';
+      if (this.isMedia) return;
       if (type.viewer === 'image') {
-        const blob = await this.vaultService.readFileAsBlob(this.serverId, this.entry.relativePath);
-        if (id === this.loadId) this.imageUrl = URL.createObjectURL(blob);
+        const url = await this.vaultImages.url(this.serverId, this.entry.relativePath);
+        if (id === this.loadId) this.imageUrl = url ?? '';
         return;
       }
       if (type.id === 'map' || type.id === 'calendar' || type.id === 'timeline') {

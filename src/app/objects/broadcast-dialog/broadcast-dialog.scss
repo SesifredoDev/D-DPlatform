@@ -296,6 +296,48 @@ mat-dialog-content.compose-mode {
     }
   }
 
+  .media-preview {
+    width: 100%;
+    color-scheme: dark;
+
+    &.is-video {
+      max-height: 240px;
+      border-radius: var(--radius-m);
+      background: #000;
+    }
+  }
+
+  .media-playback {
+    display: grid;
+    gap: 6px;
+    padding: var(--space-s) var(--space-m);
+    border-radius: var(--radius-m);
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  .media-playback-label {
+    color: var(--on-surface-muted);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .media-playback-options {
+    display: grid;
+    gap: 2px;
+
+    mat-radio-button strong {
+      display: block;
+      color: var(--on-background);
+      font-size: 13px;
+    }
+
+    mat-radio-button span {
+      display: block;
+      color: var(--on-surface-muted);
+      font-size: 12px;
+    }
+  }
+
   .empty-preview {
     min-height: 160px;
     display: flex;

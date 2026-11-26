@@ -1,3 +1,5 @@
+import type { Node as ProseMirrorNode } from '@milkdown/prose/model';
+
 /**
  * Sizes of embeds, kept in the embed's `|…` part like Obsidian:
  *   `![[map.png|300]]`        300px wide
@@ -28,4 +30,19 @@ export function formatEmbedSize(size: EmbedSize | null): string {
   if (width && height) return `${width}x${height}`;
   if (height) return `x${height}`;
   return width ? `${width}` : '';
+}
+
+/**
+ * The size kept in an embed's `|…` part, if it is one. Inline embeds keep it in the image's alt.
+ * An embed on its own line is Crepe's image block, which has no alt: the `|…` part is its
+ * caption, and Crepe reads a plain width (`|300`) as its height ratio, so that counts too.
+ */
+export function embedSizeOf(node: ProseMirrorNode): EmbedSize | null {
+  if (node.type.name === 'image-block') {
+    const fromCaption = parseEmbedSize(String(node.attrs['caption'] ?? ''));
+    if (fromCaption) return fromCaption;
+    const ratio = Number(node.attrs['ratio']);
+    return Number.isInteger(ratio) && ratio >= 2 ? { width: ratio, height: null } : null;
+  }
+  return parseEmbedSize(String(node.attrs['alt'] ?? ''));
 }

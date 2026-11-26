@@ -493,13 +493,13 @@
       </header>
 
       @if (imageSource === 'vault') {
-        <input class="panel-search" [(ngModel)]="pickerQuery" (ngModelChange)="updateImagePicker()" placeholder="Filter images" aria-label="Filter images">
+        <input class="panel-search" [(ngModel)]="pickerQuery" (ngModelChange)="onPickerQueryChange()" placeholder="Filter images" aria-label="Filter images">
         @if (pickerImages.length) {
           <div class="thumb-grid">
             @for (image of pickerImages; track image.relativePath) {
               <button type="button" (click)="pickVaultImage(image)" [title]="image.relativePath">
                 @if (thumbFor(image.relativePath); as url) {
-                  <img [src]="url" alt="" loading="lazy">
+                  <img [src]="url" alt="" loading="lazy" decoding="async">
                 } @else {
                   <mat-icon>image</mat-icon>
                 }

@@ -12,7 +12,7 @@ import { CALLOUT_ACTION_CLASS, CALLOUT_MARKER_CLASS, formatCalloutsForBroadcast,
  * Statblock cards and note embeds in the editor (see statblock-node-views.ts). They're interactive
  * GM tools (edit fields, "Add to map"), so they're left out of broadcast HTML.
  */
-const STATBLOCK_SELECTOR = '.statblock-node';
+const STATBLOCK_SELECTOR = '.statblock-node, .resizable-image-cast, .resizable-image-handle, .resizable-image-readout';
 
 /** Where a broadcast comes from: the vault and the note whose relative links should be resolved. */
 export interface VaultBroadcastContext {

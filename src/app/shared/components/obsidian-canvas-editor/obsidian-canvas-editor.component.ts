@@ -29,6 +29,8 @@ import {
   ObsidianVaultService,
   type VaultEntry,
 } from '../../services/ObsidianVault/obsidian-vault-service';
+import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
+import { VaultImageService } from '../../services/ObsidianVault/vault-image.service';
 
 type CanvasNodeField = 'text' | 'file' | 'subpath' | 'url' | 'label' | 'color';
 type CanvasNodeNumberField = 'x' | 'y' | 'width' | 'height';
@@ -175,6 +177,8 @@ export class ObsidianCanvasEditorComponent implements AfterViewInit, OnChanges, 
 
   constructor(
     private readonly obsidianVaultService: ObsidianVaultService,
+    private readonly vaultIndexService: VaultIndexService,
+    private readonly vaultImages: VaultImageService,
     private readonly sanitizer: DomSanitizer,
     private readonly changeDetectorRef: ChangeDetectorRef
   ) {}
@@ -2773,6 +2777,19 @@ export class ObsidianCanvasEditorComponent implements AfterViewInit, OnChanges, 
   ): Promise<string | null> {
     const cleanPath = this.cleanVaultPath(filePath);
     if (!this.serverId || !cleanPath || this.isExternalUrl(cleanPath)) return null;
+
+    // The vault index answers from memory; probing the disk is only the fallback when it isn't loaded.
+    const index = this.vaultIndexService.get(this.serverId)
+      ?? await this.vaultIndexService.load(this.serverId).catch(() => null);
+    if (index) {
+      const source = this.cleanVaultPath(sourceFilePath);
+      if (preferImage) {
+        const image = this.vaultImages.resolveIn(index, cleanPath, source);
+        if (image) return image;
+      }
+      const entry = index.resolveFile(cleanPath, source) ?? index.resolveLink(cleanPath, source);
+      return entry?.kind === 'file' ? entry.relativePath : null;
+    }
 
     const candidates = this.getPathCandidates(cleanPath, preferImage);
     const sourceDir = this.cleanVaultPath(sourceFilePath).split('/').slice(0, -1).join('/');

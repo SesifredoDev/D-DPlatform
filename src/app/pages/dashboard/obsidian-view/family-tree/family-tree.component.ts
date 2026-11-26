@@ -35,6 +35,7 @@ import {
   serializeFamilyTree,
   updatePerson,
 } from '../../../../shared/services/ObsidianVault/family-tree';
+import { VaultImageService } from '../../../../shared/services/ObsidianVault/vault-image.service';
 
 type RelativeKind = 'parent' | 'spouse' | 'child';
 
@@ -126,16 +127,24 @@ export class FamilyTreeComponent implements OnChanges, OnDestroy {
   isPickingPortrait = false;
   pickerQuery = '';
   pickerImages: VaultEntry[] = [];
+  /** Small previews for the portrait picker. */
+  thumbUrls: Record<string, string> = {};
+  private pickerQueryTimer?: ReturnType<typeof setTimeout>;
   pickerTotal = 0;
   private readonly loadingImages = new Set<string>();
   /** First image of each linked note, keyed by note path, with the note's modified time it was read at. */
   private readonly noteImages = new Map<string, { modified: number | null; image: string | null }>();
   private readonly loadingNotes = new Set<string>();
 
-  constructor(private snackBar: MatSnackBar, private vaultService: ObsidianVaultService) {}
+  constructor(
+    private snackBar: MatSnackBar,
+    private vaultService: ObsidianVaultService,
+    private vaultImages: VaultImageService
+  ) {}
 
   ngOnDestroy(): void {
     Object.values(this.imageUrls).forEach(url => url.startsWith('blob:') && URL.revokeObjectURL(url));
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -310,8 +319,27 @@ export class FamilyTreeComponent implements OnChanges, OnDestroy {
         Number(near.has(b.parentPath)) - Number(near.has(a.parentPath)) || a.relativePath.localeCompare(b.relativePath));
     this.pickerTotal = images.length;
     this.pickerImages = images.slice(0, PICKER_LIMIT);
-    this.pickerImages.forEach(image => this.loadImage(image.relativePath));
+    this.pickerImages.forEach(image => this.loadThumb(image.relativePath));
   }
+
+  /** Picker thumbnails: small cached previews, not the full images (see VaultImageService). */
+  private loadThumb(path: string): void {
+    if (this.thumbUrls[path] !== undefined || !this.serverId) return;
+    const serverId = this.serverId;
+    void this.vaultImages.thumbnail(serverId, path).then(url => {
+      if (serverId === this.serverId) this.thumbUrls = { ...this.thumbUrls, [path]: url ?? '' };
+    });
+  }
+
+  /** The filter waits for a pause in typing, so each letter doesn't rebuild the grid. */
+  onPickerQueryChange(): void {
+    if (this.pickerQueryTimer) clearTimeout(this.pickerQueryTimer);
+    this.pickerQueryTimer = setTimeout(() => {
+      this.pickerQueryTimer = undefined;
+      this.updatePickerImages();
+    }, 150);
+  }
+
 
   pickPortrait(image: VaultEntry): void {
     const card = this.selected;

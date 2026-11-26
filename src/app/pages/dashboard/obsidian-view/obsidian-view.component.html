@@ -994,12 +994,17 @@
                   @for (image of selectedFolderImages; track image.relativePath) {
                     <figure class="gallery-item">
                       <button type="button" (click)="openGalleryImage(image.relativePath)" [attr.aria-label]="'Open ' + image.name">
-                        <img
-                          [src]="image.url"
-                          [alt]="image.name"
-                          [attr.data-path]="image.relativePath"
-                          loading="lazy"
-                          (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+                        @if (image.url) {
+                          <img
+                            [src]="image.url"
+                            [alt]="image.name"
+                            [attr.data-path]="image.relativePath"
+                            loading="lazy"
+                            decoding="async"
+                            (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+                        } @else {
+                          <span class="gallery-placeholder" aria-hidden="true"><mat-icon>image</mat-icon></span>
+                        }
                       </button>
                       <figcaption>{{ getDisplayName(image.name) }}</figcaption>
                     </figure>
@@ -1112,14 +1117,34 @@
           } @else {
             <div class="viewer">
               @if (isImage) {
-                <img
-                  [src]="nonMarkdownUrl"
-                  class="viewer-image"
-                  [alt]="selectedFileName"
-                  [attr.data-path]="selectedFileRelativePath"
-                  (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+                <div class="viewer-image-wrap">
+                  <img
+                    [src]="nonMarkdownUrl"
+                    class="viewer-image"
+                    [alt]="selectedFileName"
+                    [attr.data-path]="selectedFileRelativePath"
+                    (contextmenu)="onImageContextMenu($event, imageMenuTrigger)">
+                  @if (callConnected) {
+                    <button
+                      type="button"
+                      class="viewer-image-cast"
+                      [disabled]="showingImageOnCall"
+                      title="Show this image to everyone on the call"
+                      (click)="showOpenImageOnCall()">
+                      <mat-icon>{{ showingImageOnCall ? 'cloud_upload' : 'cast' }}</mat-icon>
+                      <span>{{ showingImageOnCall ? 'Sending…' : 'Show on call' }}</span>
+                    </button>
+                  }
+                </div>
               } @else if (isPdf) {
                 <embed [src]="nonMarkdownUrl" type="application/pdf" class="viewer-pdf">
+              } @else if (isMedia) {
+                <app-vault-media-player
+                  class="viewer-media"
+                  mode="page"
+                  [serverId]="serverId"
+                  [path]="selectedFileRelativePath"
+                  [name]="selectedFileName" />
               } @else {
                 <div class="state-card is-centered">
                   <span class="state-icon"><mat-icon>{{ getFileIcon(selectedFileName) }}</mat-icon></span>
@@ -1216,9 +1241,13 @@
           #imageMenuTrigger="matMenuTrigger">
         </div>
         <mat-menu #imageMenu="matMenu" panelClass="custom-glass-menu">
+          <button mat-menu-item [disabled]="!callConnected" (click)="showContextImageOnCall()">
+            <mat-icon>cast</mat-icon>
+            <span>{{ callConnected ? 'Show on call' : 'Show on call (join a call first)' }}</span>
+          </button>
           <button mat-menu-item (click)="broadcastContextImage()">
             <mat-icon>broadcast_on_home</mat-icon>
-            <span>Broadcast image</span>
+            <span>Broadcast image…</span>
           </button>
         </mat-menu>
       </section>

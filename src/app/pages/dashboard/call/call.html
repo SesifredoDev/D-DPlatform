@@ -1148,7 +1148,8 @@
           [editorMarkdown]="selectedSessionNoteContent"
           [serverId]="getSessionNotesServerId()"
           [currentFilePath]="selectedSessionNotePath"
-          (markdownChange)="onSessionNoteContentChange($event)">
+          (markdownChange)="onSessionNoteContentChange($event)"
+          (onLinkClick)="openSessionNoteLink($event)">
         </app-milkdown-editor>
       </div>
 
@@ -1223,8 +1224,19 @@
   </div>
 
   <!-- BROADCAST OVERLAY -->
-  <div class="broadcast-overlay" *ngIf="activeOverlayImage || activeOverlayText">
-    <div class="broadcast-image-container glass call-overlay-content" *ngIf="activeOverlayImage">
+  <div class="broadcast-overlay" *ngIf="activeOverlayImage || activeOverlayText || activeOverlayVideo">
+    @if (activeOverlayVideo) {
+      <app-call-video-overlay
+        [state]="activeOverlayVideo"
+        [isController]="isOverlayVideoController"
+        (dismiss)="hideOverlayVideo()"
+        (stop)="stopOverlayVideoForEveryone()" />
+    }
+    <div
+      class="broadcast-image-container glass call-overlay-content"
+      *ngIf="activeOverlayImage"
+      [class.is-resizing]="broadcastImageScale.resizing"
+      [style.--broadcast-scale]="broadcastImageScale.value">
       <div class="broadcast-overlay-toolbar">
         <div class="broadcast-note-actions">
           <button
@@ -1247,12 +1259,14 @@
           </button>
         </div>
         <span class="broadcast-note-status" *ngIf="broadcastOverlayNoteStatus">{{ broadcastOverlayNoteStatus }}</span>
+        <app-broadcast-scale-controls [scale]="broadcastImageScale" label="Image" />
         <button class="btn-dismiss" (click)="dismissOverlay()" aria-label="Dismiss broadcast">
           <mat-icon>close</mat-icon>
           <span>Dismiss</span>
         </button>
       </div>
       <img [src]="activeOverlayImage" alt="Broadcast Image">
+      <app-broadcast-resize-handle [scale]="broadcastImageScale" label="Image" />
     </div>
 
     <div class="broadcast-markdown-container glass call-overlay-content" *ngIf="activeOverlayText">

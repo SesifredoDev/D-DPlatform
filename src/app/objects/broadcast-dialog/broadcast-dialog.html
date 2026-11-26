@@ -31,10 +31,10 @@
         type="file"
         hidden
         (change)="onComposerFileSelected($event)">
-      <mat-icon>{{ hasFile ? (selectedFileIsImage ? 'image' : (selectedFileIsAudio ? 'audiotrack' : 'attach_file')) : 'upload_file' }}</mat-icon>
+      <mat-icon>{{ hasFile ? (selectedFileIsImage ? 'image' : (selectedFileIsAudio ? 'audiotrack' : (selectedFileIsVideo ? 'movie' : 'attach_file'))) : 'upload_file' }}</mat-icon>
       <div class="file-drop-copy">
         <strong>{{ selectedFilename || 'Add an attachment' }}</strong>
-        <span>{{ selectedFilename ? selectedFileContentType : 'Optional image or document' }}</span>
+        <span>{{ selectedFilename ? selectedFileContentType : 'Optional image, music, video or document' }}</span>
       </div>
       <button mat-stroked-button type="button" [disabled]="uploading" (click)="$event.stopPropagation(); broadcastFileInput.click()">
         <mat-icon>{{ hasFile ? 'sync' : 'upload' }}</mat-icon>
@@ -57,11 +57,31 @@
     <ng-container *ngIf="hasFile || hasImageUrl">
       <img *ngIf="imagePreview && selectedFileIsImage" [src]="imagePreview" alt="Preview" class="image-preview">
       <div class="file-preview" *ngIf="hasFile && !selectedFileIsImage">
-        <mat-icon>{{ selectedFileIsAudio ? 'audiotrack' : 'description' }}</mat-icon>
+        <mat-icon>{{ selectedFileIsAudio ? 'audiotrack' : (selectedFileIsVideo ? 'movie' : 'description') }}</mat-icon>
         <div>
           <strong>{{ selectedFilename }}</strong>
           <span>{{ selectedFileContentType }}</span>
         </div>
+      </div>
+      <audio *ngIf="selectedFileIsAudio && mediaPreviewUrl" class="media-preview" [src]="mediaPreviewUrl" controls preload="metadata"></audio>
+      <video *ngIf="selectedFileIsVideo && mediaPreviewUrl" class="media-preview is-video" [src]="mediaPreviewUrl" controls playsinline preload="metadata"></video>
+
+      <div class="media-playback" *ngIf="selectedMediaKind">
+        <span class="media-playback-label">Play it</span>
+        <mat-radio-group class="media-playback-options" aria-label="Play it" [(ngModel)]="mediaPlayback" [disabled]="uploading">
+          <mat-radio-button value="none">
+            <strong>Don't play</strong>
+            <span>Just send the file.</span>
+          </mat-radio-button>
+          <mat-radio-button value="local">
+            <strong>Just for me</strong>
+            <span>Plays here, in the corner player.</span>
+          </mat-radio-button>
+          <mat-radio-button value="call" [disabled]="!isCallActive">
+            <strong>{{ mediaCallTitle }}</strong>
+            <span>{{ mediaCallDescription }}</span>
+          </mat-radio-button>
+        </mat-radio-group>
       </div>
     </ng-container>
     <ng-container *ngIf="hasHtml && !hasFile && !hasImageUrl">
@@ -211,8 +231,8 @@
   </div>
   <button mat-button mat-dialog-close>Cancel</button>
   <button mat-raised-button color="primary" [disabled]="!canBroadcast() || uploading" (click)="broadcast()">
-    <mat-icon *ngIf="!uploading">send</mat-icon>
-    <span *ngIf="!uploading">Broadcast</span>
+    <mat-icon *ngIf="!uploading">{{ isLocalPlaybackOnly ? 'play_arrow' : 'send' }}</mat-icon>
+    <span *ngIf="!uploading">{{ isLocalPlaybackOnly ? 'Play' : 'Broadcast' }}</span>
     <mat-spinner diameter="20" *ngIf="uploading && uploadProgress === 0"></mat-spinner>
     <span *ngIf="uploading && uploadProgress > 0">Uploading...</span>
   </button>

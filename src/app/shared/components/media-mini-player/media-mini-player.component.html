@@ -1,0 +1,56 @@
+@if (media.local(); as item) {
+  <section class="mini" [class.is-video]="item.kind === 'video'" aria-label="Now playing">
+    @if (item.kind === 'video') {
+      <!-- Tracked by id so a new file gets a new element (and starts from its own time). -->
+      @for (key of [item.id]; track key) {
+        <video
+          #player
+          class="screen"
+          [src]="item.url"
+          controls
+          playsinline
+          (loadedmetadata)="onLoaded(item)"
+          (play)="onPlay()"></video>
+      }
+    }
+
+    <div class="head">
+      <mat-icon class="glyph" aria-hidden="true">{{ item.kind === 'video' ? 'movie' : 'graphic_eq' }}</mat-icon>
+      <div class="label">
+        <span class="title" [title]="item.name">{{ item.name }}</span>
+        <span class="where" [class.is-error]="statusIsError" role="status">{{ status || 'Playing just for you' }}</span>
+      </div>
+      @if (callConnected && item.file) {
+        <button
+          type="button"
+          class="icon-btn"
+          [disabled]="sendingToCall"
+          [title]="uploadLabel() || media.callActionLabel(item.kind)"
+          [attr.aria-label]="media.callActionLabel(item.kind)"
+          (click)="playOnCall(item)">
+          <mat-icon>{{ sendingToCall ? 'cloud_upload' : 'cast' }}</mat-icon>
+        </button>
+      }
+      <button type="button" class="icon-btn" title="Stop" aria-label="Stop and close" (click)="close()">
+        <mat-icon>close</mat-icon>
+      </button>
+    </div>
+
+    @if (item.kind === 'audio') {
+      @for (key of [item.id]; track key) {
+        <audio
+          #player
+          [src]="item.url"
+          controls
+          (loadedmetadata)="onLoaded(item)"
+          (play)="onPlay()"></audio>
+      }
+    }
+
+    @if (uploadLabel(); as label) {
+      <div class="progress" role="progressbar" [attr.aria-valuenow]="media.sending()?.progress" aria-valuemin="0" aria-valuemax="100">
+        <span [style.width.%]="media.sending()?.progress"></span>
+      </div>
+    }
+  </section>
+}

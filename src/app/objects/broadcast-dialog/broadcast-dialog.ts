@@ -20,13 +20,15 @@ import { VttSync } from '../../shared/services/vttsync/vttsync';
 import { FileService } from '../../shared/services/file/file';
 import { UserService } from '../../shared/services/user/user';
 import { AuthService } from '../../shared/services/auth/auth';
-import { SoundCloudService } from '../../shared/services/playlist/soundcloud.service';
+import { MediaKind, MediaPlaybackService, mediaKindOf } from '../../shared/services/media/media-playback.service';
 import { ObsidianVaultService } from '../../shared/services/ObsidianVault/obsidian-vault-service';
 import { DomSanitizer, SafeHtml, SafeUrl } from '@angular/platform-browser';
 import type { BroadcastData, BroadcastEmbeddedFile, UploadedBroadcastAsset, BroadcastProcessingContext } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
 export type { BroadcastData, BroadcastEmbeddedFile } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
 
 type BroadcastNoteAction = 'none' | 'current' | 'new';
+/** What to do with an attached audio or video file. */
+type MediaPlaybackChoice = 'none' | 'local' | 'call';
 
 @Component({
   selector: 'app-broadcast-dialog',
@@ -57,6 +59,11 @@ export class BroadcastDialog implements OnInit {
   selectedFileContentType: string | null = null;
   selectedFileIsImage: boolean = false;
   selectedFileIsAudio: boolean = false;
+  selectedFileIsVideo: boolean = false;
+  /** Object URL for previewing an attached audio or video file. */
+  mediaPreviewUrl: SafeUrl | null = null;
+  private mediaPreviewObjectUrl: string | null = null;
+  mediaPlayback: MediaPlaybackChoice = 'none';
 
   textChannels: IChannel[] = [];
   selectedChannels: string[] = [];
@@ -101,11 +108,12 @@ export class BroadcastDialog implements OnInit {
     private fileService: FileService,
     private userService: UserService,
     private authService: AuthService,
-    private soundCloudService: SoundCloudService,
+    private mediaPlaybackService: MediaPlaybackService,
     private obsidianVaultService: ObsidianVaultService,
     private sanitizer: DomSanitizer
   ) {
     this.isComposerMode = !!data.composeMode;
+    this.dialogRef.afterClosed().subscribe(() => this.releaseMediaPreview());
     this.currentUserId = this.authService.getCurrentUserId();
 
     if (data.file) {
@@ -142,12 +150,39 @@ export class BroadcastDialog implements OnInit {
     return this.hasText || this.hasHtml || this.hasImageContentForVtt;
   }
 
-  get hasAudioContentForCall(): boolean {
-    return this.hasFile && this.selectedFileIsAudio;
+  /** The attached file is music or video (it can be played as well as sent). */
+  get selectedMediaKind(): MediaKind | null {
+    if (!this.hasFile) return null;
+    return this.selectedFileIsVideo ? 'video' : this.selectedFileIsAudio ? 'audio' : null;
   }
 
   get hasCallBroadcastContent(): boolean {
-    return this.hasCallOverlayContent || this.hasAudioContentForCall;
+    return this.hasCallOverlayContent;
+  }
+
+  get mediaCallTitle(): string {
+    if (this.selectedMediaKind === 'audio' && !this.canControlCallAudioPlayback) return 'Request it on the call';
+    return 'Play it on the call';
+  }
+
+  get mediaCallDescription(): string {
+    if (!this.isCallActive) return 'Join a call to play this for everyone.';
+    if (this.selectedMediaKind === 'video') return 'Everyone on the call watches it together. You control play, pause and seeking.';
+    return this.canControlCallAudioPlayback
+      ? 'Plays through the call’s music player for everyone.'
+      : 'Sends it to the DM’s music requests.';
+  }
+
+  /** Only "play just for me" is chosen: nothing is sent anywhere. */
+  get isLocalPlaybackOnly(): boolean {
+    return this.mediaPlayback === 'local' &&
+      !this.broadcastToCall &&
+      !this.broadcastToVtt &&
+      !this.setTemporaryAtmosphereBackground &&
+      !this.setVttBackground &&
+      this.selectedChannels.length === 0 &&
+      this.selectedMembers.length === 0 &&
+      !this.canAddToBroadcastNotes;
   }
 
   get canControlCallAudioPlayback(): boolean {
@@ -155,26 +190,10 @@ export class BroadcastDialog implements OnInit {
   }
 
   get callBroadcastTitle(): string {
-    if (this.hasAudioContentForCall && !this.hasCallOverlayContent) {
-      return this.canControlCallAudioPlayback ? 'Play Audio in Call' : 'Request Audio in Call';
-    }
-
     return 'Broadcast to Call';
   }
 
   get callBroadcastDescription(): string {
-    if (this.hasAudioContentForCall && !this.hasCallOverlayContent) {
-      return this.canControlCallAudioPlayback
-        ? 'Play this audio through the shared player for everyone in the active video call.'
-        : 'Send this audio to the DM requests queue instead of taking over playback.';
-    }
-
-    if (this.hasAudioContentForCall) {
-      return this.canControlCallAudioPlayback
-        ? 'Display call content and play the audio through the shared player.'
-        : 'Display call content and send the audio to the DM requests queue.';
-    }
-
     return 'Display this content on everyone\'s screen in the active video call.';
   }
 
@@ -229,7 +248,10 @@ export class BroadcastDialog implements OnInit {
     const canSetVttBackground = this.canSetVttBackground && this.setVttBackground;
     const canBroadcastToTextChannels = this.hasContent && this.selectedChannels.length > 0;
     const canBroadcastToWhispers = this.hasContent && this.selectedMembers.length > 0;
+    const canPlayMedia = !!this.selectedMediaKind &&
+      (this.mediaPlayback === 'local' || (this.mediaPlayback === 'call' && this.isCallActive));
     return canBroadcastToCall ||
+      canPlayMedia ||
       canBroadcastToVtt ||
       canSetTemporaryAtmosphere ||
       canSetVttBackground ||
@@ -286,6 +308,9 @@ export class BroadcastDialog implements OnInit {
     this.selectedFileContentType = null;
     this.selectedFileIsImage = false;
     this.selectedFileIsAudio = false;
+    this.selectedFileIsVideo = false;
+    this.mediaPlayback = 'none';
+    this.releaseMediaPreview();
     this.imagePreview = null;
     const hasRemainingImageContent = this.hasImageContentForVtt;
     this.broadcastToVtt = hasRemainingImageContent && this.broadcastToVtt;
@@ -295,6 +320,14 @@ export class BroadcastDialog implements OnInit {
 
   async broadcast() {
     console.log('[BroadcastDialog] Starting broadcast', { data: this.data });
+    const mediaKind = this.selectedMediaKind;
+    if (mediaKind && this.data.file && this.mediaPlayback === 'local') {
+      this.mediaPlaybackService.playLocal(this.data.file, this.data.file.name, mediaKind);
+      if (this.isLocalPlaybackOnly) {
+        this.dialogRef.close();
+        return;
+      }
+    }
     this.uploading = true;
     this.uploadProgress = 0;
     try {
@@ -311,8 +344,8 @@ export class BroadcastDialog implements OnInit {
         if (this.isImageContentType(uploaded.contentType)) {
           context.standaloneImageForCallVtt = uploaded.url;
         }
-        if (this.isAudioAsset(uploaded)) {
-          context.audioForCall = uploaded;
+        if (mediaKind) {
+          context.mediaForCall = uploaded;
         }
         this.addAttachment(context, uploaded);
         const uploadedMarkdown = this.formatUploadedAssetForMessage(uploaded);
@@ -372,12 +405,15 @@ export class BroadcastDialog implements OnInit {
       }
 
       // 5. Call Broadcast
-      if (this.broadcastToCall && this.isCallActive) {
-        if (context.audioForCall) {
-          console.log('[BroadcastDialog] Broadcasting call audio');
-          await this.broadcastCallAudio(context.audioForCall);
-        }
+      if (mediaKind && context.mediaForCall && this.mediaPlayback === 'call' && this.isCallActive) {
+        console.log('[BroadcastDialog] Playing media on the call');
+        await this.mediaPlaybackService.playUploadedOnCall(
+          { url: context.mediaForCall.url, filename: context.mediaForCall.filename || this.data.filename || 'Broadcast media' },
+          mediaKind
+        );
+      }
 
+      if (this.broadcastToCall && this.isCallActive) {
         if (context.textForCall) {
           console.log('[BroadcastDialog] Broadcasting overlay text');
           await this.videoService.broadcastOverlayText(context.textForCall);
@@ -821,6 +857,14 @@ export class BroadcastDialog implements OnInit {
     this.selectedFileContentType = file.type || 'unknown file type';
     this.selectedFileIsImage = file.type.startsWith('image/');
     this.selectedFileIsAudio = this.isAudioFile(file);
+    this.selectedFileIsVideo = !this.selectedFileIsAudio && mediaKindOf(file.name, file.type) === 'video';
+    this.releaseMediaPreview();
+    if (this.selectedFileIsAudio || this.selectedFileIsVideo) {
+      this.mediaPreviewObjectUrl = URL.createObjectURL(file);
+      this.mediaPreviewUrl = this.sanitizer.bypassSecurityTrustUrl(this.mediaPreviewObjectUrl);
+    } else {
+      this.mediaPlayback = 'none';
+    }
 
     if (!this.selectedFileIsImage) {
       this.imagePreview = null;
@@ -868,42 +912,14 @@ export class BroadcastDialog implements OnInit {
     return !!contentType && contentType.startsWith('image/');
   }
 
-  private isAudioContentType(contentType: string | null | undefined): boolean {
-    return !!contentType && contentType.startsWith('audio/');
-  }
-
   private isAudioFile(file: File): boolean {
-    return this.isAudioContentType(file.type) || this.isAudioFilename(file.name);
+    return mediaKindOf(file.name, file.type) === 'audio';
   }
 
-  private isAudioAsset(asset: UploadedBroadcastAsset): boolean {
-    return this.isAudioContentType(asset.contentType) || this.isAudioFilename(asset.filename);
-  }
-
-  private isAudioFilename(filename: string | null | undefined): boolean {
-    return !!filename && /\.(aac|aiff?|flac|m4a|mp3|oga|ogg|opus|wav|webm)$/i.test(filename);
-  }
-
-  private async broadcastCallAudio(asset: UploadedBroadcastAsset) {
-    const metadata = this.createBroadcastAudioMetadata(asset);
-    if (this.canControlCallAudioPlayback) {
-      await this.soundCloudService.play(asset.url, 0, false, undefined, metadata);
-      return;
-    }
-
-    await this.videoService.sendSoundCloudRequest(metadata, this.currentUserName);
-  }
-
-  private createBroadcastAudioMetadata(asset: UploadedBroadcastAsset) {
-    return {
-      id: asset.url,
-      uri: asset.url,
-      name: asset.filename || this.data.filename || 'Broadcast audio',
-      artist: 'Broadcast audio',
-      owner: 'Broadcast audio',
-      image: '',
-      type: 'track' as const
-    };
+  private releaseMediaPreview() {
+    if (this.mediaPreviewObjectUrl) URL.revokeObjectURL(this.mediaPreviewObjectUrl);
+    this.mediaPreviewObjectUrl = null;
+    this.mediaPreviewUrl = null;
   }
 
   private hasEmbeddedImageContent(): boolean {

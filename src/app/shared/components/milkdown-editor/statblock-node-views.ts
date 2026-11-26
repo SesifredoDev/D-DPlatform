@@ -6,7 +6,7 @@ import { createTimer, type Ctx } from '@milkdown/ctx';
 import { Subscription } from 'rxjs';
 import { blockKindOf, blockLanguage, isStatblockLanguage } from '../../services/ObsidianVault/statblock';
 import { getFileExtension, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
-import { EmbedSize, formatEmbedSize, parseEmbedSize } from './embed-size';
+import { EmbedSize, embedSizeOf, formatEmbedSize } from './embed-size';
 import { NoteEmbedComponent } from '../statblock-card/note-embed.component';
 import { StatblockCardComponent } from '../statblock-card/statblock-card.component';
 
@@ -21,6 +21,10 @@ export interface StatblockViewHost {
   filesAdded(): void;
   /** A link inside an embed (e.g. a map pin) is hovered: show the usual link preview. */
   linkHover(event: { target: string; rect: DOMRect } | null): void;
+  /** In a call: images get a "Show on call" button. */
+  callConnected(): boolean;
+  /** Shows an image (its loaded `src`, and vault path for the name) to everyone on the call. */
+  showImageOnCall(src: string, path: string): Promise<void>;
 }
 
 type GetPos = () => number | undefined;
@@ -91,14 +95,20 @@ export function noteEmbedTarget(node: ProseMirrorNode): string | null {
   // Images, PDFs and other known types keep the image view; notes (and names with dots, like
   // "Mr. Smith") and maps get the embed card.
   const extension = getFileExtension(path);
-  return !extension || ['md', 'map', 'calendar', 'timeline'].includes(extension) || getVaultFileType(path).id === 'file' ? target : null;
+  const type = getVaultFileType(path);
+  return !extension || ['md', 'map', 'calendar', 'timeline'].includes(extension) || type.id === 'file' || type.viewer === 'media'
+    ? target
+    : null;
 }
 
 function embedView(host: StatblockViewHost, fallback?: NodeViewConstructor): NodeViewConstructor {
   return (node, view, getPos, decorations, innerDecorations) => {
     const target = noteEmbedTarget(node);
     if (target !== null) return new NoteEmbedView(node, view, getPos as GetPos, target, host);
-    if (node.type.name === 'image' && vaultImagePath(node)) return new ResizableImageView(node, view, getPos as GetPos, host);
+    // Vault images, inline or on their own line (Crepe's image block), get the px-width resizer.
+    if ((node.type.name === 'image' || node.type.name === 'image-block') && vaultImagePath(node)) {
+      return new ResizableImageView(node, view, getPos as GetPos, host);
+    }
     if (fallback) return fallback(node, view, getPos, decorations, innerDecorations);
     // No editor view registered for this node: render it the way its schema does.
     const spec = node.type.spec.toDOM?.(node);
@@ -220,7 +230,7 @@ class NoteEmbedView extends AngularNodeView<NoteEmbedComponent> {
     if (node.type !== this.node.type) return false;
     const target = noteEmbedTarget(node);
     if (target === null) return false;
-    const sizeChanged = node.attrs['alt'] !== this.node.attrs['alt'];
+    const sizeChanged = formatEmbedSize(embedSizeOf(node)) !== formatEmbedSize(embedSizeOf(this.node));
     this.node = node;
     if (target !== this.target) {
       this.target = target;
@@ -231,16 +241,19 @@ class NoteEmbedView extends AngularNodeView<NoteEmbedComponent> {
   }
 }
 
-/** The size kept in an embed's `|…` part (the image node's alt), if it is one. */
-function embedSizeOf(node: ProseMirrorNode): EmbedSize | null {
-  return parseEmbedSize(String(node.attrs['alt'] ?? ''));
-}
-
 /** Writes a size into the embed's `|…` part (saved as `![[x|300]]`); null removes it. */
 function setEmbedSize(view: EditorView, getPos: GetPos, size: EmbedSize | null): void {
   const pos = getPos();
   if (typeof pos !== 'number' || !view.editable) return;
-  view.dispatch(view.state.tr.setNodeAttribute(pos, 'alt', formatEmbedSize(size)));
+  const node = view.state.doc.nodeAt(pos);
+  if (!node) return;
+  const text = formatEmbedSize(size);
+  const tr = node.type.name === 'image-block'
+    // Ratio back to 1 so Crepe's own height scaling stays out of it.
+    ? view.state.tr.setNodeAttribute(pos, 'caption', text).setNodeAttribute(pos, 'ratio', 1)
+    // The title also carries the `|…` part (see the wikilink plugin); keep it in step.
+    : view.state.tr.setNodeAttribute(pos, 'alt', text).setNodeAttribute(pos, 'title', text);
+  view.dispatch(tr);
 }
 
 /** The vault path of an `![[image]]` embed (or a local Markdown image); null for web images. */
@@ -261,12 +274,14 @@ class ResizableImageView implements NodeView {
   private img: HTMLImageElement;
   private handle: HTMLElement;
   private readout: HTMLElement;
+  private cast: HTMLButtonElement;
   private drag: { id: number; startX: number; width: number; max: number } | null = null;
   private liveWidth: number | null = null;
 
   constructor(private node: ProseMirrorNode, private view: EditorView, private getPos: GetPos, private host: StatblockViewHost) {
-    this.dom = document.createElement('span');
-    this.dom.className = 'resizable-image';
+    const isBlock = node.type.name === 'image-block';
+    this.dom = document.createElement(isBlock ? 'div' : 'span');
+    this.dom.className = isBlock ? 'resizable-image is-block' : 'resizable-image';
     this.dom.contentEditable = 'false';
 
     this.img = document.createElement('img');
@@ -285,8 +300,19 @@ class ResizableImageView implements NodeView {
     this.readout = document.createElement('span');
     this.readout.className = 'resizable-image-readout';
 
-    this.dom.append(this.img);
+    // "Show on call", shown on hover while in a call.
+    this.cast = document.createElement('button');
+    this.cast.type = 'button';
+    this.cast.className = 'resizable-image-cast';
+    this.cast.innerHTML = '<span class="material-icons" aria-hidden="true">cast</span><span class="resizable-image-cast-label">Show on call</span>';
+    this.cast.title = 'Show this image to everyone on the call';
+    this.cast.addEventListener('mousedown', event => event.preventDefault());
+    this.cast.addEventListener('click', this.onCast);
+    this.dom.addEventListener('mouseenter', this.refreshCast);
+
+    this.dom.append(this.img, this.cast);
     if (!host.readonly() && view.editable) this.dom.append(this.handle, this.readout);
+    this.refreshCast();
 
     this.handle.addEventListener('pointerdown', this.onPointerDown);
     this.handle.addEventListener('pointermove', this.onPointerMove);
@@ -321,10 +347,37 @@ class ResizableImageView implements NodeView {
     this.dom.classList.remove('ProseMirror-selectednode');
   }
 
-  /** The handle is ours; everything else (selecting, deleting the image) is the editor's. */
+  /** The handle and cast button are ours; everything else (selecting, deleting the image) is the editor's. */
   stopEvent(event: Event): boolean {
-    return event.target instanceof Node && this.handle.contains(event.target);
+    return event.target instanceof Node && (this.handle.contains(event.target) || this.cast.contains(event.target));
   }
+
+  private readonly refreshCast = () => {
+    this.cast.hidden = !this.host.callConnected();
+  };
+
+  private readonly onCast = async (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const src = this.img.getAttribute('src') || '';
+    if (!src || this.cast.disabled) return;
+    const label = this.cast.querySelector('.resizable-image-cast-label');
+    const setLabel = (text: string) => { if (label) label.textContent = text; };
+    this.cast.disabled = true;
+    setLabel('Sending…');
+    try {
+      await this.host.showImageOnCall(src, vaultImagePath(this.node) ?? 'image');
+      setLabel('On the call');
+    } catch (error) {
+      console.warn('[ImageEmbed] Show on call failed', error);
+      setLabel('Couldn’t send');
+    } finally {
+      setTimeout(() => {
+        this.cast.disabled = false;
+        setLabel('Show on call');
+      }, 2500);
+    }
+  };
 
   /** The editor swaps the image's src once it has loaded it from the vault. */
   ignoreMutation(): boolean {
