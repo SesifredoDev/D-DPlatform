@@ -1297,7 +1297,13 @@
           <span>Dismiss</span>
         </button>
       </div>
-      <markdown [data]="activeOverlayText"></markdown>
+      @for (part of overlayContentParts; track $index) {
+        @if (part.kind === 'map') {
+          <app-vault-map class="broadcast-map" mode="player" [content]="part.content" [path]="part.title" [readonly]="true" [wheelZoom]="true" />
+        } @else {
+          <markdown [data]="part.text"></markdown>
+        }
+      }
     </div>
   </div>
 

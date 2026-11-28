@@ -1,10 +1,11 @@
 import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
-import { CalendarDef, CalendarEngine, ParsedDate } from './calendar-engine';
+import { CalendarDef, CalendarEngine, DatePrecision, ParsedDate } from './calendar-engine';
 import { ObsidianVaultService, VaultEntry } from './obsidian-vault-service';
 import { parseCalendarFile } from './vault-calendar';
 import { VaultIndex, VaultIndexService } from './vault-index.service';
 import { getVaultDisplayName, isVaultFileType } from './vault-file-types';
+import type { TimelineEvent, VaultTimeline } from './vault-timeline';
 
 export interface LoadedCalendar {
   path: string;
@@ -37,6 +38,25 @@ export interface DatedItem {
   color: string | null;
   tags: string[];
 }
+
+/** One row on a timeline. */
+export interface TimelineEntry {
+  key: string;
+  kind: 'event' | 'note' | 'mention' | 'holiday';
+  title: string;
+  day: number;
+  endDay: number | null;
+  label: string;
+  precision: DatePrecision;
+  path: string | null;
+  color: string | null;
+  lane: string;
+  /** The timeline's own event (editable). */
+  event: TimelineEvent | null;
+}
+
+/** Colour of timeline events and dated notes that don't set one. */
+export const TIMELINE_EVENT_COLOR = '#7fc8f8';
 
 /** Property names that date a note (`fc-…` are Obsidian Calendarium's). */
 const DATE_KEYS = ['date', 'fc-date'];
@@ -265,6 +285,90 @@ export class CalendarService {
       }
     }
     return items;
+  }
+
+  /**
+   * A timeline's entries in date order: its own events, then notes and holidays as its sources ask.
+   * Notes must be content-indexed first (VaultIndexService.ensureContentIndexed). `unreadable` are
+   * events whose date doesn't read in the calendar.
+   */
+  timelineEntries(serverId: string, calendar: LoadedCalendar, timeline: VaultTimeline, path: string): { entries: TimelineEntry[]; unreadable: TimelineEvent[] } {
+    const engine = calendar.engine;
+    const entries: TimelineEntry[] = [];
+    const unreadable: TimelineEvent[] = [];
+
+    for (const event of timeline.events) {
+      const start = engine.parse(event.date);
+      if (!start) {
+        unreadable.push(event);
+        continue;
+      }
+      const end = event.end ? engine.parse(event.end) : null;
+      const link = event.link ? this.vaultIndexService.get(serverId)?.resolveLink(event.link, path) : null;
+      entries.push({
+        key: `event:${event.id}`,
+        kind: 'event',
+        title: event.title || (link ? getVaultDisplayName(link.name) : event.date),
+        day: engine.toDayNumber(start.date),
+        endDay: end ? engine.toDayNumber(end.date) : null,
+        label: engine.format(start.date, start.precision),
+        precision: start.precision,
+        path: link?.kind === 'file' ? link.relativePath : null,
+        color: event.color,
+        lane: event.lane || 'Events',
+        event,
+      });
+    }
+
+    const { tags, folders, holidays, inlineDates } = timeline.sources;
+    const wantedTags = tags.map(tag => tag.toLowerCase());
+    const filter = (entry: { relativePath: string }, noteTags: string[]) =>
+      (!wantedTags.length && !folders.length)
+      || noteTags.some(tag => wantedTags.includes(tag.toLowerCase()) || wantedTags.some(wanted => tag.toLowerCase().startsWith(`${wanted}/`)))
+      || folders.some(folder => entry.relativePath.toLowerCase().startsWith(`${folder.toLowerCase().replace(/\/$/, '')}/`));
+
+    const notes = this.datedItems(serverId, calendar, { mentions: inlineDates, filter });
+    for (const item of notes) {
+      entries.push({
+        key: `${item.kind}:${item.path}:${item.day}`,
+        kind: item.kind,
+        title: item.title,
+        day: item.day,
+        endDay: item.endDay,
+        label: item.label,
+        precision: item.precision,
+        path: item.path,
+        color: item.kind === 'mention' ? null : TIMELINE_EVENT_COLOR,
+        lane: item.kind === 'mention' ? 'Mentions' : 'Notes',
+        event: null,
+      });
+    }
+
+    if (holidays) {
+      const days = entries.map(entry => entry.day);
+      const today = engine.today();
+      const fromYear = days.length ? engine.fromDayNumber(Math.min(...days)).year : today?.year ?? 1;
+      const toYear = days.length ? engine.fromDayNumber(Math.max(...days)).year : today?.year ?? 1;
+      for (const item of this.datedItems(serverId, calendar, { holidays: { fromYear, toYear } })) {
+        if (item.kind !== 'holiday') continue;
+        entries.push({
+          key: `holiday:${item.title}:${item.day}`,
+          kind: 'holiday',
+          title: item.title,
+          day: item.day,
+          endDay: null,
+          label: item.label,
+          precision: 'day',
+          path: item.path,
+          color: item.color ?? '#8fe0ad',
+          lane: 'Holidays',
+          event: null,
+        });
+      }
+    }
+
+    entries.sort((a, b) => a.day - b.day || a.title.localeCompare(b.title));
+    return { entries, unreadable };
   }
 
   /** Dated items on one day (for a calendar's day card). */

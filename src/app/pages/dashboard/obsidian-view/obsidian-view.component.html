@@ -873,16 +873,15 @@
                 </span>
               }
 
-              @if (!isDatabaseFileSelected && !isFamilyTreeSelected && !isMapSelected && !isCalendarSelected && !isTimelineSelected) {
-                <button
-                  mat-stroked-button
-                  class="btn-secondary btn-broadcast"
-                  (click)="broadcast()"
-                  [matTooltip]="hasActiveSelection ? 'Send the selected text to players' : 'Send this file to players'">
-                  <mat-icon [class.is-accent]="hasActiveSelection">broadcast_on_home</mat-icon>
-                  <span class="btn-label">{{ hasActiveSelection ? 'Broadcast selection' : 'Broadcast' }}</span>
-                </button>
-              }
+              <!-- Every file type can be broadcast (see ObsidianBroadcastService): notes, maps, trees, calendars, timelines, canvases, bases and plain files. -->
+              <button
+                mat-stroked-button
+                class="btn-secondary btn-broadcast"
+                (click)="broadcast()"
+                [matTooltip]="hasActiveSelection ? 'Send the selected text to players' : 'Send this file to players'">
+                <mat-icon [class.is-accent]="hasActiveSelection">broadcast_on_home</mat-icon>
+                <span class="btn-label">{{ hasActiveSelection ? 'Broadcast selection' : 'Broadcast' }}</span>
+              </button>
 
               <button
                 mat-icon-button

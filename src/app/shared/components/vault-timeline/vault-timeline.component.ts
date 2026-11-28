@@ -4,8 +4,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subscription } from 'rxjs';
-import type { DatePrecision } from '../../services/ObsidianVault/calendar-engine';
-import { CalendarService, LoadedCalendar } from '../../services/ObsidianVault/calendar.service';
+import { CalendarService, LoadedCalendar, TIMELINE_EVENT_COLOR, TimelineEntry } from '../../services/ObsidianVault/calendar.service';
 import { VaultIndexService } from '../../services/ObsidianVault/vault-index.service';
 import { getVaultDisplayName, getVaultFileType } from '../../services/ObsidianVault/vault-file-types';
 import {
@@ -16,21 +15,7 @@ import {
   serializeTimeline,
 } from '../../services/ObsidianVault/vault-timeline';
 
-/** One row on the timeline. */
-interface Entry {
-  key: string;
-  kind: 'event' | 'note' | 'mention' | 'holiday';
-  title: string;
-  day: number;
-  endDay: number | null;
-  label: string;
-  precision: DatePrecision;
-  path: string | null;
-  color: string | null;
-  lane: string;
-  /** The timeline's own event (editable). */
-  event: TimelineEvent | null;
-}
+type Entry = TimelineEntry;
 
 interface ListRow {
   type: 'year' | 'month' | 'today' | 'entry';
@@ -48,7 +33,7 @@ interface EventDraft {
   color: string;
 }
 
-const DEFAULT_COLOR = '#7fc8f8';
+const DEFAULT_COLOR = TIMELINE_EVENT_COLOR;
 
 /**
  * A timeline file (see vault-timeline.ts): events in one calendar, from the timeline itself and from
@@ -196,81 +181,8 @@ export class VaultTimelineComponent implements OnChanges, OnDestroy {
       this.rows = [];
       return;
     }
-    const engine = calendar.engine;
-    const entries: Entry[] = [];
-    this.unreadable = [];
-
-    for (const event of timeline.events) {
-      const start = engine.parse(event.date);
-      if (!start) {
-        this.unreadable.push(event);
-        continue;
-      }
-      const end = event.end ? engine.parse(event.end) : null;
-      const link = event.link ? this.vaultIndexService.get(this.serverId)?.resolveLink(event.link, this.path) : null;
-      entries.push({
-        key: `event:${event.id}`,
-        kind: 'event',
-        title: event.title || (link ? getVaultDisplayName(link.name) : event.date),
-        day: engine.toDayNumber(start.date),
-        endDay: end ? engine.toDayNumber(end.date) : null,
-        label: engine.format(start.date, start.precision),
-        precision: start.precision,
-        path: link?.kind === 'file' ? link.relativePath : null,
-        color: event.color,
-        lane: event.lane || 'Events',
-        event,
-      });
-    }
-
-    const { tags, folders, holidays, inlineDates } = timeline.sources;
-    const wantedTags = tags.map(tag => tag.toLowerCase());
-    const filter = (entry: { relativePath: string }, noteTags: string[]) =>
-      (!wantedTags.length && !folders.length)
-      || noteTags.some(tag => wantedTags.includes(tag.toLowerCase()) || wantedTags.some(wanted => tag.toLowerCase().startsWith(`${wanted}/`)))
-      || folders.some(folder => entry.relativePath.toLowerCase().startsWith(`${folder.toLowerCase().replace(/\/$/, '')}/`));
-
-    const notes = this.calendarService.datedItems(this.serverId, calendar, { mentions: inlineDates, filter });
-    for (const item of notes) {
-      entries.push({
-        key: `${item.kind}:${item.path}:${item.day}`,
-        kind: item.kind,
-        title: item.title,
-        day: item.day,
-        endDay: item.endDay,
-        label: item.label,
-        precision: item.precision,
-        path: item.path,
-        color: item.kind === 'mention' ? null : DEFAULT_COLOR,
-        lane: item.kind === 'mention' ? 'Mentions' : 'Notes',
-        event: null,
-      });
-    }
-
-    if (holidays) {
-      const days = entries.map(entry => entry.day);
-      const today = engine.today();
-      const fromYear = days.length ? engine.fromDayNumber(Math.min(...days)).year : today?.year ?? 1;
-      const toYear = days.length ? engine.fromDayNumber(Math.max(...days)).year : today?.year ?? 1;
-      for (const item of this.calendarService.datedItems(this.serverId, calendar, { holidays: { fromYear, toYear } })) {
-        if (item.kind !== 'holiday') continue;
-        entries.push({
-          key: `holiday:${item.title}:${item.day}`,
-          kind: 'holiday',
-          title: item.title,
-          day: item.day,
-          endDay: null,
-          label: item.label,
-          precision: 'day',
-          path: item.path,
-          color: item.color ?? '#8fe0ad',
-          lane: 'Holidays',
-          event: null,
-        });
-      }
-    }
-
-    entries.sort((a, b) => a.day - b.day || a.title.localeCompare(b.title));
+    const { entries, unreadable } = this.calendarService.timelineEntries(this.serverId, calendar, timeline, this.path);
+    this.unreadable = unreadable;
     this.entries = entries;
     if (this.selected) this.selected = entries.find(entry => entry.key === this.selected!.key) ?? null;
     this.buildRows();

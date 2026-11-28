@@ -1,22 +1,35 @@
 <div
   class="vmap"
-  [class.is-embed]="mode === 'embed'"
+  [class.is-embed]="mode !== 'file'"
+  [class.is-player]="mode === 'player'"
   [class.is-editing]="editing"
   [class.is-adding]="addingPin"
   [class.is-resizing]="!!liveSize"
   [style.height.px]="mode === 'embed' ? embedHeight : null"
   [style.width.px]="mode === 'embed' ? embedWidth : null"
   (dragstart)="$event.preventDefault()">
-  @if (mode === 'embed') {
+  @if (mode !== 'file') {
     <header class="embed-head">
       <mat-icon class="embed-icon">map</mat-icon>
       <span class="embed-title">{{ title }}</span>
       @if (map.pins.length) {
         <span class="embed-count">{{ map.pins.length === 1 ? '1 pin' : map.pins.length + ' pins' }}</span>
       }
-      <button type="button" class="icon-btn" (click)="openFile.emit(path)" matTooltip="Open map" [attr.aria-label]="'Open ' + title">
-        <mat-icon>open_in_new</mat-icon>
-      </button>
+      @if (mode === 'embed') {
+        <button type="button" class="icon-btn" (click)="openFile.emit(path)" matTooltip="Open map" [attr.aria-label]="'Open ' + title">
+          <mat-icon>open_in_new</mat-icon>
+        </button>
+      } @else if (hasLayers) {
+        <button
+          type="button"
+          class="icon-btn"
+          [class.is-active]="panelOpen"
+          (click)="panelOpen = !panelOpen"
+          [attr.aria-pressed]="panelOpen"
+          [matTooltip]="panelOpen ? 'Hide layers' : 'Show layers'">
+          <mat-icon>layers</mat-icon>
+        </button>
+      }
     </header>
   } @else {
     <div class="map-toolbar">
@@ -174,7 +187,9 @@
               <span class="card-icon" [style.--pin-color]="view.pin.color"><mat-icon>{{ pinIcon(view) }}</mat-icon></span>
               <div class="card-titles">
                 <strong>{{ view.title }}</strong>
-                <span>{{ card.kindLabel }}@if (view.pin.layer) {, {{ layerName(view.pin.layer) }}}</span>
+                @if (cardMeta(view, card.kindLabel); as meta) {
+                  <span>{{ meta }}</span>
+                }
               </div>
               <button type="button" class="icon-btn is-small" (click)="closeCard()" aria-label="Close">
                 <mat-icon>close</mat-icon>
@@ -216,6 +231,31 @@
         }
       }
     </div>
+
+    @if (mode === 'player' && panelOpen && hasLayers && !parseError) {
+      <aside class="map-panel is-player-panel" aria-label="Layers">
+        <div class="panel-head">
+          <strong>Layers</strong>
+          <span class="count">{{ map.layers.length }}</span>
+        </div>
+        <ul class="layer-rows">
+          @for (layer of map.layers; track layer.id) {
+            <li [class.is-hidden]="!layer.visible">
+              <button
+                type="button"
+                class="layer-toggle"
+                (click)="toggleLayer(layer)"
+                [attr.aria-pressed]="layer.visible"
+                [attr.aria-label]="(layer.visible ? 'Hide ' : 'Show ') + layer.name">
+                <mat-icon>{{ layer.visible ? 'visibility' : 'visibility_off' }}</mat-icon>
+                <span class="layer-name">{{ layer.name }}</span>
+                <span class="layer-count" [attr.aria-label]="layerPinCount(layer.id) + ' pins'">{{ layerPinCount(layer.id) }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      </aside>
+    }
 
     @if (mode === 'file' && panelOpen && !parseError && (map.image || map.pins.length)) {
       <aside class="map-panel" [attr.aria-label]="editing && selectedPin ? 'Pin settings' : 'Pins'">

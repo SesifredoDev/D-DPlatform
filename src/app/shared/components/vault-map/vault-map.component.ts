@@ -108,7 +108,13 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
   @Input() path = '';
   @Input() serverId = '';
   @Input() readonly = false;
-  @Input() mode: 'file' | 'embed' = 'file';
+  /**
+   * `file`: the map's own view. `embed`: `![[X.map]]` in a note. `player`: a broadcast map (see
+   * broadcast-map.ts) — no vault, pins only show their name, players pick the layers they see.
+   */
+  @Input() mode: 'file' | 'embed' | 'player' = 'file';
+  /** Embeds and player maps: zoom with a plain scroll (not just Ctrl + scroll), where the page doesn't scroll. */
+  @Input() wheelZoom = false;
   /** Fly to a pin (from `[[Map.map#Pin]]` links); a new token re-runs it. */
   @Input() focus: { anchor: string; token: number } | null = null;
 
@@ -332,7 +338,8 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     this.imageFailed = false;
     const ref = this.map.image;
     if (!ref) return;
-    if (/^https?:\/\//i.test(ref)) {
+    // Player maps come with the uploaded image's URL; there's no vault to read from.
+    if (/^https?:\/\//i.test(ref) || this.mode === 'player') {
       this.imageUrl = ref;
       return;
     }
@@ -553,7 +560,7 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     const viewport = this.viewportRef?.nativeElement;
     const size = this.natural;
     if (!viewport || !size || !viewport.clientWidth) return;
-    const padding = this.mode === 'embed' ? 8 : 24;
+    const padding = this.mode === 'file' ? 24 : 8;
     const k = clamp(
       Math.min((viewport.clientWidth - padding * 2) / size.width, (viewport.clientHeight - padding * 2) / size.height),
       MIN_ZOOM,
@@ -603,7 +610,7 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
 
   onWheel(event: WheelEvent): void {
     // In a note, plain scrolling scrolls the note; Ctrl + wheel zooms the map.
-    if (this.mode === 'embed' && !event.ctrlKey && !event.metaKey) {
+    if (this.mode !== 'file' && !this.wheelZoom && !event.ctrlKey && !event.metaKey) {
       this.flashZoomHint();
       return;
     }
@@ -827,7 +834,19 @@ export class VaultMapComponent implements OnChanges, AfterViewInit, OnDestroy {
     this.card = null;
   }
 
+  /** The line under a pin card's title: what it is, and its layer. */
+  cardMeta(view: PinView, kindLabel: string): string {
+    return [kindLabel, this.layerName(view.pin.layer)].filter(Boolean).join(', ');
+  }
+
+  /** The map has layers (player maps show a layers panel). */
+  get hasLayers(): boolean {
+    return this.map.layers.length > 0;
+  }
+
   private kindLabel(view: PinView): string {
+    // Players only get the pin's name: it doesn't link anywhere for them.
+    if (this.mode === 'player') return '';
     if (!view.pin.link) return 'Marker';
     if (view.missing) return 'Note not found';
     if (view.isSubmap) return 'Map';

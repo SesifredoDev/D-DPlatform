@@ -36,7 +36,13 @@
 
               @if(msg.content.trim()) {
                 <div class="message-text" (click)="handleMessageLinkClick($event)">
-                  <markdown [data]="msg.content"></markdown>
+                  @for (part of contentParts(msg.content); track $index) {
+                    @if (part.kind === 'map') {
+                      <app-vault-map class="broadcast-map" mode="player" [content]="part.content" [path]="part.title" [readonly]="true" />
+                    } @else {
+                      <markdown [data]="part.text"></markdown>
+                    }
+                  }
                 </div>
               }
 

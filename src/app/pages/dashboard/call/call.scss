@@ -1,3 +1,5 @@
+@use '../../../shared/styles/rendered-markdown' as md;
+
 /* ================================
    VIDEO CALL (MODERN GLASS UI)
 ================================ */
@@ -2480,6 +2482,13 @@
     padding: 22px 24px 26px;
   }
 
+  // Broadcast maps: pan, zoom and pick layers on the overlay.
+  > app-vault-map.broadcast-map {
+    display: block;
+    height: min(70vh, 640px);
+    margin: 12px;
+  }
+
   @media (max-width: 600px) {
     > markdown {
       padding: 18px;
@@ -2491,6 +2500,8 @@
     color: rgba(255,255,255,0.9);
     line-height: 1.6;
     font-size: 15px;
+
+    @include md.rendered-markdown;
 
     h1, h2, h3 { color: white; margin-top: 0; }
     p { margin-bottom: 1.2rem; }

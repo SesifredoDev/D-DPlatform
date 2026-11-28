@@ -174,6 +174,7 @@ class StatblockBlockView extends AngularNodeView<StatblockCardComponent> {
     this.ref.setInput('readonly', host.readonly() || !view.editable);
     this.ref.setInput('source', node.textContent);
     this.ref.changeDetectorRef.detectChanges();
+    this.markSource(node);
 
     const card = this.ref.instance;
     this.subscriptions.add(card.sourceChange.subscribe(source => this.write(source)));
@@ -186,7 +187,14 @@ class StatblockBlockView extends AngularNodeView<StatblockCardComponent> {
     this.node = node;
     this.ref.setInput('kind', blockKindOf(String(node.attrs['language'] || '')) ?? 'creature');
     this.ref.setInput('source', node.textContent);
+    this.markSource(node);
     return true;
+  }
+
+  /** What the card shows, so broadcasting a selection can write it out (see obsidian-broadcast.service.ts). */
+  private markSource(node: ProseMirrorNode): void {
+    this.dom.dataset['broadcastBlock'] = String(node.attrs['language'] || '');
+    this.dom.dataset['broadcastSource'] = node.textContent;
   }
 
   /** Puts the card's new text into the block, renaming old block languages (`dnd-statsheet` → `statblock`). */
@@ -220,6 +228,8 @@ class NoteEmbedView extends AngularNodeView<NoteEmbedComponent> {
     this.ref.setInput('fromPath', host.filePath());
     this.ref.setInput('link', target);
     this.ref.setInput('size', embedSizeOf(node));
+    // What the embed shows, so broadcasting a selection can write it out (see obsidian-broadcast.service.ts).
+    this.dom.dataset['broadcastEmbed'] = target;
     this.ref.setInput('resizable', !host.readonly() && view.editable);
     this.subscriptions.add(this.ref.instance.openNote.subscribe(link => host.openLink(link)));
     this.subscriptions.add(this.ref.instance.linkHover.subscribe(event => host.linkHover(event)));
@@ -235,6 +245,7 @@ class NoteEmbedView extends AngularNodeView<NoteEmbedComponent> {
     if (target !== this.target) {
       this.target = target;
       this.ref.setInput('link', target);
+      this.dom.dataset['broadcastEmbed'] = target;
     }
     if (sizeChanged) this.ref.setInput('size', embedSizeOf(node));
     return true;

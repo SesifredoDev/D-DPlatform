@@ -1,3 +1,5 @@
+@use '../../shared/styles/rendered-markdown' as md;
+
 :host {
   display: block;
   overflow: hidden;
@@ -379,6 +381,23 @@ mat-dialog-content.compose-mode {
   .html-preview {
     ::ng-deep img { max-width: 100%; height: auto; border-radius: var(--radius-s); }
     ::ng-deep a { color: var(--accent); }
+  }
+
+  .markdown-preview {
+    display: block;
+
+    markdown {
+      display: block;
+    }
+
+    app-vault-map.broadcast-map {
+      display: block;
+      height: 260px;
+    }
+
+    ::ng-deep {
+      @include md.rendered-markdown;
+    }
   }
 }
 

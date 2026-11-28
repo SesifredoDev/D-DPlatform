@@ -259,6 +259,7 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
   /** The main note editor (not the one inside hover cards). */
   @ViewChild('noteEditor') private noteEditor?: MilkdownEditorComponent;
   @ViewChild('noteProperties') private noteProperties?: NotePropertiesComponent;
+  @ViewChild(DatabaseViewComponent) private databaseView?: DatabaseViewComponent;
   /** Focuses the name field whenever a create form appears. */
   @ViewChild('createInput') private set createInput(ref: ElementRef<HTMLInputElement> | undefined) {
     if (ref) {
@@ -2679,13 +2680,18 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
     const view = this.fileView;
     if (!view || (!view.content && !view.blobUrl)) return;
 
-    const isMarkdown = view.fileType.viewer === 'markdown';
-    this.reportBroadcastSecrets(await this.broadcastService.broadcastDocument({
-      ...this.broadcastContext(),
-      fileName: view.name,
-      markdown: isMarkdown ? view.content : null,
-      html: isMarkdown ? this.getEditorHtml() : undefined,
-    }));
+    try {
+      this.reportBroadcastSecrets(await this.broadcastService.broadcastDocument({
+        ...this.broadcastContext(),
+        fileName: view.name,
+        // Text files (notes, maps, trees, calendars…) are formatted for players; others are sent as they are.
+        content: view.fileType.readAs === 'text' ? view.content : null,
+        baseViewIndex: this.databaseView?.activeView,
+      }));
+    } catch (error) {
+      console.warn('[ObsidianView] Broadcast failed', error);
+      this.snackBar.open(error instanceof Error && error.message ? error.message : 'Couldn’t broadcast this file.', 'Dismiss', { duration: 5000 });
+    }
   }
 
   /** Tells the GM what was kept back, so they can trust secrets stay secret. */
@@ -2711,12 +2717,6 @@ export class ObsidianViewComponent implements OnInit, AfterViewInit, OnDestroy, 
 
   private broadcastContext() {
     return { serverId: this.serverId, currentFilePath: this.selectedFileRelativePath };
-  }
-
-  private getEditorHtml(): string | undefined {
-    return this.hostRef.nativeElement.querySelector<HTMLElement>(
-      '.milkdown-container .ProseMirror, .milkdown-container'
-    )?.innerHTML;
   }
 
   private revokeObjectUrls(): void {

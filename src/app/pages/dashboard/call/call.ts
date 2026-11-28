@@ -45,6 +45,8 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { ServerService } from '../../../shared/services/server/server';
 import { IServer, TemporaryDmDuration } from '../../../shared/models/server/server.model';
 import { MarkdownComponent } from 'ngx-markdown';
+import { VaultMapComponent } from '../../../shared/components/vault-map/vault-map.component';
+import { BroadcastContentPart, broadcastMapsAsImages, splitBroadcastContent } from '../../../shared/services/ObsidianVault/broadcast-map';
 import { AuthService } from '../../../shared/services/auth/auth';
 import { DeviceService } from '../../../shared/services/device/device';
 import { ObsidianVaultService, VaultEntry } from '../../../shared/services/ObsidianVault/obsidian-vault-service';
@@ -264,7 +266,7 @@ interface CallSessionNoteUpdatedEventDetail {
   templateUrl: './call.html',
   styleUrls: ['./call.scss'],
   standalone: true,
-  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent, MilkdownEditorComponent, CallVideoOverlayComponent, BroadcastScaleControlsComponent, BroadcastResizeHandleComponent]
+  imports: [FormsModule, NgForOf, NgIf, SpotifyPlayer, MatIconModule, MatTooltipModule, MatMenuModule, MatSnackBarModule, MarkdownComponent, VaultMapComponent, MilkdownEditorComponent, CallVideoOverlayComponent, BroadcastScaleControlsComponent, BroadcastResizeHandleComponent]
 })
 export class Call implements OnInit, OnDestroy, OnChanges {
   @Input() channelId!: string;
@@ -382,6 +384,8 @@ export class Call implements OnInit, OnDestroy, OnChanges {
   // Broadcast state
   activeOverlayImage: string | null = null;
   activeOverlayText: string | null = null;
+  private overlayPartsFor: string | null = null;
+  private overlayParts: BroadcastContentPart[] = [];
   /** A video shown to the call (from the vault or a broadcast). */
   activeOverlayVideo: OverlayVideoState | null = null;
   /** How big broadcast images show (remembered on this device). */
@@ -5425,9 +5429,20 @@ export class Call implements OnInit, OnDestroy, OnChanges {
     return `${current.trimEnd()}\n\n${section.trim()}\n`;
   }
 
+  /** The overlay text as Markdown parts and interactive broadcast maps (kept stable for the template). */
+  get overlayContentParts(): BroadcastContentPart[] {
+    const text = this.activeOverlayText ?? '';
+    if (text !== this.overlayPartsFor) {
+      this.overlayPartsFor = text;
+      this.overlayParts = splitBroadcastContent(text);
+    }
+    return this.overlayParts;
+  }
+
   private getActiveBroadcastOverlayMarkdown(): string {
     if (this.activeOverlayText?.trim()) {
-      return this.activeOverlayText.trim();
+      // Notes only show Markdown: maps go in as their image.
+      return broadcastMapsAsImages(this.activeOverlayText.trim());
     }
 
     if (this.activeOverlayImage) {

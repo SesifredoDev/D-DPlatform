@@ -84,10 +84,21 @@
         </mat-radio-group>
       </div>
     </ng-container>
-    <ng-container *ngIf="hasHtml && !hasFile && !hasImageUrl">
+    <ng-container *ngIf="markdownPreview && !hasFile && !hasImageUrl">
+      <div class="html-preview markdown-preview">
+        @for (part of previewParts; track $index) {
+          @if (part.kind === 'map') {
+            <app-vault-map class="broadcast-map" mode="player" [content]="part.content" [path]="part.title" [readonly]="true" />
+          } @else {
+            <markdown [data]="part.text"></markdown>
+          }
+        }
+      </div>
+    </ng-container>
+    <ng-container *ngIf="hasHtml && !markdownPreview && !hasFile && !hasImageUrl">
       <div class="html-preview" [innerHTML]="htmlPreview"></div>
     </ng-container>
-    <ng-container *ngIf="hasText && (isComposerMode || (!hasFile && !hasImageUrl && !hasHtml))">
+    <ng-container *ngIf="hasText && !markdownPreview && (isComposerMode || (!hasFile && !hasImageUrl && !hasHtml))">
       <pre class="text-preview">{{ textPreview }}</pre>
     </ng-container>
     <div class="empty-preview" *ngIf="!hasContent">

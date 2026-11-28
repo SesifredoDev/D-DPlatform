@@ -17,6 +17,8 @@ import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { MatIconButton } from '@angular/material/button';
 import { MarkdownComponent, provideMarkdown } from 'ngx-markdown';
+import { VaultMapComponent } from '../../../shared/components/vault-map/vault-map.component';
+import { BroadcastContentPart, hasBroadcastMap, splitBroadcastContent } from '../../../shared/services/ObsidianVault/broadcast-map';
 import { TextFieldModule } from '@angular/cdk/text-field';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
@@ -53,6 +55,7 @@ interface MediaAttachmentPreview {
     MatIconModule,
     MatIconButton,
     MarkdownComponent,
+    VaultMapComponent,
     TextFieldModule,
     MatTooltipModule,
     MatMenuModule,
@@ -88,6 +91,8 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   private readonly videoExtensions = ['m4v', 'mov', 'mp4', 'mpeg', 'ogv', 'webm'];
   private readonly audioExtensions = ['aac', 'flac', 'm4a', 'mp3', 'oga', 'ogg', 'opus', 'wav', 'webm'];
   private readonly linkPreviewCache = new Map<string, LinkPreview[]>();
+  /** Message text split into Markdown and broadcast maps, by content (kept stable for the template). */
+  private readonly contentPartsCache = new Map<string, BroadcastContentPart[]>();
 
   // Whisper state
   isWhisperMode = false;
@@ -162,6 +167,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
   loadChannel() {
     this.msgSub?.unsubscribe();
     this.linkPreviewCache.clear();
+    this.contentPartsCache.clear();
     this.isLoadingOlderMessages = false;
     this.hasMoreMessages = true;
     this.justOpened = true;
@@ -447,6 +453,16 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     window.open(safeUrl, '_blank', 'noopener,noreferrer');
   }
 
+  /** A message's text as Markdown parts and interactive broadcast maps (see broadcast-map.ts). */
+  contentParts(content: string): BroadcastContentPart[] {
+    let parts = this.contentPartsCache.get(content);
+    if (!parts) {
+      parts = splitBroadcastContent(content);
+      this.contentPartsCache.set(content, parts);
+    }
+    return parts;
+  }
+
   shouldUseCompactAttachments(message: MessageData): boolean {
     return this.hasMediaInText(message.content);
   }
@@ -455,7 +471,7 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     const value = content?.trim() ?? '';
     if (!value) return false;
 
-    if (this.extractMarkdownImageUrls(value).length > 0) return true;
+    if (hasBroadcastMap(value) || this.extractMarkdownImageUrls(value).length > 0) return true;
 
     return this.getLinkPreviews(value).some(preview => this.isMediaPreviewType(preview.type));
   }
@@ -581,7 +597,11 @@ export class TextChannel implements OnChanges, OnDestroy, OnInit {
     return url ? this.fileService.resolveFileUrl(url) : '';
   }
 
-  private extractPreviewUrls(content: string): string[] {
+  private extractPreviewUrls(fullContent: string): string[] {
+    // A broadcast map's image is shown by the map itself, not as a link preview.
+    const content = this.contentParts(fullContent)
+      .map(part => (part.kind === 'markdown' ? part.text : ''))
+      .join('\n');
     const markdownImageUrls = new Set(this.extractMarkdownImageUrls(content));
 
     const matches = content.match(/\bhttps?:\/\/[^\s<>"'`]+/gi) ?? [];

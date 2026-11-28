@@ -11,6 +11,9 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatRadioModule } from '@angular/material/radio';
+import { MarkdownComponent } from 'ngx-markdown';
+import { VaultMapComponent } from '../../shared/components/vault-map/vault-map.component';
+import { BroadcastContentPart, broadcastMapsAsImages, splitBroadcastContent } from '../../shared/services/ObsidianVault/broadcast-map';
 
 import { ServerService } from '../../shared/services/server/server';
 import { IChannel } from '../../shared/models/server/channel.model';
@@ -27,6 +30,8 @@ import type { BroadcastData, BroadcastEmbeddedFile, UploadedBroadcastAsset, Broa
 export type { BroadcastData, BroadcastEmbeddedFile } from '../../shared/models/objects/broadcast-dialog/broadcast-dialog.model';
 
 type BroadcastNoteAction = 'none' | 'current' | 'new';
+/** Placeholder URL of a file attached to a broadcast (see ObsidianBroadcastService). */
+const BROADCAST_FILE_TOKEN = /broadcast-file:\/\/[0-9a-f-]+/gi;
 /** What to do with an attached audio or video file. */
 type MediaPlaybackChoice = 'none' | 'local' | 'call';
 
@@ -45,7 +50,9 @@ type MediaPlaybackChoice = 'none' | 'local' | 'call';
     MatTabsModule,
     MatFormFieldModule,
     MatInputModule,
-    MatRadioModule
+    MatRadioModule,
+    MarkdownComponent,
+    VaultMapComponent
   ],
   templateUrl: './broadcast-dialog.html',
   styleUrls: ['./broadcast-dialog.scss']
@@ -54,6 +61,14 @@ export class BroadcastDialog implements OnInit {
   imagePreview: SafeUrl | null = null;
   textPreview: string | null = null;
   htmlPreview: SafeHtml | null = null;
+  /**
+   * Formatted broadcasts (notes, maps, calendars…): the Markdown as players will see it, with
+   * attached files shown from local object URLs until they're uploaded.
+   */
+  markdownPreview: string | null = null;
+  /** `markdownPreview` split into Markdown and interactive maps. */
+  previewParts: BroadcastContentPart[] = [];
+  private previewObjectUrls: string[] = [];
   draftText: string = '';
   selectedFilename: string | null = null;
   selectedFileContentType: string | null = null;
@@ -113,7 +128,10 @@ export class BroadcastDialog implements OnInit {
     private sanitizer: DomSanitizer
   ) {
     this.isComposerMode = !!data.composeMode;
-    this.dialogRef.afterClosed().subscribe(() => this.releaseMediaPreview());
+    this.dialogRef.afterClosed().subscribe(() => {
+      this.releaseMediaPreview();
+      this.previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+    });
     this.currentUserId = this.authService.getCurrentUserId();
 
     if (data.file) {
@@ -136,6 +154,22 @@ export class BroadcastDialog implements OnInit {
       this.hasHtml = true;
       this.htmlPreview = this.sanitizer.bypassSecurityTrustHtml(data.htmlContent);
     }
+
+    if (data.text && data.preferTextForBroadcast && !this.isComposerMode) {
+      this.markdownPreview = this.previewMarkdown(data.text);
+      this.previewParts = splitBroadcastContent(this.markdownPreview);
+    }
+  }
+
+  /** The text with `broadcast-file://` tokens pointing at local previews of the attached files. */
+  private previewMarkdown(text: string): string {
+    const urls = new Map<string, string>();
+    for (const embedded of this.data.embeddedFiles || []) {
+      const url = URL.createObjectURL(embedded.file);
+      this.previewObjectUrls.push(url);
+      urls.set(embedded.tokenUrl, url);
+    }
+    return text.replace(BROADCAST_FILE_TOKEN, token => urls.get(token) ?? token);
   }
 
   get hasContent(): boolean {
@@ -381,7 +415,8 @@ export class BroadcastDialog implements OnInit {
       console.log('[BroadcastDialog] Final content compiled', { finalMessageContent, contextAttachments: context.attachments.length });
 
       if (this.canAddToBroadcastNotes) {
-        await this.writeBroadcastToNotes(finalMessageContent);
+        // Notes only show Markdown: interactive maps go in as their image.
+        await this.writeBroadcastToNotes(broadcastMapsAsImages(finalMessageContent));
       }
 
       // 4. Send to Text Channels
@@ -522,7 +557,18 @@ export class BroadcastDialog implements OnInit {
     }
 
     result += text.slice(lastIndex);
-    return result;
+    return this.replaceFileTokens(result, context);
+  }
+
+  /** Points links to attached files (music, PDFs… in `[name](broadcast-file://…)`) at their uploads. */
+  private replaceFileTokens(text: string, context: BroadcastProcessingContext): string {
+    return text.replace(BROADCAST_FILE_TOKEN, token => {
+      const uploaded = context.uploadedEmbeddedFiles.get(token);
+      if (!uploaded) return token;
+      // An interactive map's image can also go to the VTT or the call background.
+      if (this.isImageContentType(uploaded.contentType)) this.markEmbeddedImageForVtt(context, uploaded.url);
+      return this.encodeMarkdownUrl(uploaded.url);
+    });
   }
 
   private async processHtmlContent(htmlContent: string, context: BroadcastProcessingContext): Promise<string> {
@@ -553,7 +599,9 @@ export class BroadcastDialog implements OnInit {
       .replace(/<div.*?>/gi, '\n').replace(/<\/div>/gi, '\n')
       .replace(/<br.*?>/gi, '\n');
 
-    return html.replace(/<[^>]+>/g, '').trim();
+    // Tags out, then entities back to characters (text such as "Fish & Chips" arrives as "&amp;").
+    const text = new DOMParser().parseFromString(html.replace(/<[^>]+>/g, ''), 'text/html').documentElement.textContent ?? '';
+    return this.replaceFileTokens(text, context).trim();
   }
 
   private async uploadFile(file: File, filenameSuggestion?: string): Promise<UploadedBroadcastAsset> {
